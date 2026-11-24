@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -51,7 +52,9 @@ class WorkspaceTask(dspy.Signature):
         desc="Previous completed turns in this session."
     )
     answer: str = dspy.OutputField(desc="The verified answer to the task.")
-    artifact_paths: list[str] = dspy.OutputField(desc="Paths of artifacts created for the task.")
+    artifact_paths: list[str] = dspy.OutputField(
+        desc="Paths of generated workspace artifacts to attach to the answer."
+    )
 
 
 def bound_history(history: dspy.History, max_turns: int, max_chars: int) -> dspy.History:
@@ -289,11 +292,26 @@ async def run_workspace_task(
             raise CodeExecutionError("Shared sub-LM call limit reached")
         remaining_calls -= count
 
+    def trace_run(name: str, span_type: str, child_id: str, parent_id: str | None, depth: int):
+        if not settings.mlflow_tracking_uri and mlflow.get_current_active_span() is None:
+            return nullcontext()
+        return mlflow.start_span(
+            name,
+            span_type=span_type,
+            attributes={
+                "fleet.root_run_id": run_id,
+                "fleet.run_id": child_id,
+                "fleet.parent_run_id": parent_id or "",
+                "fleet.depth": depth,
+            },
+        )
+
     async def run(
         prompt: str,
         current_run_id: str,
         depth: int,
         previous: dspy.History | None = None,
+        parent_run_id: str | None = None,
     ) -> dspy.Prediction:
         action = _ActionCapture()
         interpreters: list[_AbortableInterpreter] = []
@@ -352,7 +370,7 @@ async def run_workspace_task(
             reserve(1)
 
             async def work(child_id: str) -> tuple[dict, str]:
-                result = await run(task, child_id, depth + 1)
+                result = await run(task, child_id, depth + 1, parent_run_id=current_run_id)
                 output = {"answer": result.answer, "artifact_paths": result.artifact_paths}
                 return output, result.answer
 
@@ -374,12 +392,18 @@ async def run_workspace_task(
             argument = args[0] if args else kwargs.get("prompts" if batched else "prompt")
             if isinstance(argument, dict) and argument.get(TAG) == WIRE:
                 argument = argument.get("value")
-            reserve(len(argument) if batched and isinstance(argument, list) else 1)
+            query_count = len(argument) if batched and isinstance(argument, list) else 1
+            reserve(query_count)
             query = argument if isinstance(argument, str) else json.dumps(argument)
 
             async def work(child_id: str) -> tuple[Any, str]:
                 await emit(child_id, RunStartedEvent("llm_query"))
-                value = await invoke()
+                with trace_run(
+                    "fleet.rlm.llm_query", "CHAIN", child_id, current_run_id, depth + 1
+                ) as span:
+                    if span is not None:
+                        span.set_attributes({"fleet.tool": name, "fleet.query_count": query_count})
+                    value = await invoke()
                 if batched:
                     # DSPy reports batch item failures as provider text. Keep those
                     # messages on the host even when the other calls succeed.
@@ -435,9 +459,14 @@ async def run_workspace_task(
 
         def invoke() -> dspy.Prediction:
             with (
-                mlflow.tracing.context(tags={"fleet.run_id": current_run_id}),
+                mlflow.tracing.context(tags={"fleet.run_id": run_id}),
+                trace_run("fleet.rlm.run", "AGENT", current_run_id, parent_run_id, depth) as span,
                 dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory),
             ):
+                if span is not None:
+                    if depth == 0:
+                        mlflow.update_current_trace(tags={"fleet.run_id": run_id})
+                    span.set_inputs({"task": prompt})
                 program = build_program(
                     settings,
                     [*tools, spawn_agent],
@@ -445,7 +474,7 @@ async def run_workspace_task(
                     optimized_state=optimized_state,
                 )
                 program.generate_action.callbacks.append(action)
-                return program(
+                prediction = program(
                     task=prompt,
                     files_manifest=files_manifest,
                     memories=memories,
@@ -453,6 +482,9 @@ async def run_workspace_task(
                     prior_turns=list(prior_turns) if depth == 0 else [],
                     history=previous,
                 )
+                if span is not None:
+                    span.set_outputs({"answer": prediction.answer})
+                return prediction
 
         await emit(current_run_id, RunStartedEvent("workspace"))
         # A parent blocks on its interpreter while a child runs. Dedicated workers
@@ -465,9 +497,14 @@ async def run_workspace_task(
             with registration:
                 cancelled = True
             try:
-                await asyncio.gather(*(interpreter.abort() for interpreter in interpreters))
+                stopped = await asyncio.gather(
+                    *(interpreter.abort() for interpreter in interpreters), return_exceptions=True
+                )
             finally:
                 await asyncio.gather(worker, return_exceptions=True)
+            errors = [error for error in stopped if isinstance(error, Exception)]
+            if errors:
+                raise ExceptionGroup("RLM worker cleanup failed", errors) from None
             raise
         finally:
             executor.shutdown(wait=False)

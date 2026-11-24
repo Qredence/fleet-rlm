@@ -2,37 +2,36 @@
 
 import asyncio
 import base64
+import codecs
 import inspect
 import json
 import logging
 import re
 from collections.abc import (
     AsyncGenerator,
-    AsyncIterator,
     Awaitable,
     Callable,
     Collection,
     Coroutine,
     Mapping,
 )
-from contextlib import asynccontextmanager, suppress
-from pathlib import PurePosixPath
-from typing import Any
+from contextlib import aclosing, asynccontextmanager, suppress
+from pathlib import Path, PurePosixPath
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import mlflow
 from daytona import AsyncDaytona, DaytonaConfig
-from daytona.v0 import (
-    AsyncSandbox,
-    CreateSandboxFromSnapshotParams,
-    DaytonaConnectionTimeoutError,
+from daytona.v2 import AsyncSandbox
+from daytona.v2.errors import ConnectionError as DaytonaConnectionError
+from daytona.v2.errors import (
     DaytonaError,
-    DaytonaFileNotFoundError,
-    DaytonaTimeoutError,
-    OutputMessage,
-    SandboxState,
-    VolumeMount,
+    NotFoundError,
+    SandboxCreateConnectionError,
+    SandboxCreateRequestTimeoutError,
 )
+from daytona.v2.process import AsyncProcessHandle
+from daytona.v2.types import StreamLogEvent
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import INTERPRETER_TOOL
 
@@ -49,75 +48,118 @@ ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitab
 
 
 def make_daytona_client(settings: Settings) -> AsyncDaytona:
-    return AsyncDaytona(DaytonaConfig(api_key=settings.daytona_api_key.get_secret_value()))
-
-
-def _is_recoverable_timeout(error: BaseException) -> bool:
-    """Return True for recoverable cell timeouts, excluding transport/connection timeouts."""
-    if isinstance(error, BaseExceptionGroup):
-        return bool(error.exceptions) and all(
-            _is_recoverable_timeout(sub) for sub in error.exceptions
+    return AsyncDaytona(
+        DaytonaConfig(
+            api_key=settings.daytona_api_key.get_secret_value(),
+            request_timeout=30,
+            otel_enabled=settings.daytona_otel_enabled,
         )
-    if isinstance(error, DaytonaConnectionTimeoutError):
-        return False
-    return isinstance(error, (TimeoutError, DaytonaTimeoutError))
+    )
 
 
 class SandboxStartupError(RuntimeError):
     """The Session workspace could not be started."""
 
 
+class SandboxCleanupError(CodeInterpreterError):
+    """The sandbox must be retired because its worker could not be stopped."""
+
+
+def sandbox_cleanup_failed(error: BaseException) -> bool:
+    if isinstance(error, SandboxCleanupError):
+        return True
+    if isinstance(error, BaseExceptionGroup) and any(map(sandbox_cleanup_failed, error.exceptions)):
+        return True
+    return error.__cause__ is not None and sandbox_cleanup_failed(error.__cause__)
+
+
 async def _provision_sandbox(
-    daytona: AsyncDaytona, settings: Settings, *, volumes: list[VolumeMount] | None = None
+    daytona: AsyncDaytona, settings: Settings, *, spot: bool = False
 ) -> AsyncSandbox:
     name = f"fleet-{uuid4().hex}"
     sandbox = None
     try:
-        sandbox = await daytona.v0.create(
-            CreateSandboxFromSnapshotParams(
+        async with asyncio.timeout(120):
+            sandbox = await daytona.v2.create(
+                settings.daytona_image,
                 name=name,
-                snapshot=settings.daytona_snapshot,
-                language="python",
-                target=settings.daytona_target,
-                auto_stop_interval=settings.daytona_auto_stop_minutes,
-                volumes=volumes,
+                region=settings.daytona_region,
+                spot=spot,
+                create_timeout_seconds=110,
+                wait_seconds=0,
+                lifecycle_policy={
+                    "idle_expiry_seconds": settings.daytona_idle_timeout_minutes * 60,
+                    "on_idle_timeout": "delete",
+                    "timeout_seconds": settings.daytona_max_lifetime_minutes * 60,
+                    "on_timeout": "delete",
+                },
+                network_policy={
+                    "block_all": True,
+                    "allow_domains": settings.daytona_network_allow_domains,
+                },
+                labels={"fleet-runtime": "v2"},
             )
-        )
-        # Mounting a new Volume subpath can hide the image's workspace directories.
-        result = await sandbox.process.code_run(
-            "from pathlib import Path\n"
-            "Path('/workspace/files').mkdir(parents=True, exist_ok=True)\n"
-            "Path('/workspace/artifacts').mkdir(parents=True, exist_ok=True)",
-            timeout=settings.daytona_exec_timeout_seconds,
-        )
-        if result.exit_code != 0:
-            raise SandboxStartupError("Could not initialize the Daytona workspace")
-        return sandbox
-    except (Exception, asyncio.CancelledError):
-        # Create can allocate a remote sandbox and then fail while waiting for startup.
+            if sandbox.state != "started":
+                await sandbox.wait(until="started", timeout=110)
+            result = await sandbox.process.run(
+                argv=["mkdir", "-p", f"{WORKSPACE}/files", ARTIFACTS],
+                timeout=10,
+                execution_timeout=10,
+            )
+            if result.exit_code != 0:
+                raise SandboxStartupError("Could not initialize the Daytona workspace")
+            return sandbox
+    except (Exception, asyncio.CancelledError) as error:
+        # A timed-out create may have allocated a sandbox before the response arrived.
         try:
-            if sandbox is None:
-                sandbox = await daytona.v0.get(name, request_timeout=10)
-            await daytona.v0.delete(sandbox, timeout=15, wait=True)
-        except DaytonaError as error:
-            if error.status_code != 404:
-                _LOG.warning(
-                    "Could not clean up failed Daytona sandbox %s (%s)", name, type(error).__name__
-                )
+            async with asyncio.timeout(20):
+                candidates = (sandbox,) if sandbox else ()
+                if sandbox is None:
+                    uncertain = isinstance(
+                        error,
+                        (
+                            asyncio.CancelledError,
+                            TimeoutError,
+                            SandboxCreateConnectionError,
+                            SandboxCreateRequestTimeoutError,
+                        ),
+                    )
+                    delays = (0, 0.5, 1.5, 3) if uncertain else (0,)
+                    for delay in delays:
+                        await asyncio.sleep(delay)
+                        candidates = await daytona.v2.find_by_name(
+                            name, region=settings.daytona_region
+                        )
+                        if candidates:
+                            break
+                for candidate in candidates:
+                    await delete_sandbox(daytona, candidate)
+        except (DaytonaError, TimeoutError) as cleanup_error:
+            _LOG.warning(
+                "Could not clean up Daytona allocation %s (%s)", name, type(cleanup_error).__name__
+            )
+        if isinstance(error, (DaytonaError, TimeoutError)):
+            raise SandboxStartupError("Daytona workspace startup failed") from error
         raise
 
 
 @asynccontextmanager
 async def ephemeral_sandbox(
-    daytona: AsyncDaytona,
-    settings: Settings,
+    daytona: AsyncDaytona, settings: Settings
 ) -> AsyncGenerator[AsyncSandbox]:
-    """Create a volume-free Daytona sandbox for offline optimization and always delete it."""
-    sandbox = await _provision_sandbox(daytona, settings)
+    sandbox = await _provision_sandbox(daytona, settings, spot=settings.daytona_optimize_spot)
     try:
         yield sandbox
     finally:
-        await daytona.v0.delete(sandbox, wait=True)
+        await delete_sandbox(daytona, sandbox)
+
+
+async def get_running_sandbox(daytona: AsyncDaytona, sandbox_id: str) -> AsyncSandbox | None:
+    try:
+        sandbox = await daytona.v2.get(sandbox_id)
+    except NotFoundError:
+        return None
+    return sandbox if sandbox.state == "started" else None
 
 
 async def ensure_session_sandbox(
@@ -128,76 +170,102 @@ async def ensure_session_sandbox(
 ) -> tuple[AsyncSandbox, str, bool]:
     try:
         if existing_sandbox_id:
-            sandbox = await daytona.v0.get(existing_sandbox_id)
-            if sandbox.state != SandboxState.STARTED:
-                await sandbox.start()
-            return sandbox, sandbox.id, False
-
-        sandbox = await _provision_sandbox(
-            daytona,
-            settings,
-            volumes=[
-                VolumeMount(
-                    volume_id=settings.daytona_volume_id,
-                    mount_path=WORKSPACE,
-                    subpath=f"sessions/{session_id}",
-                )
-            ],
-        )
+            try:
+                sandbox = await daytona.v2.get(existing_sandbox_id)
+            except NotFoundError:
+                sandbox = None
+            if sandbox is not None:
+                if sandbox.state == "started":
+                    return sandbox, sandbox.id, False
+                if sandbox.state in {"queued", "creating", "starting"}:
+                    await sandbox.wait(until="started", timeout=90)
+                    return sandbox, sandbox.id, False
+                if sandbox.state not in {"destroyed", "destroying", "error"}:
+                    raise SandboxStartupError("Daytona workspace is in an unexpected state")
+                if sandbox.state == "error":
+                    await delete_sandbox(daytona, sandbox)
+        sandbox = await _provision_sandbox(daytona, settings)
     except DaytonaError as error:
         raise SandboxStartupError("Daytona workspace startup failed") from error
     return sandbox, sandbox.id, True
 
 
 async def delete_sandbox(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
-    """Delete a resolved Daytona v0 sandbox and wait for removal."""
-    await daytona.v0.delete(sandbox, wait=True)
+    await delete_sandbox_by_id(daytona, sandbox.id)
 
 
 async def delete_sandbox_by_id(daytona: AsyncDaytona, sandbox_id: str) -> None:
-    """Look up a Daytona v0 sandbox by ID and delete it."""
-    sandbox = await daytona.v0.get(sandbox_id)
-    await daytona.v0.delete(sandbox, wait=True)
+    with suppress(NotFoundError):
+        await daytona.v2.delete(sandbox_id, timeout=30)
+
+
+async def reset_managed_workspace(sandbox: AsyncSandbox, *, timeout: int) -> None:
+    # Running workers are closed before the next root can reconcile this private disk.
+    result = await sandbox.process.run(
+        argv=[
+            "python",
+            "-c",
+            """from pathlib import Path
+import shutil
+for path in (Path('/workspace/files'), Path('/workspace/artifacts')):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+    path.mkdir()
+""",
+        ],
+        execution_timeout=timeout,
+        timeout=timeout,
+    )
+    if result.exit_code != 0:
+        raise SandboxStartupError("Could not reset the Daytona workspace")
 
 
 async def upload_workspace_file(
     sandbox: AsyncSandbox,
-    chunks: AsyncIterator[bytes],
+    source: Path,
     relative_path: str,
     *,
+    sha256: str,
+    size: int,
     timeout: int,
 ) -> None:
-    """Stream chunks to a temporary file under /workspace/files and atomically rename."""
-    temporary = f"{WORKSPACE}/files/.{uuid4().hex}.upload"
-    try:
-        await sandbox.fs.upload_file_stream(chunks, temporary, timeout=timeout)
-        await sandbox.fs.move_files(
-            temporary, f"{WORKSPACE}/{relative_path}", request_timeout=timeout
+    destination = f"{WORKSPACE}/{relative_path}"
+    async with asyncio.timeout(timeout):
+        result = await sandbox.process.run(
+            argv=["mkdir", "-p", str(PurePosixPath(destination).parent)],
+            timeout=timeout,
+            execution_timeout=timeout,
         )
-    except (Exception, asyncio.CancelledError):
-        with suppress(DaytonaError):
-            await sandbox.fs.delete_file(temporary, request_timeout=timeout)
-        raise
-
-
-async def delete_workspace_file(
-    sandbox: AsyncSandbox,
-    relative_path: str,
-    *,
-    timeout: int,
-) -> None:
-    """Delete a workspace file under /workspace."""
-    await sandbox.fs.delete_file(f"{WORKSPACE}/{relative_path}", request_timeout=timeout)
+        if result.exit_code != 0:
+            raise SandboxStartupError("Could not create the Daytona file directory")
+        await sandbox.fs.upload_file(source, destination, atomic=True)
+        result = await sandbox.process.run(
+            argv=[
+                "python",
+                "-c",
+                "import hashlib, sys\n"
+                "with open(sys.argv[1], 'rb') as file:\n"
+                "    digest = hashlib.file_digest(file, 'sha256').hexdigest()\n"
+                "    if (digest, file.tell()) != (sys.argv[2], int(sys.argv[3])):\n"
+                "        raise SystemExit(1)",
+                destination,
+                sha256,
+                str(size),
+            ],
+            timeout=timeout,
+            execution_timeout=timeout,
+        )
+        if result.exit_code != 0:
+            raise SandboxStartupError("Daytona workspace file failed integrity verification")
 
 
 async def download_workspace_file(
-    sandbox: AsyncSandbox,
-    relative_path: str,
-    *,
-    timeout: int,
-) -> bytes:
-    """Download a workspace file under /workspace."""
-    return await sandbox.fs.download_file(f"{WORKSPACE}/{relative_path}", timeout)
+    sandbox: AsyncSandbox, relative_path: str, destination: Path, *, timeout: int
+) -> None:
+    async with asyncio.timeout(timeout):
+        await sandbox.fs.download_file(f"{WORKSPACE}/{relative_path}", destination)
 
 
 class WorkspaceBrowseLimit(RuntimeError):
@@ -205,10 +273,12 @@ class WorkspaceBrowseLimit(RuntimeError):
 
 
 async def _workspace_query(sandbox: AsyncSandbox, code: str, timeout: int):
-    result = await sandbox.process.code_run(code, timeout=timeout)
+    result = await sandbox.process.run(
+        argv=["python", "-c", code], timeout=timeout, execution_timeout=timeout
+    )
     if result.exit_code != 0:
         raise RuntimeError("Could not read the Daytona workspace")
-    return json.loads(result.result)
+    return json.loads(result.stdout)
 
 
 async def list_workspace_files(sandbox: AsyncSandbox, *, timeout: int) -> list[dict]:
@@ -299,98 +369,139 @@ print(json.dumps(result))
     return base64.b64decode(result["data"], validate=True)
 
 
-# The interpreter socket only sends output. Upload each response to a private
-# sandbox-local mailbox and atomically rename it before the guest reads it.
-_PRELUDE = r"""
-def __fleet_prelude(mailbox):
-    import contextlib
-    import json
-    import os
-    import sys
-    import time
-    import uuid
+_WORKER = r"""
+import contextlib
+import io
+import json
+import queue
+import sys
+import threading
+import traceback
+import uuid
 
-    os.makedirs(mailbox, mode=0o700)
-    namespace = globals()
+stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
+sys.stdin = io.StringIO("")
+cells = queue.Queue()
+pending = {}
+pending_lock = threading.Lock()
+output_lock = threading.Lock()
+namespace = {"__name__": "__main__"}
 
-    class Submitted(BaseException):
-        pass
 
-    class BoundedWriter:
-        def __init__(self, stream, limit):
-            self.stream = stream
-            self.remaining = limit
+def read_requests():
+    for line in stdin:
+        request = json.loads(line)
+        if request["kind"] == "execute":
+            cells.put(request)
+        else:
+            with pending_lock:
+                reply = pending.get((request["token"], request["id"]))
+                if reply is not None:
+                    reply.put_nowait(request)
+    cells.put(None)
 
-        def write(self, text):
+
+class Submitted(BaseException):
+    pass
+
+
+class BoundedWriter:
+    def __init__(self, stream, limit):
+        self.stream = stream
+        self.remaining = limit
+
+    def write(self, text):
+        with output_lock:
             if self.remaining > 0:
                 self.stream.write(text[:self.remaining])
                 self.remaining -= len(text)
-            return len(text)
+        return len(text)
 
-        def __getattr__(self, name):
-            return getattr(self.stream, name)
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
 
-    def run(code, values, fields, tools, token, rpc_timeout, limit, frame_limit):
-        stdout = sys.stdout
-        active = True
 
-        def emit(data):
-            payload = json.dumps(data, allow_nan=False, separators=(",", ":"))
-            if len(payload) > frame_limit:
-                raise ValueError("Interpreter message exceeds the size limit")
+def run(request):
+    token = request["token"]
+    fields = request["fields"]
+    limit = request["limit"]
+    frame_limit = request["frame_limit"]
+    active = True
+    submitted = None
+
+    def emit(data):
+        payload = json.dumps(data, allow_nan=False, separators=(",", ":"))
+        if len(payload) > frame_limit:
+            raise ValueError("Interpreter message exceeds the size limit")
+        with output_lock:
             stdout.write("\x1e" + token + " " + payload + "\n")
             stdout.flush()
 
-        def tool(name):
-            def call(*args, **kwargs):
-                if not active:
-                    raise RuntimeError("Tool call belongs to a finished execution")
-                request_id = uuid.uuid4().hex
-                path = os.path.join(mailbox, token + "-" + request_id + ".json")
-                emit({
-                    "kind": "call", "id": request_id, "name": name, "args": args, "kwargs": kwargs,
-                })
-                deadline = time.monotonic() + rpc_timeout if rpc_timeout else float("inf")
-                while True:
-                    try:
-                        with open(path, encoding="utf-8") as reply:
-                            response = json.load(reply)
-                    except FileNotFoundError:
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("Host tool response timed out") from None
-                        time.sleep(0.025)
-                    else:
-                        os.unlink(path)
-                        if "error" in response:
-                            raise RuntimeError(response["error"])
-                        return response["value"]
-            return call
+    def tool(name):
+        def call(*args, **kwargs):
+            if not active:
+                raise RuntimeError("Tool call belongs to a finished execution")
+            request_id = uuid.uuid4().hex
+            key = (token, request_id)
+            reply = queue.Queue()
+            with pending_lock:
+                pending[key] = reply
+            try:
+                emit({"kind": "call", "id": request_id, "name": name,
+                      "args": args, "kwargs": kwargs})
+                try:
+                    response = reply.get(timeout=request["rpc_timeout"])
+                except queue.Empty:
+                    raise TimeoutError("Host tool response timed out") from None
+            finally:
+                with pending_lock:
+                    pending.pop(key, None)
+            if "error" in response:
+                raise RuntimeError(response["error"])
+            return response["value"]
+        return call
 
-        def submit(*args, **kwargs):
-            if len(args) > len(fields):
-                raise TypeError("Too many positional SUBMIT arguments")
-            submitted = dict(zip(fields, args))
-            if submitted.keys() & kwargs.keys() or kwargs.keys() - set(fields):
-                raise TypeError("Invalid SUBMIT arguments")
-            submitted.update(kwargs)
-            emit({"kind": "submit", "value": submitted})
-            raise Submitted()
+    def submit(*args, **kwargs):
+        nonlocal submitted
+        if len(args) > len(fields):
+            raise TypeError("Too many positional SUBMIT arguments")
+        values = dict(zip(fields, args))
+        if values.keys() & kwargs.keys() or kwargs.keys() - set(fields):
+            raise TypeError("Invalid SUBMIT arguments")
+        values.update(kwargs)
+        serialized = json.dumps(values, allow_nan=False)
+        if len(serialized) > frame_limit // 2:
+            raise ValueError("Interpreter submission exceeds the size limit")
+        submitted = json.loads(serialized)
+        raise Submitted()
 
-        namespace.update(json.loads(values))
-        namespace.update({name: tool(name) for name in tools})
-        namespace["SUBMIT"] = submit
-        try:
-            with (
-                contextlib.redirect_stdout(BoundedWriter(stdout, limit)),
-                contextlib.redirect_stderr(BoundedWriter(sys.stderr, limit)),
-            ):
-                exec(compile(code, "<workspace>", "exec"), namespace)
-        except Submitted:
-            pass
-        finally:
-            active = False
+    namespace.update(request["variables"])
+    namespace.update({name: tool(name) for name in request["tools"]})
+    namespace["SUBMIT"] = submit
+    terminal = {"kind": "done"}
+    try:
+        with (
+            contextlib.redirect_stdout(BoundedWriter(stdout, limit)),
+            contextlib.redirect_stderr(BoundedWriter(stderr, limit)),
+        ):
+            exec(compile(request["code"], "<workspace>", "exec"), namespace)
+    except Submitted:
+        terminal["submission"] = submitted
+    except BaseException as error:
+        budget = max(256, min(limit, frame_limit // 16))
+        terminal["error"] = {
+            "name": type(error).__name__[:128],
+            "message": str(error)[:budget],
+            "traceback": traceback.format_exc()[-budget:],
+        }
+    finally:
+        active = False
+    emit(terminal)
 
-    return run
+
+threading.Thread(target=read_requests, daemon=True).start()
+while (request := cells.get()) is not None:
+    run(request)
 """
 
 
@@ -410,12 +521,12 @@ class _Output:
             self.parts.append(value[: self.remaining])
             self.remaining -= min(len(value), self.remaining)
 
-    def feed(self, message: OutputMessage) -> None:
-        self.received += len(message.output)
+    def feed(self, message: str) -> None:
+        self.received += len(message)
         # The SDK also keeps its own copy. Bound traffic bypassing the guest writers.
         if self.received > 8 * _MAX_FRAME:
             raise CodeExecutionError("Interpreter output exceeded the transport limit")
-        self.buffer += message.output
+        self.buffer += message
         while self.buffer:
             before, marker, record = self.buffer.partition("\x1e")
             self._append(before)
@@ -472,8 +583,10 @@ class DaytonaCodeInterpreter:
         self._limit = max(0, max_output_chars)
         self._on_execution = on_execution
         self._on_tool = on_tool
-        self._mailbox = f"/tmp/fleet-rpc-{uuid4().hex}"
-        self._context = None
+        self._tag: str | None = None
+        self._cursor: str | None = None
+        self._handle: AsyncProcessHandle | None = None
+        self._stdin_lock = asyncio.Lock()
         self._operation: asyncio.Task | None = None
         self._closing = asyncio.Lock()
         self._closed = False
@@ -501,7 +614,10 @@ class DaytonaCodeInterpreter:
                 with mlflow.start_span(
                     name="daytona.python.execute",
                     span_type="TOOL",
-                    attributes={"daytona.sandbox_id": self._sandbox.id},
+                    attributes={
+                        "daytona.sandbox_id": self._sandbox.id,
+                        "daytona.worker_id": self._handle.id if self._handle else "",
+                    },
                 ) as span:
                     span.set_inputs({"code": code})
                     try:
@@ -536,80 +652,122 @@ class DaytonaCodeInterpreter:
             self._operation = None
 
     async def _start(self) -> None:
-        if self._context is not None:
+        if self._handle is not None:
             return
+        self._tag = f"fleet-python-{uuid4().hex}"
+        self._cursor = None
         try:
-            self._context = await self._sandbox.code_interpreter.create_context(
-                cwd=WORKSPACE, request_timeout=self._timeout
+            self._handle = await self._sandbox.process.start(
+                argv=["python", "-u", "-c", _WORKER],
+                cwd=WORKSPACE,
+                stdin="open",
+                tag=self._tag,
             )
-            if self._closed:
-                raise CodeInterpreterError("Interpreter closed during context creation")
-            result = await self._sandbox.code_interpreter.run_code(
-                _PRELUDE + f"\n__fleet_run = __fleet_prelude({self._mailbox!r})",
-                context=self._context,
-                timeout=self._timeout,
-            )
-            if result.error:
-                raise CodeInterpreterError(self._format_error(result.error))
-        except DaytonaError as error:
+        except (Exception, asyncio.CancelledError) as error:
             self._closed = True
-            await self._delete_context()
-            raise CodeInterpreterError("Daytona context setup failed") from error
-        except (CodeInterpreterError, asyncio.CancelledError):
-            self._closed = True
-            await self._delete_context()
-            raise
+            await self._reset()
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise CodeInterpreterError("Daytona worker startup failed") from error
 
     async def abort(self) -> None:
-        """Fence replies, wait for the active cell and its tool tasks, then delete its context."""
+        """Fence replies and wait for the worker and its descendants to stop."""
         async with self._closing:
             self._closed = True
             operation = self._operation
+            cleanup_error = None
             if operation is not None:
-                # Once create_context has returned, we know which remote context to delete.
-                if self._context is not None:
+                if self._handle is not None:
                     operation.cancel()
-                with suppress(asyncio.CancelledError, Exception):
+                try:
                     await asyncio.shield(operation)
-            await self._delete_context()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as error:
+                    if sandbox_cleanup_failed(error):
+                        cleanup_error = error
+            await self._reset()
+            if cleanup_error is not None:
+                raise SandboxCleanupError("A child worker could not be stopped") from cleanup_error
 
-    async def _delete_context(self) -> None:
-        if self._context is None:
+    async def _reset(self) -> None:
+        if self._tag is None:
             return
         try:
-            await self._sandbox.code_interpreter.delete_context(
-                self._context, request_timeout=self._timeout
-            )
-        finally:
-            self._context = None
-            with suppress(DaytonaFileNotFoundError):
-                await self._sandbox.fs.delete_file(
-                    self._mailbox, recursive=True, request_timeout=self._timeout
-                )
+            await self._sandbox.process.kill_all(tag=self._tag, timeout=10)
+        except NotFoundError:
+            pass
+        except Exception as error:
+            self._closed = True
+            raise SandboxCleanupError("Daytona worker cleanup could not be verified") from error
+        if self._handle is not None:
+            with suppress(DaytonaError):
+                await self._handle.delete()
+        self._handle = None
+        self._tag = None
+        self._cursor = None
 
-    def _format_error(self, error: Any) -> str:
-        budget = max(256, self._limit)
-        return json.dumps(
-            {
-                "name": error.name[:128],
-                "message": error.value[:budget],
-                "traceback": error.traceback[-budget:],
-            }
-        )
+    async def _send(self, handle: AsyncProcessHandle, frame: dict) -> None:
+        message = json.dumps(frame, allow_nan=False, separators=(",", ":")) + "\n"
+        if len(message) > 2 * _MAX_FRAME:
+            raise CodeInterpreterError("Interpreter request exceeds the size limit")
+        # Serialize stdin writes. A request with unknown delivery must never be replayed.
+        async with self._stdin_lock:
+            if self._closed:
+                raise CodeInterpreterError("Interpreter is closed")
+            await handle.write_stdin(message)
+
+    async def _read_cell(
+        self, handle: AsyncProcessHandle, output: _Output, done: asyncio.Future[dict]
+    ) -> dict:
+        decode = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        stderr_bytes = 0
+        for attempt in range(3):
+            try:
+                log_stream = cast(
+                    "AsyncGenerator[StreamLogEvent]",
+                    handle.stream_logs(cursor=self._cursor, encoding="base64"),
+                )
+                async with aclosing(log_stream) as logs:
+                    async for event in logs:
+                        if event.type != "log":
+                            raise CodeInterpreterError(
+                                "Daytona log history was truncated or the worker stopped"
+                            )
+                        if event.cursor == self._cursor:
+                            continue
+                        chunk = base64.b64decode(event.frame.data, validate=True)
+                        if event.frame.channel == "stdout":
+                            output.feed(decode.decode(chunk))
+                        else:
+                            stderr_bytes += len(chunk)
+                            if stderr_bytes > 8 * _MAX_FRAME:
+                                raise CodeInterpreterError(
+                                    "Interpreter stderr exceeded the transport limit"
+                                )
+                        self._cursor = event.cursor
+                        if done.done():
+                            return done.result()
+                raise ConnectionError("Daytona log stream ended before the cell completed")
+            except (ConnectionError, DaytonaConnectionError):
+                if attempt == 2:
+                    raise
+        raise AssertionError("Unreachable Daytona stream retry state")
 
     async def _execute(self, code: str, variables: dict) -> str | FinalOutput:
+        handle = self._handle
+        if handle is None:
+            raise CodeInterpreterError("Daytona worker is unavailable")
         token = uuid4().hex
         tools = self.tools.copy()
         tasks: set[asyncio.Task[None]] = set()
         seen: set[str] = set()
-        submitted = None
         active = True
-        stderr_chars = 0
         loop = asyncio.get_running_loop()
+        done: asyncio.Future[dict] = loop.create_future()
         active_elapsed = 0.0
         active_started_at: float | None = loop.time()
-        sandbox_active = asyncio.Event()
-        sandbox_active.set()
+        changed = asyncio.Event()
         timed_out = False
 
         async def reply(request: dict) -> None:
@@ -624,150 +782,131 @@ class DaytonaCodeInterpreter:
                 value = await asyncio.to_thread(function, *args, **kwargs)
                 return await value if inspect.isawaitable(value) else value
 
+            frame = {"kind": "reply", "token": token, "id": request["id"]}
             try:
-                if self._on_tool is None:
-                    value = await invoke()
-                else:
-                    value = await self._on_tool(name, args, kwargs, invoke)
-                data = json.dumps({"value": value}, allow_nan=False).encode()
-                if len(data) > _MAX_FRAME:
+                value = (
+                    await self._on_tool(name, args, kwargs, invoke)
+                    if self._on_tool
+                    else await invoke()
+                )
+                if len(json.dumps(value, allow_nan=False)) > _MAX_FRAME:
                     raise ValueError("Host tool response exceeds the size limit")
+                frame["value"] = value
             except Exception as error:
                 if isinstance(error, CodeInterpreterError) and not isinstance(
                     error, CodeExecutionError
                 ):
                     raise
-                if isinstance(error, CodeExecutionError):
-                    message = (
-                        str(error)[:512] or f"Host tool {name!r} failed ({type(error).__name__})"
-                    )
-                else:
-                    message = f"Host tool {name!r} failed ({type(error).__name__})"
-                data = json.dumps({"error": message}).encode()
-
+                frame["error"] = (
+                    str(error)[:512]
+                    if isinstance(error, CodeExecutionError) and str(error)
+                    else f"Host tool {name!r} failed ({type(error).__name__})"
+                )
             if active and not self._closed:
-                path = f"{self._mailbox}/{token}-{request['id']}.json"
-                await self._sandbox.fs.upload_file(data, f"{path}.tmp", timeout=self._timeout)
-                if active and not self._closed:
-                    await self._sandbox.fs.move_files(
-                        f"{path}.tmp", path, request_timeout=self._timeout
-                    )
+                await self._send(handle, frame)
 
-        def on_task_done(done_task: asyncio.Task[None]) -> None:
+        def on_task_done(task: asyncio.Task[None]) -> None:
             nonlocal active_started_at
-            tasks.discard(done_task)
+            tasks.discard(task)
             if not tasks and active_started_at is None:
                 active_started_at = loop.time()
-                sandbox_active.set()
+                changed.set()
 
         def receive(frame: dict) -> None:
-            nonlocal submitted, active_elapsed, active_started_at
+            nonlocal active_elapsed, active_started_at
             if not active or self._closed:
                 return
-            if frame["kind"] == "submit":
-                submitted = FinalOutput(frame["value"])
+            if frame.get("kind") == "done" and not done.done():
+                done.set_result(frame)
                 return
-            request_id = frame["id"]
+            request_id = frame.get("id")
             if (
-                frame["kind"] != "call"
+                frame.get("kind") != "call"
+                or not isinstance(request_id, str)
                 or not re.fullmatch(r"[a-f0-9]{32}", request_id)
+                or not isinstance(frame.get("name"), str)
                 or frame["name"] not in tools
-                or request_id in seen
-                or len(tasks) >= 32
-                or len(seen) >= 1024
+                or not isinstance(frame.get("args"), list)
+                or not isinstance(frame.get("kwargs"), dict)
+                or done.done()
             ):
-                raise CodeExecutionError("Invalid interpreter tool request")
+                raise CodeInterpreterError("Invalid interpreter tool request")
+            if request_id in seen:
+                return
+            if len(tasks) >= 32 or len(seen) >= 1024:
+                raise CodeInterpreterError("Interpreter tool request limit exceeded")
             seen.add(request_id)
             task = group.create_task(reply(frame))
-            if not tasks and active_started_at is not None:
+            if active_started_at is not None:
                 active_elapsed += loop.time() - active_started_at
                 active_started_at = None
-                sandbox_active.clear()
+                changed.set()
             tasks.add(task)
             task.add_done_callback(on_task_done)
 
-        def receive_stderr(message: OutputMessage) -> None:
-            nonlocal stderr_chars
-            stderr_chars += len(message.output)
-            if stderr_chars > 8 * _MAX_FRAME:
-                raise CodeExecutionError("Interpreter stderr exceeded the transport limit")
-
-        async def watch(target: asyncio.Task[Any]) -> None:
+        async def watch(target: asyncio.Task) -> None:
             nonlocal timed_out
-            budget = float(self._timeout)
             while not target.done():
-                await sandbox_active.wait()
-                if target.done():
-                    return
-                elapsed = active_elapsed + (
-                    loop.time() - active_started_at if active_started_at is not None else 0.0
-                )
-                remaining = budget - elapsed
+                changed.clear()
+                started = active_started_at
+                if started is None:
+                    await changed.wait()
+                    continue
+                remaining = self._timeout - active_elapsed - (loop.time() - started)
                 if remaining <= 0:
                     timed_out = True
                     target.cancel()
                     return
-                await asyncio.sleep(remaining)
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(changed.wait(), remaining)
 
         output = _Output(token, self._limit, receive)
-        fields = [field["name"] for field in self.output_fields]
-        values = json.dumps(variables, allow_nan=False)
-        remote_timeout = max(self._timeout * 4, 600) if self._timeout else 0
-        source = (
-            f"__fleet_run({code!r}, {values!r}, {fields!r}, {list(tools)!r}, {token!r}, "
-            f"{remote_timeout!r}, {self._limit!r}, {_MAX_FRAME!r})"
-        )
+        message = {
+            "kind": "execute",
+            "token": token,
+            "code": code,
+            "variables": variables,
+            "fields": [field["name"] for field in self.output_fields],
+            "tools": list(tools),
+            "rpc_timeout": max(self._timeout * 4, 600),
+            "limit": self._limit,
+            "frame_limit": _MAX_FRAME,
+        }
         try:
             async with asyncio.TaskGroup() as group:
-                run_task = asyncio.create_task(
-                    self._sandbox.code_interpreter.run_code(
-                        source,
-                        context=self._context,
-                        on_stdout=output.feed,
-                        on_stderr=receive_stderr,
-                        timeout=remote_timeout,
-                    )
-                )
-                watchdog = asyncio.create_task(watch(run_task)) if self._timeout else None
+                await self._send(handle, message)
+                active_started_at = loop.time()
+                task = group.create_task(self._read_cell(handle, output, done))
+                watchdog = group.create_task(watch(task)) if self._timeout else None
                 try:
-                    result = await run_task
+                    result = await task
                 except asyncio.CancelledError:
-                    current = asyncio.current_task()
-                    if timed_out and not (current is not None and current.cancelling()):
-                        raise TimeoutError from None
-                    raise
+                    if not timed_out:
+                        raise
                 finally:
                     active = False
                     if watchdog is not None:
                         watchdog.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await watchdog
-                    if not run_task.done():
-                        run_task.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await run_task
-                    for task in tasks.copy():
-                        task.cancel()
-        except (TimeoutError, DaytonaError, ExceptionGroup) as error:
-            if _is_recoverable_timeout(error):
-                try:
-                    await self._delete_context()
-                except DaytonaError as cleanup_error:
-                    self._closed = True
-                    raise CodeInterpreterError(
-                        "Daytona execution transport failed or timed out"
-                    ) from cleanup_error
-                raise CodeExecutionError(
-                    f"Python execution timed out after {self._timeout}s; interpreter context was "
-                    "reset (in-memory variables cleared, /workspace files preserved)."
-                ) from error
+                    for pending in tasks.copy():
+                        pending.cancel()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
             self._closed = True
+            await self._reset()
             raise CodeInterpreterError("Daytona execution transport failed or timed out") from error
 
-        if result.error:
-            raise CodeExecutionError(self._format_error(result.error))
-        stdout = output.finish()
-        return submitted if submitted is not None else stdout
+        if timed_out:
+            await self._reset()
+            raise CodeExecutionError(
+                f"Python execution timed out after {self._timeout}s; interpreter context was "
+                "reset (in-memory variables cleared, /workspace files preserved)."
+            )
+        if "error" in result:
+            raise CodeExecutionError(json.dumps(result["error"]))
+        if "submission" in result:
+            return FinalOutput(result["submission"])
+        return output.finish()
 
 
 class _DaytonaInterpreterFactory:
@@ -823,7 +962,8 @@ async def list_new_artifacts(
     else:
         known = sorted({str(PurePosixPath(WORKSPACE) / path) for path in known_paths})
         header = f"root = {ARTIFACTS!r}\nknown_paths = set({known!r})\nknown_hashes = None\n"
-    result = await sandbox.process.code_run(
+    return await _workspace_query(
+        sandbox,
         header
         + """
 import hashlib
@@ -857,8 +997,5 @@ if os.path.isdir(root) and not os.path.islink(root):
                     })
 print(json.dumps(sorted(files, key=lambda item: item["path"])))
 """,
-        timeout=60,
+        60,
     )
-    if result.exit_code != 0:
-        raise RuntimeError("Could not discover Daytona artifacts")
-    return json.loads(result.result)

@@ -1,11 +1,12 @@
 """Phase 2 verification. Live services require FLEET_RUN_PHASE2_LIVE=1."""
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
-import shutil
 import sys
+from contextlib import aclosing
 from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,14 +44,12 @@ from fleet_rlm.agent import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
-    DaytonaConnectionTimeoutError,
+    DaytonaConnectionError,
     DaytonaError,
-    DaytonaTimeoutError,
+    SandboxCleanupError,
     SandboxStartupError,
-    _is_recoverable_timeout,
     delete_sandbox,
     delete_sandbox_by_id,
-    delete_workspace_file,
     download_workspace_file,
     ensure_session_sandbox,
     ephemeral_sandbox,
@@ -69,7 +68,7 @@ def settings():
         database_url="postgresql://localhost/unused",
         database_direct_url="postgresql://localhost/unused",
         daytona_api_key="offline",
-        daytona_volume_id="offline",
+        daytona_image="offline",
         llm_model="openai/gpt-4o-mini",
         sub_llm_model="openai/gpt-4o-mini",
         llm_api_key="offline",
@@ -348,119 +347,89 @@ def test_bounded_history_and_optimized_state(settings, tmp_path):
     assert restored.generate_action.signature.instructions == "Optimized workspace prompt"
 
 
-_GUEST = r"""
-import json
-import sys
-import traceback
+class _LocalWorker:
+    def __init__(self, process, tag, sandbox):
+        self.process = process
+        self.id = tag
+        self.sandbox = sandbox
+        self.cursor = 0
 
-out = sys.stdout
+    async def write_stdin(self, message):
+        frame = json.loads(message)
+        if frame["kind"] == "reply":
+            self.sandbox.replies.append(frame)
+        else:
+            self.sandbox.run_code_timeouts.append(frame["rpc_timeout"])
+        self.process.stdin.write(message.encode())
+        await self.process.stdin.drain()
 
-def send(kind, data):
-    out.write(json.dumps([kind, data]) + "\n")
-    out.flush()
+    async def stream_logs(self, *, cursor, encoding):
+        assert encoding == "base64"
+        while chunk := await self.process.stdout.read(1024):
+            cut = len(chunk) // 2 or 1
+            for part in (chunk[:cut], chunk[cut:]):
+                if part:
+                    self.cursor += 1
+                    yield SimpleNamespace(
+                        type="log",
+                        cursor=str(self.cursor),
+                        frame=SimpleNamespace(channel="stdout", data=base64.b64encode(part)),
+                    )
 
-class Stream:
-    def __init__(self, kind):
-        self.kind = kind
-
-    def write(self, value):
-        send(self.kind, value)
-        return len(value)
-
-    def flush(self):
-        pass
-
-sys.stdout = Stream("stdout")
-sys.stderr = Stream("stderr")
-scope = {"__name__": "__main__"}
-for request in sys.stdin:
-    try:
-        exec(json.loads(request), scope)
-    except Exception as err:
-        send("error", [type(err).__name__, str(err), traceback.format_exc()])
-    send("done", None)
-"""
+    async def delete(self):
+        self.sandbox.deleted.append(self)
 
 
 class _LocalSandbox:
-    """Exercise Daytona's output-only callback and filesystem APIs without remote services."""
+    """Run the production worker locally through the v2 process interface."""
 
     def __init__(self, cwd):
         self.cwd = cwd
-        self.code_interpreter = self.fs = self.process = self
+        self.process = self
         self.contexts = []
         self.deleted = []
-        self.uploads = []
+        self.replies = []
         self.run_code_timeouts = []
         self.state = "started"
         self.id = "test-sandbox"
-        self.start = AsyncMock()
+        self.wait = AsyncMock()
 
-    async def create_context(self, *, cwd, request_timeout):
-        assert cwd == "/workspace"
+    async def start(self, *, argv, cwd, stdin, tag):
+        assert cwd == "/workspace" and stdin == "open"
         process = await asyncio.create_subprocess_exec(
             sys.executable,
-            "-u",
-            "-c",
-            _GUEST,
+            *argv[1:],
             cwd=self.cwd,
-            limit=2**21,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        self.contexts.append(process)
-        return process
+        worker = _LocalWorker(process, tag, self)
+        self.contexts.append(worker)
+        return worker
 
-    async def delete_context(self, context, *, request_timeout):
-        self.deleted.append(context)
-        context.kill()
-        await context.wait()
+    async def kill_all(self, *, tag, timeout):
+        for worker in self.contexts:
+            if worker.id == tag and worker.process.returncode is None:
+                worker.process.kill()
+                await worker.process.wait()
 
-    async def run_code(self, code, *, context, timeout, on_stdout=None, on_stderr=None):
-        self.run_code_timeouts.append(timeout)
-        context.stdin.write((json.dumps(code) + "\n").encode())
-        await context.stdin.drain()
-        error = None
-        while line := await context.stdout.readline():
-            kind, value = json.loads(line)
-            if kind == "done":
-                return SimpleNamespace(error=error)
-            if kind == "error":
-                error = SimpleNamespace(name=value[0], value=value[1], traceback=value[2])
-            read = on_stdout if kind == "stdout" else on_stderr if kind == "stderr" else None
-            if read:
-                cut = len(value) // 2
-                read(SimpleNamespace(output=value[:cut]))
-                read(SimpleNamespace(output=value[cut:]))
-        raise RuntimeError("Guest process ended unexpectedly")
-
-    async def upload_file(self, data, path, *, timeout):
-        self.uploads.append(path)
-        Path(path).write_bytes(data)
-
-    async def move_files(self, source, dest, *, request_timeout):
-        Path(source).replace(dest)
-
-    async def delete_file(self, path, *, recursive, request_timeout):
-        shutil.rmtree(path, ignore_errors=True)
-
-    async def code_run(self, code, *, timeout):
+    async def run(self, *, argv, timeout, execution_timeout):
         process = await asyncio.create_subprocess_exec(
             sys.executable,
-            "-c",
-            code,
+            *argv[1:],
             stdout=asyncio.subprocess.PIPE,
         )
         stdout, _ = await process.communicate()
-        return SimpleNamespace(exit_code=process.returncode, result=stdout.decode())
+        return SimpleNamespace(exit_code=process.returncode, stdout=stdout.decode())
 
 
 @pytest.mark.asyncio
 async def test_provisioning_and_reuse(settings, tmp_path):
     sandbox = _LocalSandbox(tmp_path)
-    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
+    sandbox.process = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
     daytona = SimpleNamespace(
-        v0=SimpleNamespace(
+        v2=SimpleNamespace(
             create=AsyncMock(return_value=sandbox), get=AsyncMock(return_value=sandbox)
         )
     )
@@ -470,46 +439,53 @@ async def test_provisioning_and_reuse(settings, tmp_path):
         sandbox.id,
         True,
     )
-    params = daytona.v0.create.call_args.args[0]
-    assert params.snapshot == settings.daytona_snapshot and not params.env_vars
-    (mount,) = params.volumes
-    assert mount.mount_path == "/workspace" and mount.subpath == f"sessions/{session_id}"
+    create = daytona.v2.create
+    assert create.call_args.args == (settings.daytona_image,)
+    args = create.call_args.kwargs
+    assert "env" not in args and "volumes" not in args
+    assert args["network_policy"] == {"block_all": True, "allow_domains": []}
+    assert args["lifecycle_policy"]["on_idle_timeout"] == "delete"
     assert await ensure_session_sandbox(daytona, settings, session_id, sandbox.id) == (
         sandbox,
         sandbox.id,
         False,
     )
-    sandbox.start.assert_not_awaited()
-    sandbox.state = "stopped"
-    await ensure_session_sandbox(daytona, settings, session_id, sandbox.id)
-    sandbox.start.assert_awaited_once()
+    sandbox.wait.assert_not_awaited()
+    sandbox.state = "destroyed"
+    replacement = _LocalSandbox(tmp_path)
+    replacement.id = "replacement"
+    replacement.process = sandbox.process
+    create.return_value = replacement
+    assert await ensure_session_sandbox(daytona, settings, session_id, sandbox.id) == (
+        replacement,
+        replacement.id,
+        True,
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_create", [True, False])
 async def test_failed_workspace_startup_deletes_new_sandbox(settings, tmp_path, during_create):
     sandbox = _LocalSandbox(tmp_path)
-    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
+    sandbox.process = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
     daytona = SimpleNamespace(
-        v0=SimpleNamespace(
+        v2=SimpleNamespace(
             create=AsyncMock(
                 return_value=sandbox,
                 side_effect=DaytonaError("Provider rejected startup") if during_create else None,
             ),
-            get=AsyncMock(return_value=sandbox),
+            find_by_name=AsyncMock(return_value=[sandbox]),
             delete=AsyncMock(),
         )
     )
-
     with pytest.raises(SandboxStartupError):
         await ensure_session_sandbox(daytona, settings, uuid4(), None)
-
     if during_create:
-        params = daytona.v0.create.call_args.args[0]
-        daytona.v0.get.assert_awaited_once_with(params.name, request_timeout=10)
+        name = daytona.v2.create.call_args.kwargs["name"]
+        daytona.v2.find_by_name.assert_awaited_once_with(name, region=settings.daytona_region)
     else:
-        daytona.v0.get.assert_not_awaited()
-    daytona.v0.delete.assert_awaited_once_with(sandbox, timeout=15, wait=True)
+        daytona.v2.find_by_name.assert_not_awaited()
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
 
 @pytest.mark.asyncio
@@ -594,13 +570,13 @@ async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp
                 cancelled.set()
 
         interpreter.tools["slow"] = slow
-        uploads = len(sandbox.uploads)
+        replies = len(sandbox.replies)
         cell = asyncio.create_task(execute("slow()"))
         await asyncio.wait_for(waiting.wait(), timeout=5)
         await interpreter.abort()
         with pytest.raises(asyncio.CancelledError):
             await cell
-        assert cancelled.is_set() and len(sandbox.uploads) == uploads
+        assert cancelled.is_set() and len(sandbox.replies) == replies
     finally:
         await asyncio.to_thread(interpreter.shutdown)
     assert sandbox.contexts == sandbox.deleted
@@ -640,7 +616,6 @@ async def test_should_raise_recoverable_execution_error_and_reset_context_when_c
         assert await execute("cached = 42\nprint(cached)") == "42\n"
         assert len(sandbox.contexts) == 1
         first_context = sandbox.contexts[0]
-        assert Path(interpreter._mailbox).exists()
 
         with pytest.raises(
             CodeExecutionError,
@@ -649,21 +624,19 @@ async def test_should_raise_recoverable_execution_error_and_reset_context_when_c
             await execute("import time\ntime.sleep(5)")
 
         assert sandbox.deleted == [first_context]
-        assert not Path(interpreter._mailbox).exists()
         assert interpreter._closed is False
-        assert interpreter._context is None
+        assert interpreter._handle is None
 
         assert await execute("print('cached' in globals())\nSUBMIT('recovered')") == FinalOutput(
             {"answer": "recovered"}
         )
         assert len(sandbox.contexts) == 2
-        assert interpreter._context is sandbox.contexts[1]
+        assert interpreter._handle is sandbox.contexts[1]
         assert interpreter._closed is False
     finally:
         await asyncio.to_thread(interpreter.shutdown)
     assert sandbox.contexts == sandbox.deleted
 
-    original_run_code = sandbox.run_code
     for failure in (
         DaytonaError("transport closed"),
         ExceptionGroup("transport group", [DaytonaError("frame error")]),
@@ -671,16 +644,14 @@ async def test_should_raise_recoverable_execution_error_and_reset_context_when_c
         broken = factory()
         try:
             await asyncio.to_thread(broken.start)
-            monkeypatch.setattr(sandbox, "run_code", AsyncMock(side_effect=failure))
-            with pytest.raises(
-                CodeInterpreterError,
-                match="Daytona execution transport failed or timed out",
-            ) as exc_info:
+            handle = broken._handle
+            send = AsyncMock(side_effect=failure)
+            monkeypatch.setattr(handle, "write_stdin", send)
+            with pytest.raises(CodeInterpreterError, match="Daytona execution transport failed"):
                 await asyncio.to_thread(broken.execute, "print('unreachable')")
-            assert not isinstance(exc_info.value, CodeExecutionError)
+            send.assert_awaited_once()
             assert broken._closed is True
         finally:
-            monkeypatch.setattr(sandbox, "run_code", original_run_code)
             await asyncio.to_thread(broken.shutdown)
 
 
@@ -812,100 +783,57 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_daytona_timeout_recovery_vs_connection_timeout_fatal(
+async def test_stream_resumes_at_cursor_without_repeating_host_calls(
     settings, tmp_path, monkeypatch
 ):
-    assert _is_recoverable_timeout(TimeoutError("local")) is True
-    assert _is_recoverable_timeout(DaytonaTimeoutError("cell timed out")) is True
-    assert _is_recoverable_timeout(DaytonaConnectionTimeoutError("connect timed out")) is False
-    assert _is_recoverable_timeout(DaytonaError("generic")) is False
-    assert _is_recoverable_timeout(
-        ExceptionGroup("ok", [TimeoutError(), DaytonaTimeoutError("cell")])
-    )
-    assert not _is_recoverable_timeout(
-        ExceptionGroup("mixed", [TimeoutError(), DaytonaConnectionTimeoutError("net")])
-    )
-    assert not _is_recoverable_timeout(ExceptionGroup("mixed", [TimeoutError(), DaytonaError("x")]))
-
     sandbox = _LocalSandbox(tmp_path)
-    factory = make_interpreter_factory(
-        sandbox,
-        settings.model_copy(update={"daytona_exec_timeout_seconds": 5}),
-        asyncio.get_running_loop(),
-    )
-    interpreter = factory()
+    interpreter = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())()
     interpreter.output_fields = [{"name": "answer"}]
-    original_run_code = sandbox.run_code
+    tool = AsyncMock(return_value="resume-ok")
+    interpreter.tools["probe"] = tool
+    await asyncio.to_thread(interpreter.start)
+    handle = interpreter._handle
+    stream = handle.stream_logs(cursor=None, encoding="base64")
+    cursors = []
 
+    async def interrupted(*, cursor, encoding):
+        cursors.append(cursor)
+        assert encoding == "base64"
+        async for event in stream:
+            yield event
+            if len(cursors) == 1:
+                # Model the provider retaining unread frames after disconnect.
+                raise DaytonaConnectionError("log stream disconnected")
+
+    # Retain a single generator behind the simulated reconnect, including the
+    # second half of a JSON frame that was split by the local provider.
+    monkeypatch.setattr(handle, "stream_logs", interrupted)
     try:
-        assert await asyncio.to_thread(interpreter.execute, "x = 1\nprint(x)") == "1\n"
-        first_context = sandbox.contexts[0]
-
-        # Remote DaytonaTimeoutError resets context, keeps interpreter open, and recovers.
-        monkeypatch.setattr(
-            sandbox, "run_code", AsyncMock(side_effect=DaytonaTimeoutError("daemon timeout"))
-        )
-        with pytest.raises(
-            CodeExecutionError,
-            match=r"Python execution timed out after 5s; interpreter context was reset",
-        ):
-            await asyncio.to_thread(interpreter.execute, "print('slow')")
-        assert sandbox.deleted == [first_context]
-        assert interpreter._closed is False
-        assert interpreter._context is None
-
-        monkeypatch.setattr(sandbox, "run_code", original_run_code)
-        assert await asyncio.to_thread(
-            interpreter.execute, "assert 'x' not in globals()\nSUBMIT('after-daytona-timeout')"
-        ) == FinalOutput({"answer": "after-daytona-timeout"})
-        assert len(sandbox.contexts) == 2
-        assert interpreter._closed is False
-
-        # If cleanup fails during recoverable timeout handling, mark fatal CodeInterpreterError.
-        second_context = sandbox.contexts[1]
-        monkeypatch.setattr(
-            sandbox, "run_code", AsyncMock(side_effect=DaytonaTimeoutError("daemon timeout"))
-        )
-        original_delete = sandbox.delete_context
-        failing_delete = AsyncMock(side_effect=DaytonaError("cleanup lost"))
-        monkeypatch.setattr(sandbox, "delete_context", failing_delete)
-        try:
-            with pytest.raises(
-                CodeInterpreterError, match="Daytona execution transport failed or timed out"
-            ) as cleanup_exc:
-                await asyncio.to_thread(interpreter.execute, "print('cleanup-fail')")
-            assert not isinstance(cleanup_exc.value, CodeExecutionError)
-            assert interpreter._closed is True
-            assert failing_delete.await_args.args[0] is second_context
-        finally:
-            monkeypatch.setattr(sandbox, "delete_context", original_delete)
-            monkeypatch.setattr(sandbox, "run_code", original_run_code)
-            await original_delete(second_context, request_timeout=5)
+        result = await asyncio.to_thread(interpreter.execute, "SUBMIT(probe())")
+        assert result == FinalOutput({"answer": "resume-ok"})
+        assert cursors == [None, "1"]
+        tool.assert_awaited_once()
     finally:
+        await stream.aclose()
         await asyncio.to_thread(interpreter.shutdown)
-    assert set(sandbox.contexts) == set(sandbox.deleted)
 
-    # DaytonaConnectionTimeoutError is a transport failure: closes interpreter and raises fatal.
-    for fatal in (
-        DaytonaConnectionTimeoutError("socket connect timed out"),
-        ExceptionGroup(
-            "conn group",
-            [TimeoutError("cell"), DaytonaConnectionTimeoutError("transport timeout")],
-        ),
-    ):
-        broken = factory()
-        try:
-            await asyncio.to_thread(broken.start)
-            monkeypatch.setattr(sandbox, "run_code", AsyncMock(side_effect=fatal))
-            with pytest.raises(
-                CodeInterpreterError, match="Daytona execution transport failed or timed out"
-            ) as exc_info:
-                await asyncio.to_thread(broken.execute, "print('unreachable')")
-            assert not isinstance(exc_info.value, CodeExecutionError)
-            assert broken._closed is True
-        finally:
-            monkeypatch.setattr(sandbox, "run_code", original_run_code)
-            await asyncio.to_thread(broken.shutdown)
+
+@pytest.mark.asyncio
+async def test_unknown_worker_cleanup_fails_closed(settings, tmp_path, monkeypatch):
+    sandbox = _LocalSandbox(tmp_path)
+    interpreter = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())()
+    await asyncio.to_thread(interpreter.start)
+    failing_kill = AsyncMock(side_effect=DaytonaError("cleanup lost"))
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sandbox, "kill_all", failing_kill)
+            with pytest.raises(SandboxCleanupError, match="cleanup could not be verified"):
+                await interpreter.abort()
+            failing_kill.assert_awaited_once()
+            assert interpreter._closed is True
+    finally:
+        await interpreter.abort()
+    assert sandbox.contexts == sandbox.deleted
 
 
 @pytest.mark.asyncio
@@ -939,7 +867,7 @@ async def test_cell_timer_pauses_during_slow_host_rpc_and_times_out_pure_python(
         ):
             await execute("import time\ntime.sleep(3)")
         assert interpreter._closed is False
-        assert interpreter._context is None
+        assert interpreter._handle is None
         assert await execute("SUBMIT('alive')") == FinalOutput({"answer": "alive"})
     finally:
         await asyncio.to_thread(interpreter.shutdown)
@@ -1097,103 +1025,77 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
 @pytest.mark.asyncio
 async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(settings, tmp_path):
     sandbox = _LocalSandbox(tmp_path)
-    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
+    sandbox.process = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
     daytona = SimpleNamespace(
-        v0=SimpleNamespace(
-            create=AsyncMock(return_value=sandbox),
-            delete=AsyncMock(),
-        )
+        v2=SimpleNamespace(create=AsyncMock(return_value=sandbox), delete=AsyncMock())
     )
     configured = settings.model_copy(
         update={
-            "daytona_snapshot": "custom-snap",
-            "daytona_target": "us",
-            "daytona_auto_stop_minutes": 7,
+            "daytona_image": "custom-image",
+            "daytona_region": "us-east-ash-1",
+            "daytona_idle_timeout_minutes": 7,
+            "daytona_optimize_spot": True,
         }
     )
-
     async with ephemeral_sandbox(daytona, configured) as yielded:
         assert yielded is sandbox
-        params = daytona.v0.create.call_args.args[0]
-        assert params.snapshot == "custom-snap"
-        assert params.language == "python"
-        assert params.target == "us"
-        assert params.auto_stop_interval == 7
-        assert params.volumes is None
-        assert params.env_vars is None
-        daytona.v0.delete.assert_not_awaited()
-    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+        assert daytona.v2.create.call_args.args == ("custom-image",)
+        args = daytona.v2.create.call_args.kwargs
+        assert args["region"] == "us-east-ash-1" and args["spot"] is True
+        assert args["lifecycle_policy"]["idle_expiry_seconds"] == 420
+        assert "volumes" not in args and "env" not in args
+        daytona.v2.delete.assert_not_awaited()
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
-    # Also cleans up when the caller raises inside the context block.
-    daytona.v0.delete.reset_mock()
+    daytona.v2.delete.reset_mock()
     with pytest.raises(RuntimeError, match="eval crashed"):
         async with ephemeral_sandbox(daytona, configured):
             raise RuntimeError("eval crashed")
-    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
-    # Also cleans up if workspace directory init fails.
-    daytona.v0.delete.reset_mock()
-    sandbox.process = SimpleNamespace(code_run=AsyncMock(return_value=SimpleNamespace(exit_code=1)))
+    daytona.v2.delete.reset_mock()
+    sandbox.process.run.return_value = SimpleNamespace(exit_code=1)
     with pytest.raises(SandboxStartupError, match="initialize the Daytona workspace"):
         async with ephemeral_sandbox(daytona, configured):
             pytest.fail("must not yield when init fails")
-    daytona.v0.delete.assert_awaited_once_with(sandbox, timeout=15, wait=True)
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
 
 @pytest.mark.asyncio
-async def test_daytona_v0_and_workspace_file_helpers(settings):
+async def test_daytona_v2_and_workspace_file_helpers(settings, tmp_path):
     client = make_daytona_client(settings)
-    assert hasattr(client, "v0")
+    assert hasattr(client, "v2")
     await client.close()
 
     sandbox = SimpleNamespace(
         id="sb-1",
-        fs=SimpleNamespace(
-            upload_file_stream=AsyncMock(),
-            move_files=AsyncMock(),
-            delete_file=AsyncMock(),
-            download_file=AsyncMock(return_value=b"payload"),
-        ),
+        process=SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(exit_code=0))),
+        fs=SimpleNamespace(upload_file=AsyncMock(), download_file=AsyncMock()),
     )
-    daytona = SimpleNamespace(
-        v0=SimpleNamespace(
-            get=AsyncMock(return_value=sandbox),
-            delete=AsyncMock(),
-        )
-    )
-
+    daytona = SimpleNamespace(v2=SimpleNamespace(delete=AsyncMock()))
     await delete_sandbox(daytona, sandbox)
-    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
-
-    daytona.v0.delete.reset_mock()
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
+    daytona.v2.delete.reset_mock()
     await delete_sandbox_by_id(daytona, "sb-1")
-    daytona.v0.get.assert_awaited_once_with("sb-1")
-    daytona.v0.delete.assert_awaited_once_with(sandbox, wait=True)
+    daytona.v2.delete.assert_awaited_once_with("sb-1", timeout=30)
 
-    async def sample_chunks():
-        yield b"abc"
-
-    await upload_workspace_file(sandbox, sample_chunks(), "files/a.csv", timeout=30)
-    temp_path = sandbox.fs.upload_file_stream.await_args.args[1]
-    assert temp_path.startswith("/workspace/files/.") and temp_path.endswith(".upload")
-    assert sandbox.fs.upload_file_stream.await_args.kwargs == {"timeout": 30}
-    sandbox.fs.move_files.assert_awaited_once_with(
-        temp_path, "/workspace/files/a.csv", request_timeout=30
-    )
-
-    # Failed move cleans up the temporary upload path before re-raising.
-    sandbox.fs.move_files.side_effect = DaytonaError("move failed")
-    with pytest.raises(DaytonaError, match="move failed"):
-        await upload_workspace_file(sandbox, sample_chunks(), "files/b.csv", timeout=15)
-    failed_temp = sandbox.fs.upload_file_stream.await_args.args[1]
-    sandbox.fs.delete_file.assert_awaited_once_with(failed_temp, request_timeout=15)
-
-    sandbox.fs.delete_file.reset_mock()
-    await delete_workspace_file(sandbox, "files/b.csv", timeout=12)
-    sandbox.fs.delete_file.assert_awaited_once_with("/workspace/files/b.csv", request_timeout=12)
-
-    assert await download_workspace_file(sandbox, "artifacts/out.txt", timeout=20) == b"payload"
-    sandbox.fs.download_file.assert_awaited_once_with("/workspace/artifacts/out.txt", 20)
+    source = tmp_path / "a.csv"
+    source.write_bytes(b"abc")
+    digest = hashlib.sha256(b"abc").hexdigest()
+    await upload_workspace_file(sandbox, source, "files/a.csv", sha256=digest, size=3, timeout=30)
+    sandbox.fs.upload_file.assert_awaited_once_with(source, "/workspace/files/a.csv", atomic=True)
+    make_directory, verify_contents = sandbox.process.run.await_args_list
+    assert make_directory.kwargs["argv"] == ["mkdir", "-p", "/workspace/files"]
+    assert verify_contents.kwargs["argv"][-3:] == ["/workspace/files/a.csv", digest, "3"]
+    sandbox.process.run.return_value = SimpleNamespace(exit_code=1)
+    with pytest.raises(SandboxStartupError, match="file directory"):
+        await upload_workspace_file(
+            sandbox, source, "files/b.csv", sha256=digest, size=3, timeout=15
+        )
+    sandbox.fs.upload_file.assert_awaited_once()
+    destination = tmp_path / "out.txt"
+    await download_workspace_file(sandbox, "artifacts/out.txt", destination, timeout=20)
+    sandbox.fs.download_file.assert_awaited_once_with("/workspace/artifacts/out.txt", destination)
 
 
 @pytest.mark.asyncio
@@ -1317,8 +1219,129 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
     os.environ.get("FLEET_RUN_PHASE2_LIVE") != "1", reason="Requires authorized live services"
 )
 @pytest.mark.asyncio
+async def test_live_streamed_worker_failure_recovery(monkeypatch):
+    settings = Settings().model_copy(update={"daytona_exec_timeout_seconds": 3})
+    if not settings.mlflow_tracking_uri:
+        pytest.skip("Configure the staging MLflow tracking URI")
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(settings.mlflow_experiment)
+
+    async with make_daytona_client(settings) as daytona, ephemeral_sandbox(daytona, settings) as vm:
+        await vm.fs.write_bytes("/workspace/files/worker-canary.txt", b"fixture", atomic=True)
+        factory = make_interpreter_factory(vm, settings, asyncio.get_running_loop())
+        probe = factory()
+        probe.output_fields = [{"name": "answer"}]
+
+        async def slow_check():
+            await asyncio.sleep(3.4)
+            return "host-tool-ok"
+
+        probe.tools["slow_check"] = slow_check
+        execute = probe.execute
+        with mlflow.start_span("fleet.acceptance.worker_recovery") as span:
+            try:
+                await asyncio.to_thread(probe.start)
+                original_worker = probe._handle
+                assert original_worker is not None
+                open_logs = original_worker.stream_logs
+                cursors = []
+
+                async def drop_first_event(*, cursor, encoding):
+                    cursors.append(cursor)
+                    async with aclosing(open_logs(cursor=cursor, encoding=encoding)) as logs:
+                        async for event in logs:
+                            yield event
+                            if len(cursors) == 1:
+                                raise DaytonaConnectionError("Simulated stream disconnect")
+
+                called = AsyncMock(return_value="cursor resumed")
+                probe.tools["probe_resume"] = called
+                with monkeypatch.context() as patch:
+                    patch.setattr(original_worker, "stream_logs", drop_first_event)
+                    assert await asyncio.to_thread(execute, "print(probe_resume())") == (
+                        "cursor resumed\n"
+                    )
+                assert cursors[0] is None and len(cursors) == 2 and cursors[1]
+                called.assert_awaited_once()
+                assert await asyncio.to_thread(execute, "sentinel = 42; print(sentinel)") == "42\n"
+                with pytest.raises(CodeExecutionError, match="ordinary failure"):
+                    await asyncio.to_thread(execute, "raise ValueError('ordinary failure')")
+                assert await asyncio.to_thread(execute, "print(sentinel)") == "42\n"
+                assert await asyncio.to_thread(execute, "print(slow_check())") == "host-tool-ok\n"
+                with pytest.raises(CodeExecutionError, match="interpreter context was reset"):
+                    await asyncio.to_thread(execute, "import time; time.sleep(20)")
+                result = await asyncio.to_thread(
+                    execute,
+                    "assert 'sentinel' not in globals()\n"
+                    "SUBMIT(open('/workspace/files/worker-canary.txt').read())",
+                )
+                assert result == FinalOutput({"answer": "fixture"})
+            finally:
+                await probe.abort()
+        print(f"worker recovery MLflow trace {span.trace_id}, sandbox {vm.id}")
+
+        child_running = asyncio.Event()
+        callbacks = ChildCallbacks(AsyncMock(), AsyncMock())
+        callbacks.on_child_start.return_value = uuid4()
+
+        async def emit(_run_id, _event):
+            pass
+
+        async def wait_in_child():
+            child_running.set()
+            await asyncio.Future()
+
+        root_lm = DummyLM([{"plan": "Run the child", "code": "spawn_agent('Wait in the child')"}])
+        sub_lm = DummyLM(
+            [
+                {
+                    "plan": "Stage an uncommitted file and wait",
+                    "code": "open('/workspace/artifacts/unpublished.txt','w').write('partial')\n"
+                    "wait_in_child()",
+                }
+            ]
+        )
+        with mlflow.start_span("fleet.acceptance.stop_recursive") as span:
+            executing = asyncio.create_task(
+                run_workspace_task(
+                    settings,
+                    task="Stop while the child is active",
+                    files_manifest=[],
+                    memories=[],
+                    interpreter_factory=factory,
+                    run_id=str(uuid4()),
+                    emit=emit,
+                    callbacks=callbacks,
+                    model_override=root_lm,
+                    sub_lm=sub_lm,
+                    selection=SimpleNamespace(active_skills=(), allowed_tools=("wait_in_child",)),
+                    host_tools={"wait_in_child": wait_in_child},
+                )
+            )
+            try:
+                await asyncio.wait_for(child_running.wait(), 20)
+            finally:
+                executing.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await executing
+            assert callbacks.on_child_finish.await_args.args[1] == "cancelled"
+        mlflow.flush_trace_async_logging()
+        trace = mlflow.get_trace(span.trace_id)
+        cancelled_cells = [
+            cell
+            for cell in trace.data.spans
+            if cell.attributes.get("daytona.execution.status") == "cancelled"
+        ]
+        assert len({cell.attributes["daytona.worker_id"] for cell in cancelled_cells}) == 2
+        print(f"recursive stop MLflow trace {span.trace_id}, sandbox {vm.id}")
+
+
+@pytest.mark.skipif(
+    os.environ.get("FLEET_RUN_PHASE2_LIVE") != "1", reason="Requires authorized live services"
+)
+@pytest.mark.asyncio
 async def test_live_two_turn_csv(tmp_path):
-    """Run on an isolated Daytona Volume subpath and inspect a local MLflow trace."""
+    """Run on an isolated Daytona v2 sandbox and inspect a local MLflow trace."""
     import mlflow
     import mlflow.dspy
 
@@ -1334,13 +1357,12 @@ async def test_live_two_turn_csv(tmp_path):
         value.strip()
         for value in (
             settings.daytona_api_key.get_secret_value(),
-            settings.daytona_volume_id,
             settings.llm_api_key.get_secret_value(),
             settings.llm_model,
             settings.sub_llm_model,
         )
     ):
-        pytest.skip("Configure the Daytona Volume and host model credentials")
+        pytest.skip("Configure Daytona and host model credentials")
     if not os.environ.get("TYPESAFE_API_KEY", "").strip():
         pytest.skip("Configure the host TYPESAFE_API_KEY for Jev")
 
@@ -1359,7 +1381,7 @@ async def test_live_two_turn_csv(tmp_path):
             uploaded = False
             try:
                 assert created
-                await sandbox.fs.upload_file(b"value\n2\n5\n11\n", path)
+                await sandbox.fs.write_bytes(path, b"value\n2\n5\n11\n", atomic=True)
                 uploaded = True
                 factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())
                 events = []
@@ -1414,9 +1436,9 @@ async def test_live_two_turn_csv(tmp_path):
             finally:
                 try:
                     if uploaded:
-                        await sandbox.fs.delete_file(path)
+                        await sandbox.fs.remove(path)
                 finally:
-                    await daytona.v0.delete(sandbox, wait=True)
+                    await delete_sandbox(daytona, sandbox)
         traces = mlflow.search_traces(
             locations=[experiment.experiment_id], return_type="list", flush=True
         )

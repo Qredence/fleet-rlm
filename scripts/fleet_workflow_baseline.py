@@ -622,7 +622,7 @@ async def evaluate(
                         "rows": rows,
                         **(
                             {
-                                "snapshot": settings.daytona_snapshot,
+                                "image": settings.daytona_image,
                                 "model": settings.llm_model,
                                 "sub_model": settings.sub_llm_model,
                                 "decision_model": settings.decision_model,
@@ -648,6 +648,11 @@ def main():
     suites = parser.add_mutually_exclusive_group()
     suites.add_argument("--large", action="store_true")
     suites.add_argument(
+        "--daytona-migration",
+        choices=("v0", "v2"),
+        help="Exercise recursive trajectories and the selected sandbox lifecycle on staging.",
+    )
+    suites.add_argument(
         "--bundled-skills",
         action="store_true",
         help="Run synthetic Skill cases against a disposable Fleet deployment and its database.",
@@ -661,6 +666,19 @@ def main():
     args = parser.parse_args()
     if args.case and not args.bundled_skills:
         parser.error("--case requires --bundled-skills")
+    if args.daytona_migration:
+        from daytona_migration_cases import run_daytona_migration
+
+        if args.resume:
+            parser.error("--resume is supported by the existing workflow suites")
+        passed = asyncio.run(
+            run_daytona_migration(
+                args.url, args.output_dir, args.repeats, args.daytona_migration
+            )
+        )
+        if not passed:
+            raise SystemExit(1)
+        return
     asyncio.run(
         evaluate(
             args.url,

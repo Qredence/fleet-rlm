@@ -45,10 +45,11 @@ def settings(tmp_path: Path) -> Settings:
             "postgresql+psycopg://user:password@ep-prod.region.aws.neon.tech/fleet?sslmode=require"
         ),
         daytona_api_key="offline",
-        daytona_volume_id="offline",
+        daytona_image="offline",
         llm_model="openai/gpt-4o-mini",
         sub_llm_model="openai/gpt-4o-mini",
         llm_api_key="offline",
+        mlflow_tracking_uri=None,
         skills_dir=skills_dir,
     )
 

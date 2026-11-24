@@ -1,0 +1,143 @@
+"""Host-only storage for committed workspace files."""
+
+import asyncio
+import hashlib
+from collections.abc import Callable
+from contextlib import closing
+from pathlib import Path
+from typing import BinaryIO
+from uuid import UUID, uuid4
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
+
+from .config import Settings
+
+
+class StorageError(RuntimeError):
+    """A workspace object could not be read or written."""
+
+
+class StorageObjectMissing(StorageError):
+    """The object named by the current file record no longer exists."""
+
+
+class StorageIntegrityError(StorageError):
+    """The returned bytes differ from the committed file record."""
+
+
+async def _transfer[T](operation: Callable[[], T]) -> T:
+    task = asyncio.create_task(asyncio.to_thread(operation))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # The SDK uses blocking I/O. Keep the caller's spool and write fence alive
+        # until the request settles, even when the HTTP client has disconnected.
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    except ClientError as error:
+        if error.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
+            raise StorageObjectMissing("Workspace object not found") from error
+        raise StorageError("Workspace storage request failed") from error
+    except BotoCoreError as error:
+        raise StorageError("Workspace storage request failed") from error
+
+
+class ObjectStorage:
+    def __init__(self, settings: Settings) -> None:
+        if (
+            not settings.s3_endpoint_url
+            or not settings.s3_access_key_id
+            or not settings.s3_secret_access_key
+        ):
+            raise ValueError("Configure the Neon Object Storage endpoint and credentials")
+        self.bucket = settings.s3_bucket
+        self._client = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint_url,
+            region_name=settings.s3_region,
+            aws_access_key_id=settings.s3_access_key_id.get_secret_value(),
+            aws_secret_access_key=settings.s3_secret_access_key.get_secret_value(),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                connect_timeout=10,
+                read_timeout=30,
+                retries={"mode": "standard", "total_max_attempts": 2},
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    @staticmethod
+    def prefix(session_id: UUID) -> str:
+        return f"sessions/{session_id}/"
+
+    @classmethod
+    def new_key(cls, session_id: UUID) -> str:
+        return f"{cls.prefix(session_id)}{uuid4().hex}"
+
+    async def put(self, key: str, path: Path) -> tuple[str, int]:
+        def write() -> tuple[str, int]:
+            with path.open("rb") as body:
+                digest = hashlib.file_digest(body, "sha256").hexdigest()
+                size = body.tell()
+                body.seek(0)
+                self._client.put_object(
+                    Bucket=self.bucket,
+                    Key=key,
+                    Body=body,
+                    ContentLength=size,
+                    Metadata={"sha256": digest},
+                )
+            self._read_verified(key, sha256=digest, size=size)
+            return digest, size
+
+        return await _transfer(write)
+
+    async def download(self, key: str, path: Path, *, sha256: str, size: int) -> None:
+        def read() -> None:
+            with path.open("wb") as output:
+                self._read_verified(key, sha256=sha256, size=size, output=output)
+
+        await _transfer(read)
+
+    def _read_verified(
+        self, key: str, *, sha256: str, size: int, output: BinaryIO | None = None
+    ) -> None:
+        item = self._client.get_object(Bucket=self.bucket, Key=key)
+        with closing(item["Body"]) as body:
+            if item["ContentLength"] != size:
+                raise StorageIntegrityError("Workspace object size does not match its record")
+            digest = hashlib.sha256()
+            length = 0
+            for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+                digest.update(chunk)
+                length += len(chunk)
+                if output is not None:
+                    output.write(chunk)
+            if length != size or digest.hexdigest() != sha256:
+                raise StorageIntegrityError("Workspace object hash does not match its record")
+
+    async def delete(self, key: str) -> None:
+        await _transfer(lambda: self._client.delete_object(Bucket=self.bucket, Key=key))
+
+    async def delete_session(self, session_id: UUID) -> None:
+        def delete() -> None:
+            prefix = self.prefix(session_id)
+            while True:
+                page = self._client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=1000)
+                keys = [{"Key": item["Key"]} for item in page.get("Contents", ())]
+                if not keys:
+                    return
+                result = self._client.delete_objects(
+                    Bucket=self.bucket, Delete={"Objects": keys, "Quiet": True}
+                )
+                if result.get("Errors"):
+                    raise StorageError("Some workspace objects could not be deleted")
+
+        await _transfer(delete)

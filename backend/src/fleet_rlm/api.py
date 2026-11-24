@@ -1,15 +1,16 @@
 """Stateless HTTP and native POST SSE for the Fleet backend."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import re
 import secrets
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager, closing, suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
@@ -30,7 +31,7 @@ from fastapi import (
 )
 from fastapi import File as Upload
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text, update
@@ -50,17 +51,20 @@ from .interpreter import (
     WorkspaceBrowseLimit,
     delete_sandbox,
     delete_sandbox_by_id,
-    delete_workspace_file,
     download_workspace_file,
     ensure_session_sandbox,
+    get_running_sandbox,
     list_new_artifacts,
     list_workspace_files,
     make_daytona_client,
     make_interpreter_factory,
     read_browsable_workspace_file,
+    reset_managed_workspace,
+    sandbox_cleanup_failed,
     upload_workspace_file,
 )
 from .skills import MAX_SKILL_BYTES, SkillRegistry, select_skills
+from .storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
 
 _STREAM_HEADER = "x-vercel-ai-ui-message-stream"
 _LOG = logging.getLogger(__name__)
@@ -71,6 +75,7 @@ class Runtime:
     settings: Settings
     sessionmaker: store.SessionFactory
     daytona: AsyncDaytona
+    storage: ObjectStorage
     skills: SkillRegistry
     lm: dspy.BaseLM
     sub_lm: dspy.BaseLM
@@ -101,7 +106,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await store.reap_stale_runs(sessionmaker, settings.stale_run_timeout_seconds)
         if settings.mlflow_tracking_uri:
             mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-            mlflow.set_experiment(settings.mlflow_experiment)
+            experiment = mlflow.set_experiment(settings.mlflow_experiment)
+            # Concurrent creation can return the experiment without activating it.
+            mlflow.set_experiment(experiment_id=experiment.experiment_id)
             mlflow.dspy.autolog()
         skills = SkillRegistry.load(settings.skills_dir)
         lm = agent._model(settings, settings.llm_model)
@@ -109,19 +116,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         decision_lm = dspy.LM(settings.decision_model)
         optimized_program_state = _load_optimized_program_state(settings, sub_lm)
         turn_semaphore = asyncio.Semaphore(settings.max_concurrent_turns_per_worker)
-        async with make_daytona_client(settings) as daytona:
-            app.state.runtime = Runtime(
-                settings=settings,
-                sessionmaker=sessionmaker,
-                daytona=daytona,
-                skills=skills,
-                lm=lm,
-                sub_lm=sub_lm,
-                decision_lm=decision_lm,
-                turn_semaphore=turn_semaphore,
-                optimized_program_state=optimized_program_state,
-            )
-            yield
+        with closing(ObjectStorage(settings)) as storage:
+            async with make_daytona_client(settings) as daytona:
+                app.state.runtime = Runtime(
+                    settings=settings,
+                    sessionmaker=sessionmaker,
+                    daytona=daytona,
+                    storage=storage,
+                    skills=skills,
+                    lm=lm,
+                    sub_lm=sub_lm,
+                    decision_lm=decision_lm,
+                    turn_semaphore=turn_semaphore,
+                    optimized_program_state=optimized_program_state,
+                )
+                yield
     finally:
         app.state.runtime = None
         await engine.dispose()
@@ -229,7 +238,6 @@ _NON_EMPTY_SETTINGS_FIELDS = (
     "sub_llm_model",
     "decision_model",
 )
-_NULLABLE_SETTINGS_FIELDS = ("daytona_target",)
 
 
 class WorkspaceSettingsFields(BaseModel):
@@ -242,8 +250,6 @@ class WorkspaceSettingsFields(BaseModel):
     rlm_max_output_chars: int = Field(ge=500, le=200_000)
     history_max_turns: int = Field(ge=0, le=100)
     history_max_chars: int = Field(ge=1_000, le=200_000)
-    daytona_target: str | None = None
-    daytona_auto_stop_minutes: int = Field(ge=1, le=1440)
     daytona_exec_timeout_seconds: int = Field(ge=5, le=600)
 
 
@@ -262,8 +268,6 @@ class WorkspaceSettingsPatch(BaseModel):
     rlm_max_output_chars: int | None = Field(default=None, ge=500, le=200_000)
     history_max_turns: int | None = Field(default=None, ge=0, le=100)
     history_max_chars: int | None = Field(default=None, ge=1_000, le=200_000)
-    daytona_target: str | None = None
-    daytona_auto_stop_minutes: int | None = Field(default=None, ge=1, le=1440)
     daytona_exec_timeout_seconds: int | None = Field(default=None, ge=5, le=600)
 
     @field_validator(*_NON_EMPTY_SETTINGS_FIELDS)
@@ -276,20 +280,15 @@ class WorkspaceSettingsPatch(BaseModel):
             raise ValueError("Must not be empty")
         return cleaned
 
-    @field_validator(*_NULLABLE_SETTINGS_FIELDS)
-    @classmethod
-    def normalize_nullable(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        return cleaned or None
-
 
 class WorkspaceSettingsStatus(BaseModel):
     database_configured: bool
     daytona_configured: bool
-    daytona_volume_id: str
-    daytona_snapshot: str
+    daytona_image: str
+    daytona_region: str | None
+    daytona_idle_timeout_minutes: int
+    daytona_max_lifetime_minutes: int
+    storage_bucket: str
     llm_api_key_configured: bool
     llm_base_url: str | None
     bearer_auth_enabled: bool
@@ -401,7 +400,7 @@ async def session_not_found(_request: Request, _error: store.SessionNotFoundErro
 
 _WORKSPACE_STARTUP_HELP = (
     "Fleet could not start the workspace. Try again. If the problem persists, "
-    "ask your administrator to check the Daytona snapshot and volume."
+    "ask your administrator to check the Daytona image and region."
 )
 
 
@@ -417,11 +416,23 @@ async def daytona_error(_request: Request, error: DaytonaError) -> JSONResponse:
     return JSONResponse({"detail": "Workspace service unavailable"}, status_code=502)
 
 
+@app.exception_handler(StorageObjectMissing)
+async def missing_storage_object(_request: Request, _error: StorageObjectMissing) -> JSONResponse:
+    return JSONResponse({"detail": "File not found"}, status_code=404)
+
+
+@app.exception_handler(StorageError)
+async def storage_error(_request: Request, _error: StorageError) -> JSONResponse:
+    return JSONResponse({"detail": "Workspace storage unavailable"}, status_code=503)
+
+
 async def _session(
     db: AsyncSession, session_id: UUID, *, for_update: bool = False
 ) -> store.Session:
-    session = await db.get(store.Session, session_id, with_for_update=True if for_update else None)
-    if session is None:
+    session = await db.get(
+        store.Session, session_id, with_for_update=store.SESSION_WRITE_LOCK if for_update else None
+    )
+    if session is None or session.deleting:
         raise store.SessionNotFoundError(session_id)
     return session
 
@@ -471,6 +482,7 @@ async def list_sessions(
 ) -> list[SessionView]:
     sessions = await db.scalars(
         select(store.Session)
+        .where(store.Session.deleting.is_(False))
         .order_by(store.Session.updated_at.desc(), store.Session.id.desc())
         .limit(limit)
     )
@@ -550,8 +562,11 @@ async def _workspace_settings_view(
         status=WorkspaceSettingsStatus(
             database_configured=bool(base.database_url),
             daytona_configured=bool(base.daytona_api_key.get_secret_value()),
-            daytona_volume_id=base.daytona_volume_id,
-            daytona_snapshot=base.daytona_snapshot,
+            daytona_image=base.daytona_image,
+            daytona_region=base.daytona_region,
+            daytona_idle_timeout_minutes=base.daytona_idle_timeout_minutes,
+            daytona_max_lifetime_minutes=base.daytona_max_lifetime_minutes,
+            storage_bucket=base.s3_bucket,
             llm_api_key_configured=bool(base.llm_api_key.get_secret_value()),
             llm_base_url=base.llm_base_url,
             bearer_auth_enabled=base.api_bearer_token is not None
@@ -676,20 +691,25 @@ async def reset_settings(runtime: RuntimeDep) -> WorkspaceSettingsView:
 @app.delete("/api/sessions/{session_id}", status_code=204, dependencies=[Depends(require_auth)])
 async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
     async with runtime.sessionmaker() as db, db.begin():
-        session = await _editable_session(db, session_id)
+        session = await db.get(store.Session, session_id, with_for_update=store.SESSION_WRITE_LOCK)
+        if session is None:
+            raise store.SessionNotFoundError(session_id)
+        if not session.deleting:
+            session = await _editable_session(db, session_id)
+            if store.upload_is_active(session):
+                raise HTTPException(409, "Session already has an upload in progress")
+            session.deleting = True
         sandbox_id = session.daytona_sandbox_id
-        await db.delete(session)
     if sandbox_id:
         try:
             await delete_sandbox_by_id(runtime.daytona, sandbox_id)
         except DaytonaError as error:
-            if error.status_code != 404:
-                _LOG.warning(
-                    "Could not delete Daytona sandbox %s for deleted session %s (%s)",
-                    sandbox_id,
-                    session_id,
-                    type(error).__name__,
-                )
+            raise HTTPException(503, "Workspace deletion can be retried") from error
+    await runtime.storage.delete_session(session_id)
+    async with runtime.sessionmaker() as db, db.begin():
+        session = await db.get(store.Session, session_id, with_for_update=True)
+        if session is not None:
+            await db.delete(session)
 
 
 @app.get("/api/sessions/{session_id}/messages", dependencies=[Depends(require_auth)])
@@ -719,28 +739,41 @@ async def _ensure_bound_sandbox(
     effective: Settings,
     session_id: UUID,
     existing_sandbox_id: str | None,
+    *,
+    owner_run_id: UUID | None = None,
+    needs_cleanup: bool = False,
 ) -> tuple[AsyncSandbox, str]:
+    reusable_id = existing_sandbox_id
+    if needs_cleanup and existing_sandbox_id:
+        try:
+            await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
+        except DaytonaError as error:
+            raise SandboxStartupError("Could not retire the previous Daytona workspace") from error
+        reusable_id = None
     sandbox, sandbox_id, created = await ensure_session_sandbox(
-        runtime.daytona, effective, session_id, existing_sandbox_id
+        runtime.daytona, effective, session_id, reusable_id
     )
     if not created:
         return sandbox, sandbox_id
     try:
-        winning_id, won = await store.bind_session_sandbox_if_unset(
-            runtime.sessionmaker, session_id, sandbox_id
+        winning_id, won = await store.rebind_session_sandbox(
+            runtime.sessionmaker,
+            session_id,
+            sandbox_id,
+            expected=existing_sandbox_id,
+            owner_run_id=owner_run_id,
         )
     except (Exception, asyncio.CancelledError):
         with suppress(DaytonaError):
             await delete_sandbox(runtime.daytona, sandbox)
         raise
-    if won:
-        return sandbox, winning_id
+    if won or winning_id == sandbox_id:
+        return sandbox, sandbox_id
     with suppress(DaytonaError):
         await delete_sandbox(runtime.daytona, sandbox)
-    winning_sandbox, _, _ = await ensure_session_sandbox(
-        runtime.daytona, effective, session_id, winning_id
-    )
-    return winning_sandbox, winning_id
+    if winning_id and (winner := await get_running_sandbox(runtime.daytona, winning_id)):
+        return winner, winning_id
+    raise SandboxStartupError("The Daytona workspace binding changed during startup")
 
 
 @app.post(
@@ -757,55 +790,38 @@ async def upload_file(
     if not _safe_component(name):
         raise HTTPException(400, "Invalid filename")
 
-    async with runtime.sessionmaker() as db:
-        session = await _session(db, session_id)
-        if await db.scalar(
-            select(store.Run.id).where(
-                store.Run.session_id == session_id,
-                store.Run.parent_run_id.is_(None),
-                store.Run.status == "running",
-            )
-        ):
-            raise HTTPException(409, "Session already has a running turn")
-        sandbox_id = session.daytona_sandbox_id
-
-    effective = await _effective_settings(runtime)
+    key = ObjectStorage.new_key(session_id)
+    async with runtime.sessionmaker() as db, db.begin():
+        session = await _editable_session(db, session_id)
+        if store.upload_is_active(session):
+            raise HTTPException(409, "Session already has an upload in progress")
+        session.upload_key = key
+        session.upload_started_at = datetime.now(UTC)
     path = f"files/{name}"
-    timeout = effective.daytona_exec_timeout_seconds
-    digest = hashlib.sha256()
-    size = 0
-
-    async def chunks() -> AsyncIterator[bytes]:
-        nonlocal size
-        while chunk := await file.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-            yield chunk
-
-    sandbox, _ = await _ensure_bound_sandbox(runtime, effective, session_id, sandbox_id)
-    await upload_workspace_file(sandbox, chunks(), path, timeout=timeout)
-
+    saving_manifest = False
     try:
-        await store.get_session_or_raise(runtime.sessionmaker, session_id)
+        with TemporaryDirectory(prefix="fleet-upload-") as temporary:
+            local = Path(temporary) / "upload"
+            with local.open("wb") as destination:
+                while chunk := await file.read(1024 * 1024):
+                    destination.write(chunk)
+            digest, size = await runtime.storage.put(key, local)
+        saving_manifest = True
         record = await store.upsert_file_record(
             runtime.sessionmaker,
             session_id,
             path=path,
-            sha256=digest.hexdigest(),
+            sha256=digest,
             size_bytes=size,
             kind="input",
+            object_key=key,
+            expected_upload=key,
         )
-    except store.SessionNotFoundError:
-        with suppress(DaytonaError):
-            await delete_workspace_file(sandbox, path, timeout=timeout)
-        raise
-    except IntegrityError:
-        try:
-            await store.get_session_or_raise(runtime.sessionmaker, session_id)
-        except store.SessionNotFoundError:
-            with suppress(DaytonaError):
-                await delete_workspace_file(sandbox, path, timeout=timeout)
-            raise
+    except (Exception, asyncio.CancelledError) as error:
+        if not saving_manifest or isinstance(error, store.SessionNotFoundError):
+            with suppress(StorageError):
+                await runtime.storage.delete(key)
+        await store.release_upload(runtime.sessionmaker, session_id, key)
         raise
     return FileView.model_validate(record)
 
@@ -832,28 +848,39 @@ def _browsable_workspace_path(path: str) -> bool:
 
 async def _browse_sandbox(runtime: Runtime, session_id: UUID) -> tuple[AsyncSandbox | None, int]:
     async with runtime.sessionmaker() as db:
-        sandbox_id = (await _session(db, session_id)).daytona_sandbox_id
-    if sandbox_id is None:
+        session = await _session(db, session_id)
+        sandbox_id = session.daytona_sandbox_id
+    if sandbox_id is None or session.sandbox_needs_cleanup:
         return None, 0
     effective = await _effective_settings(runtime)
-    sandbox, _, _ = await ensure_session_sandbox(runtime.daytona, effective, session_id, sandbox_id)
+    try:
+        sandbox = await get_running_sandbox(runtime.daytona, sandbox_id)
+    except DaytonaError:
+        sandbox = None
     return sandbox, effective.daytona_exec_timeout_seconds
 
 
 @app.get("/api/sessions/{session_id}/workspace", dependencies=[Depends(require_auth)])
 async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[WorkspaceEntry]:
     sandbox, timeout = await _browse_sandbox(runtime, session_id)
+    records = await store.list_session_files(runtime.sessionmaker, session_id)
+    entries = {
+        record.path: WorkspaceEntry(
+            path=record.path, size_bytes=record.size_bytes, revision=record.sha256
+        )
+        for record in records
+        if record.kind == "input" and _browsable_workspace_path(record.path)
+    }
     if sandbox is None:
-        return []
+        return sorted(entries.values(), key=lambda value: value.path)
     try:
-        entries = await list_workspace_files(sandbox, timeout=timeout)
+        workspace = await list_workspace_files(sandbox, timeout=timeout)
     except WorkspaceBrowseLimit as error:
         raise HTTPException(413, str(error)) from error
-    return [
-        WorkspaceEntry.model_validate(entry)
-        for entry in entries
-        if _browsable_workspace_path(entry["path"])
-    ]
+    for entry in workspace:
+        if entry["path"] not in entries and _browsable_workspace_path(entry["path"]):
+            entries[entry["path"]] = WorkspaceEntry.model_validate(entry)
+    return sorted(entries.values(), key=lambda value: value.path)
 
 
 @app.get(
@@ -864,6 +891,16 @@ async def download_workspace_entry(
 ) -> Response:
     if not _browsable_workspace_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
+    if _valid_file_path(file_path):
+        try:
+            stored = await _workspace_file(runtime, session_id, file_path)
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+        else:
+            if stored.size_bytes > 1024 * 1024:
+                raise HTTPException(413, "Workspace file preview supports files up to 1 MiB")
+            return _workspace_response(file_path, await _read_workspace_file(runtime, stored))
     sandbox, timeout = await _browse_sandbox(runtime, session_id)
     if sandbox is None:
         raise HTTPException(404, "File not found")
@@ -873,60 +910,71 @@ async def download_workspace_entry(
         raise HTTPException(413, str(error)) from error
     if content is None:
         raise HTTPException(404, "File not found")
-    filename = quote(file_path.rsplit("/", 1)[-1], safe="")
-    return Response(
-        content,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
-    )
+    return _workspace_response(file_path, content)
 
 
-async def _workspace_file(
-    runtime: Runtime, session_id: UUID, file_path: str
-) -> tuple[str, store.File]:
+async def _workspace_file(runtime: Runtime, session_id: UUID, file_path: str) -> store.File:
     if not _valid_file_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
     async with runtime.sessionmaker() as db:
-        session = await _session(db, session_id)
-        sandbox_id = session.daytona_sandbox_id
+        await _session(db, session_id)
         file = await db.scalar(
             select(store.File).where(
                 store.File.session_id == session_id, store.File.path == file_path
             )
         )
-    if file is None or sandbox_id is None:
+    if file is None:
         raise HTTPException(404, "File not found")
-    return sandbox_id, file
+    return file
 
 
-async def _read_workspace_file(
-    runtime: Runtime, session_id: UUID, sandbox_id: str, file_path: str
-) -> bytes:
-    effective = await _effective_settings(runtime)
-    try:
-        sandbox, _, _ = await ensure_session_sandbox(
-            runtime.daytona, effective, session_id, sandbox_id
+async def _read_workspace_file(runtime: Runtime, record: store.File) -> bytes:
+    with TemporaryDirectory(prefix="fleet-read-") as temporary:
+        path = Path(temporary) / "file"
+        await runtime.storage.download(
+            record.object_key, path, sha256=record.sha256, size=record.size_bytes
         )
-        return await download_workspace_file(
-            sandbox, file_path, timeout=effective.daytona_exec_timeout_seconds
-        )
-    except (DaytonaError, SandboxStartupError) as error:
-        provider_error = error.__cause__ if isinstance(error, SandboxStartupError) else error
-        if isinstance(provider_error, DaytonaError) and provider_error.status_code == 404:
-            raise HTTPException(404, "File not found") from error
-        raise
+        return path.read_bytes()
+
+
+def _attachment_headers(file_path: str) -> dict[str, str]:
+    filename = quote(file_path.rsplit("/", 1)[-1], safe="")
+    return {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+
+
+def _workspace_response(file_path: str, content: bytes) -> Response:
+    return Response(
+        content,
+        media_type="application/octet-stream",
+        headers=_attachment_headers(file_path),
+    )
 
 
 @app.get("/api/sessions/{session_id}/files/{file_path:path}", dependencies=[Depends(require_auth)])
 async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -> Response:
-    sandbox_id, _ = await _workspace_file(runtime, session_id, file_path)
-    content = await _read_workspace_file(runtime, session_id, sandbox_id, file_path)
-    filename = quote(file_path.rsplit("/", 1)[-1], safe="")
-    return Response(
-        content,
+    record = await _workspace_file(runtime, session_id, file_path)
+    with NamedTemporaryFile(prefix="fleet-download-", delete=False) as temporary:
+        path = Path(temporary.name)
+    try:
+        await runtime.storage.download(
+            record.object_key, path, sha256=record.sha256, size=record.size_bytes
+        )
+    except (Exception, asyncio.CancelledError):
+        path.unlink(missing_ok=True)
+        raise
+    return _TemporaryFileResponse(
+        path,
+        headers=_attachment_headers(file_path),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+class _TemporaryFileResponse(FileResponse):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            Path(self.path).unlink(missing_ok=True)
 
 
 @app.get("/api/memories", dependencies=[Depends(require_auth)])
@@ -995,16 +1043,19 @@ async def get_skill(name: str, runtime: RuntimeDep) -> SkillDetail:
 async def install_skill(session_id: UUID, payload: SkillInstall, runtime: RuntimeDep) -> SkillView:
     if not payload.path.startswith("artifacts/") or not payload.path.endswith("/SKILL.md"):
         raise HTTPException(400, "Only generated SKILL.md artifacts can be installed")
-    sandbox_id, file = await _workspace_file(runtime, session_id, payload.path)
+    file = await _workspace_file(runtime, session_id, payload.path)
     if file.kind != "artifact":
         raise HTTPException(400, "Only generated SKILL.md artifacts can be installed")
     if file.size_bytes > MAX_SKILL_BYTES:
         raise HTTPException(413, "SKILL.md must be at most 64 KiB")
     if file.sha256 != payload.sha256:
         raise HTTPException(409, "The artifact changed. Reopen its preview and try again.")
-    content = await _read_workspace_file(runtime, session_id, sandbox_id, payload.path)
-    if hashlib.sha256(content).hexdigest() != payload.sha256:
-        raise HTTPException(409, "The artifact changed. Reopen its preview and try again.")
+    try:
+        content = await _read_workspace_file(runtime, file)
+    except StorageIntegrityError as error:
+        raise HTTPException(
+            409, "The artifact changed. Reopen its preview and try again."
+        ) from error
     try:
         skill = await asyncio.to_thread(
             runtime.skills.install, runtime.settings.skills_dir, content
@@ -1026,6 +1077,7 @@ class Turn:
     prompt: str
     pinned_skills: list[str]
     skills: SkillRegistry
+    deadline: float
     worker: asyncio.Task[list[dict]] | None = None
     finalizing: bool = False
     finalized: bool = False
@@ -1103,7 +1155,8 @@ async def _prepare_turn(
         await store.get_session_or_raise(sessionmaker, session_id)
         raise
 
-    turn = Turn(run.id, session_id, prompt, pinned, registry)
+    deadline = asyncio.get_running_loop().time() + runtime.settings.stale_run_timeout_seconds - 5
+    turn = Turn(run.id, session_id, prompt, pinned, registry, deadline)
     response.headers[_STREAM_HEADER] = "v1"
     # FastAPI's native SSE response supplies X-Accel-Buffering: no.
     try:
@@ -1119,11 +1172,20 @@ async def _prepare_turn(
 
 
 async def _chat_sandbox(
-    runtime: Runtime, session: store.Session, settings: Settings | None = None
+    runtime: Runtime,
+    session: store.Session,
+    settings: Settings | None = None,
+    *,
+    owner_run_id: UUID | None = None,
 ) -> AsyncSandbox:
     effective = settings if settings is not None else await _effective_settings(runtime)
     sandbox, _ = await _ensure_bound_sandbox(
-        runtime, effective, session.id, session.daytona_sandbox_id
+        runtime,
+        effective,
+        session.id,
+        session.daytona_sandbox_id,
+        owner_run_id=owner_run_id,
+        needs_cleanup=session.sandbox_needs_cleanup,
     )
     return sandbox
 
@@ -1135,6 +1197,36 @@ def _file_manifest(file: store.File) -> dict:
         "sha256": file.sha256,
         "size_bytes": file.size_bytes,
     }
+
+
+async def _hydrate_workspace(
+    runtime: Runtime, sandbox: AsyncSandbox, files: list[store.File], timeout: int
+) -> None:
+    await reset_managed_workspace(sandbox, timeout=timeout)
+    with TemporaryDirectory(prefix="fleet-hydrate-") as temporary:
+        path = Path(temporary) / "file"
+        for file in files:
+            if not _valid_file_path(file.path):
+                raise StorageError("Invalid durable workspace path")
+            await runtime.storage.download(
+                file.object_key, path, sha256=file.sha256, size=file.size_bytes
+            )
+            await upload_workspace_file(
+                sandbox, path, file.path, sha256=file.sha256, size=file.size_bytes, timeout=timeout
+            )
+
+
+async def _retire_workspace(runtime: Runtime, session_id: UUID, sandbox_id: str) -> None:
+    await store.mark_sandbox_for_cleanup(runtime.sessionmaker, session_id, sandbox_id)
+    try:
+        await delete_sandbox_by_id(runtime.daytona, sandbox_id)
+    except DaytonaError as error:
+        _LOG.warning("Could not retire Daytona VM %s (%s)", sandbox_id, type(error).__name__)
+        return
+    with suppress(store.SessionNotFoundError):
+        await store.rebind_session_sandbox(
+            runtime.sessionmaker, session_id, None, expected=sandbox_id
+        )
 
 
 async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list[dict]) -> None:
@@ -1199,9 +1291,16 @@ async def _run_turn(
     result = None
     terminal_frames: list[dict] = []
     artifacts: list[dict] = []
+    staged_keys: list[str] = []
+    sandbox: AsyncSandbox | None = None
+    hydrated = False
+    buffering_terminal = False
+    failure_parts = None
+    committed = False
+    commit_uncertain = False
 
     async def send_frame(frame: dict) -> None:
-        if artifacts or frame["type"] == "finish":
+        if buffering_terminal:
             # Publish newly discovered paths and completion after their Neon writes.
             terminal_frames.append(frame)
         else:
@@ -1237,114 +1336,156 @@ async def _run_turn(
             stream.discard_child(child.id)
 
     try:
-        effective = await _effective_settings(runtime)
-        # Read history after acquiring the root so it includes the previous completed turn.
-        async with sessionmaker() as db:
-            session = await _session(db, turn.session_id)
-        prior_turns = await store.get_session_prior_turns(
-            sessionmaker,
-            turn.session_id,
-            max_turns=effective.history_max_turns,
-            max_chars=effective.history_max_chars,
-        )
-        sandbox = await _chat_sandbox(runtime, session, effective)
-        files = await store.list_session_files(sessionmaker, turn.session_id)
-        decision_lm = _request_decision_lm(runtime, effective)
-        selection = await asyncio.to_thread(
-            select_skills,
-            effective,
-            turn.skills,
-            turn.prompt,
-            turn.pinned_skills,
-            decision_lm=decision_lm,
-        )
-        records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
-        task_memories = records
-        if any(skill.name == "skill-creator" for skill in selection.active_skills):
-            task_memories = await store.list_approved_session_memories(
-                sessionmaker, turn.session_id
+        async with asyncio.timeout_at(turn.deadline):
+            effective = await _effective_settings(runtime)
+            # Read history after acquiring the root so it includes the previous completed turn.
+            async with sessionmaker() as db:
+                session = await _session(db, turn.session_id)
+            prior_turns = await store.get_session_prior_turns(
+                sessionmaker,
+                turn.session_id,
+                max_turns=effective.history_max_turns,
+                max_chars=effective.history_max_chars,
             )
-        memories = [
-            {
-                "id": str(record.id),
-                "content": record.content,
-                "scope": "global" if record.session_id is None else "session",
-                "approved": bool(record.approved),
-            }
-            for record in records
-        ]
-        manifest = [_file_manifest(file) for file in files]
-        known_files = {file.path: (file.sha256, file.size_bytes) for file in files}
-
-        async def refresh_files() -> list[dict]:
-            by_path = {entry["path"]: entry for entry in manifest}
-            for artifact in await list_new_artifacts(sandbox, known_files):
-                path = artifact["path"].removeprefix(f"{WORKSPACE}/")
-                if _valid_file_path(path) and path.startswith("artifacts/"):
-                    entry = {**artifact, "path": path, "kind": "artifact"}
-                    artifacts.append(entry)
-                    by_path[path] = entry
-            return sorted(by_path.values(), key=lambda file: file["path"])
-
-        async def emit(run_id: str, event: agent.RunEvent) -> None:
-            if run_id == root_id and isinstance(event, agent.RunResultEvent):
-                await stream.files(run_id, await refresh_files())
-            await stream.publish(run_id, event)
-            if isinstance(event, agent.RunStartedEvent) and event.kind == "workspace":
-                await stream.skills(
-                    run_id,
-                    [
-                        (skill.name, selection.scores[skill.name])
-                        for skill in selection.active_skills
-                    ],
+            sandbox = await _chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
+            files = await store.list_session_files(sessionmaker, turn.session_id)
+            await _hydrate_workspace(
+                runtime, sandbox, files, effective.daytona_exec_timeout_seconds
+            )
+            hydrated = True
+            decision_lm = _request_decision_lm(runtime, effective)
+            selection = await asyncio.to_thread(
+                select_skills,
+                effective,
+                turn.skills,
+                turn.prompt,
+                turn.pinned_skills,
+                decision_lm=decision_lm,
+            )
+            records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
+            task_memories = records
+            if any(skill.name == "skill-creator" for skill in selection.active_skills):
+                task_memories = await store.list_approved_session_memories(
+                    sessionmaker, turn.session_id
                 )
-                await stream.files(run_id, manifest)
+            memories = [
+                {
+                    "id": str(record.id),
+                    "content": record.content,
+                    "scope": "global" if record.session_id is None else "session",
+                    "approved": bool(record.approved),
+                }
+                for record in records
+            ]
+            manifest = [_file_manifest(file) for file in files]
+            known_files = {file.path: (file.sha256, file.size_bytes) for file in files}
 
-        result = await agent.run_workspace_task(
-            effective,
-            task=turn.prompt,
-            files_manifest=manifest,
-            memories=[
-                fact for record in task_memories if (fact := agent.memory_fact(record.content))
-            ],
-            interpreter_factory=make_interpreter_factory(
-                sandbox, effective, asyncio.get_running_loop()
-            ),
-            run_id=root_id,
-            emit=emit,
-            history=dspy.History.model_validate(session.history_json),
-            prior_turns=prior_turns,
-            selection=selection,
-            model_override=session.model_override or _request_root_lm(runtime, effective),
-            sub_lm=_request_sub_lm(runtime, effective),
-            optimized_state=runtime.optimized_program_state,
-            callbacks=agent.ChildCallbacks(start_child, finish_child),
-        )
-        if await request.is_disconnected():
-            raise asyncio.CancelledError
-        status = "completed"
+            async def emit(run_id: str, event: agent.RunEvent) -> None:
+                if run_id == root_id and isinstance(event, agent.RunResultEvent):
+                    return  # The root result becomes visible only after artifacts are committed.
+                await stream.publish(run_id, event)
+                if isinstance(event, agent.RunStartedEvent) and event.kind == "workspace":
+                    await stream.skills(
+                        run_id,
+                        [
+                            (skill.name, selection.scores[skill.name])
+                            for skill in selection.active_skills
+                        ],
+                    )
+                    await stream.files(run_id, manifest)
+
+            result = await agent.run_workspace_task(
+                effective,
+                task=turn.prompt,
+                files_manifest=manifest,
+                memories=[
+                    fact for record in task_memories if (fact := agent.memory_fact(record.content))
+                ],
+                interpreter_factory=make_interpreter_factory(
+                    sandbox, effective, asyncio.get_running_loop()
+                ),
+                run_id=root_id,
+                emit=emit,
+                history=dspy.History.model_validate(session.history_json),
+                prior_turns=prior_turns,
+                selection=selection,
+                model_override=session.model_override or _request_root_lm(runtime, effective),
+                sub_lm=_request_sub_lm(runtime, effective),
+                optimized_state=runtime.optimized_program_state,
+                callbacks=agent.ChildCallbacks(start_child, finish_child),
+            )
+            with TemporaryDirectory(prefix="fleet-publish-") as temporary:
+                local = Path(temporary) / "file"
+                for artifact in await list_new_artifacts(sandbox, known_files):
+                    path = artifact["path"].removeprefix(f"{WORKSPACE}/")
+                    if not (_valid_file_path(path) and path.startswith("artifacts/")):
+                        continue
+                    await download_workspace_file(
+                        sandbox, path, local, timeout=effective.daytona_exec_timeout_seconds
+                    )
+                    key = ObjectStorage.new_key(turn.session_id)
+                    staged_keys.append(key)
+                    digest, size = await runtime.storage.put(key, local)
+                    if (digest, size) != (artifact["sha256"], artifact["size_bytes"]):
+                        raise StorageError("Artifact changed during publication")
+                    artifacts.append(
+                        {
+                            **artifact,
+                            "path": path,
+                            "kind": "artifact",
+                            "object_key": key,
+                        }
+                    )
+            if await request.is_disconnected():
+                raise asyncio.CancelledError
+            failure_parts = stream.snapshot(root_id)
+            buffering_terminal = True
+            if artifacts:
+                updated_files = {entry["path"]: entry for entry in manifest}
+                for old_path in store.replaced_file_paths(
+                    updated_files, (artifact["path"] for artifact in artifacts)
+                ):
+                    del updated_files[old_path]
+                for entry in artifacts:
+                    updated_files[entry["path"]] = {
+                        field: value for field, value in entry.items() if field != "object_key"
+                    }
+                await stream.files(
+                    root_id, sorted(updated_files.values(), key=lambda file: file["path"])
+                )
+            await stream.publish(root_id, agent.RunResultEvent(result.answer))
+            status = "completed"
     except asyncio.CancelledError:
         status = "cancelled"
+        turn.finalizing = True
+        if sandbox is not None and not hydrated:
+            await _retire_workspace(runtime, turn.session_id, sandbox.id)
         raise
     except Exception as error:
+        turn.finalizing = True
+        timed_out = isinstance(error, TimeoutError)
+        if sandbox is not None and (timed_out or sandbox_cleanup_failed(error)):
+            await _retire_workspace(runtime, turn.session_id, sandbox.id)
         current_task = asyncio.current_task()
         if current_task is not None and current_task.cancelling():
             status = "cancelled"
             raise asyncio.CancelledError from error
-        error_text = (
-            _WORKSPACE_STARTUP_HELP if isinstance(error, SandboxStartupError) else "Turn failed"
-        )
+        if timed_out:
+            error_text = "Turn timed out"
+        else:
+            error_text = (
+                _WORKSPACE_STARTUP_HELP if isinstance(error, SandboxStartupError) else "Turn failed"
+            )
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
         try:
             persisted = {}
             if status == "completed" and result is not None:
-                for artifact in artifacts:
-                    await store.upsert_file_record(sessionmaker, turn.session_id, **artifact)
                 persisted = {
                     "answer": result.answer,
                     "history_json": result.history.model_dump(mode="json"),
+                    "files": artifacts,
                 }
             committed = await _finish_root(
                 sessionmaker,
@@ -1356,6 +1497,7 @@ async def _run_turn(
                 **persisted,
             )
         except Exception as error:
+            commit_uncertain = status == "completed"
             _LOG.warning("Could not finalize turn %s (%s)", turn.run_id, type(error).__name__)
             if not turn.finalized:
                 await _finish_root(
@@ -1363,9 +1505,14 @@ async def _run_turn(
                     turn,
                     "cancelled" if status == "cancelled" else "failed",
                     error="Could not persist turn",
+                    ui_parts=failure_parts or stream.snapshot(root_id),
                 )
             status = "failed"
             committed = False
+        if not commit_uncertain and (not committed or status != "completed"):
+            for key in staged_keys:
+                with suppress(StorageError):
+                    await runtime.storage.delete(key)
 
     if status == "completed" and committed and result is not None:
         background.add_task(_consolidate, runtime, turn, result.answer, memories)
