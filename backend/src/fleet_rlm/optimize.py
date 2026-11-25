@@ -1343,11 +1343,12 @@ def _evaluate_verifier(
         forbidden_claims = [str(p) for p in verifier.get("forbidden_claims") or ()]
         criteria = [str(c) for c in verifier.get("criteria") or ()]
 
+        actual_folded = actual_raw.casefold()
         for claim in forbidden_claims:
-            if re.search(claim, actual_raw, re.IGNORECASE):
+            if claim.casefold() in actual_folded:
                 return 0.0, False, f"Rubric check failed: matched forbidden claim {claim!r}."
 
-        missing_facts = [p for p in required_facts if not re.search(p, actual_raw, re.IGNORECASE)]
+        missing_facts = [fact for fact in required_facts if fact.casefold() not in actual_folded]
         missing_urls = [u for u in required_urls if u not in actual_raw]
 
         resolved_judge = judge_lm if judge_lm is not None else getattr(dspy.settings, "lm", None)

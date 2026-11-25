@@ -1877,6 +1877,52 @@ def test_rlm_metric_all_verifiers_and_execution_discipline() -> None:
     )
     assert rubric_forbidden.score == 0.0
 
+    # Rubric literal substring matching handles regex metacharacters ($, +, ()) safely.
+    ex_rubric_meta = dspy.Example(
+        task="Summarize battery cost benchmarks.",
+        answer="Reference battery synthesis.",
+        verifier={
+            "type": "rubric",
+            "criteria": ["Report verified density and refuse unverified $/kWh figures"],
+            "required_facts": ["$120/kWh (target)", "180+ Wh/kg"],
+            "required_urls": ["https://example.org/battery"],
+            "forbidden_claims": ["$65/kWh", "$80/kWh"],
+        },
+    )
+    rubric_meta_ok = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(
+            answer=(
+                "Verified 180+ Wh/kg toward a $120/kWh (target) per https://example.org/battery; "
+                "actual capex remains unverified."
+            )
+        ),
+        judge_lm=RecordingDummyLM([{"score": "0.95", "critique": "Accurate caveats."}]),
+    )
+    assert rubric_meta_ok.score == 0.95
+
+    rubric_meta_forbidden = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(
+            answer=(
+                "Verified 180+ Wh/kg at $65/kWh toward $120/kWh (target) per "
+                "https://example.org/battery."
+            )
+        ),
+        judge_lm=RecordingDummyLM([{"score": "0.95", "critique": "Should be blocked."}]),
+    )
+    assert rubric_meta_forbidden.score == 0.0
+    assert "$65/kWh" in rubric_meta_forbidden.feedback
+
+    rubric_meta_missing = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(answer="Verified 180 Wh/kg per https://example.org/battery."),
+        judge_lm=RecordingDummyLM([{"score": "1.0", "critique": "Partial."}]),
+    )
+    assert rubric_meta_missing.score == pytest.approx(1.0 / 3.0)
+    assert "$120/kWh (target)" in rubric_meta_missing.feedback
+    assert "180+ Wh/kg" in rubric_meta_missing.feedback
+
     # 6. Execution-discipline penalties & correctness dominance
     ex_budget = dspy.Example(
         answer="42",
