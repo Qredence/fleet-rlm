@@ -505,6 +505,7 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
     monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(api, "reconcile_managed_workspace", AsyncMock(return_value=set()))
     monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
@@ -797,9 +798,10 @@ async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monke
     target = tmp_path / "target.txt"
     raw = BytesIO(content)
     body = StreamingBody(raw, len(content))
+    checksum = base64.b64encode(hashlib.sha256(content).digest()).decode()
     sdk = Mock(
         create_multipart_upload=Mock(return_value={"UploadId": "fixture-upload"}),
-        upload_part=Mock(return_value={"ETag": "fixture-etag"}),
+        upload_part=Mock(return_value={"ETag": "fixture-etag", "ChecksumSHA256": checksum}),
         get_object=Mock(return_value={"Body": body, "ContentLength": len(content)}),
     )
     monkeypatch.setattr("fleet_rlm.storage.boto3.client", Mock(return_value=sdk))
@@ -824,7 +826,18 @@ async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monke
 
     saved = await storage.put("object", source, register=register)
     assert saved == (digest, len(content))
-    sdk.complete_multipart_upload.assert_called_once()
+    assert sdk.create_multipart_upload.call_args.kwargs["ChecksumAlgorithm"] == "SHA256"
+    assert sdk.upload_part.call_args.kwargs["ChecksumSHA256"] == checksum
+    assert sdk.complete_multipart_upload.call_args.kwargs["MultipartUpload"] == {
+        "Parts": [{"ETag": "fixture-etag", "PartNumber": 1, "ChecksumSHA256": checksum}]
+    }
+    # The store verified the part checksum, so the upload does not read the object back.
+    sdk.get_object.assert_not_called()
+
+    # A store that does not echo the checksum falls back to a full read-back.
+    sdk.upload_part.reset_mock(return_value=True)
+    sdk.upload_part.return_value = {"ETag": "fixture-etag"}
+    assert await storage.put("object", source, register=register) == saved
     assert raw.closed
     sdk.get_object.assert_called_once_with(Bucket=storage.bucket, Key="object")
     sdk.get_object.return_value["Body"] = StreamingBody(BytesIO(content), len(content))
@@ -864,6 +877,53 @@ async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monke
     sdk.abort_multipart_upload.assert_called_once_with(
         Bucket=storage.bucket, Key="object", UploadId="cancelled-upload"
     )
+
+
+@pytest.mark.asyncio
+async def test_hydrate_transfers_only_changed_files_to_a_reused_sandbox(monkeypatch):
+    files = [
+        SimpleNamespace(path=f"files/{name}", object_key=name, sha256="0" * 64, size_bytes=1)
+        for name in ("kept.csv", "changed.csv", "missing.csv")
+    ]
+    reconcile = AsyncMock(return_value={"files/kept.csv"})
+    reset = AsyncMock()
+    upload = AsyncMock()
+    monkeypatch.setattr(api, "reconcile_managed_workspace", reconcile)
+    monkeypatch.setattr(api, "reset_managed_workspace", reset)
+    monkeypatch.setattr(api, "upload_workspace_file", upload)
+    download = AsyncMock(side_effect=lambda _key, path, **_: path.write_bytes(b"x"))
+    runtime = SimpleNamespace(storage=SimpleNamespace(download=download))
+    sandbox = SimpleNamespace(id="test-sandbox")
+
+    transferred = await api._hydrate_workspace(runtime, sandbox, files, 30, reused=True)
+    assert transferred == files[1:]
+    assert reconcile.await_args.args[1] == {
+        file.path: (file.sha256, file.size_bytes) for file in files
+    }
+    reset.assert_not_awaited()
+    assert sorted(call.args[2] for call in upload.await_args_list) == [
+        "files/changed.csv",
+        "files/missing.csv",
+    ]
+
+    # A failed audit falls back to the full reset and transfer.
+    reconcile.side_effect = RuntimeError("audit failed")
+    upload.reset_mock()
+    assert await api._hydrate_workspace(runtime, sandbox, files, 30, reused=True) == files
+    reset.assert_awaited_once()
+    assert upload.await_count == len(files)
+
+    # A cold sandbox skips the audit.
+    reconcile.reset_mock()
+    reset.reset_mock()
+    assert await api._hydrate_workspace(runtime, sandbox, files, 30, reused=False) == files
+    reconcile.assert_not_awaited()
+    reset.assert_awaited_once()
+
+    # Concurrent transfers raise the original failure type.
+    upload.side_effect = api.SandboxStartupError("integrity")
+    with pytest.raises(api.SandboxStartupError, match="integrity"):
+        await api._hydrate_workspace(runtime, sandbox, files, 30, reused=False)
 
 
 @pytest.mark.parametrize(
@@ -2447,6 +2507,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
     monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(api, "reconcile_managed_workspace", AsyncMock(return_value=set()))
     monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))

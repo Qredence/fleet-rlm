@@ -58,6 +58,7 @@ from fleet_rlm.interpreter import (
     make_daytona_client,
     make_interpreter_factory,
     prepare_sandbox,
+    reconcile_managed_workspace,
     reusable_session_sandbox,
     upload_workspace_file,
 )
@@ -1124,6 +1125,48 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
             "size_bytes": 2,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_managed_workspace_keeps_only_matching_files(tmp_path, monkeypatch):
+    sandbox = _LocalSandbox(tmp_path)
+    monkeypatch.setattr("fleet_rlm.interpreter.WORKSPACE", str(tmp_path))
+    files = tmp_path / "files"
+    (files / "nested").mkdir(parents=True)
+    (files / "same.csv").write_bytes(b"a,b\n")
+    (files / "nested" / "same.txt").write_bytes(b"kept")
+    (files / "changed.csv").write_bytes(b"edited")
+    (files / "same_size.csv").write_bytes(b"bbbb")
+    (files / "extra.csv").write_bytes(b"extra")
+    (files / "linked.csv").symlink_to(files / "same.csv")
+    (files / "empty" / "deeper").mkdir(parents=True)
+    (files / "replaced").mkdir()
+    (files / "replaced" / "inner.txt").write_bytes(b"inner")
+    stale = tmp_path / "artifacts" / "old"
+    stale.mkdir(parents=True)
+    (stale / "report.txt").write_bytes(b"uncommitted")
+
+    def record(content):
+        return (hashlib.sha256(content).hexdigest(), len(content))
+
+    expected = {
+        "files/same.csv": record(b"a,b\n"),
+        "files/nested/same.txt": record(b"kept"),
+        "files/changed.csv": record(b"original"),
+        "files/same_size.csv": record(b"aaaa"),
+        "files/linked.csv": record(b"a,b\n"),
+        "files/replaced": record(b"file"),
+        "files/missing.csv": record(b"missing"),
+    }
+    kept = await reconcile_managed_workspace(sandbox, expected, timeout=30)
+
+    assert kept == {"files/same.csv", "files/nested/same.txt"}
+    remaining = sorted(
+        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file()
+    )
+    assert remaining == ["files/nested/same.txt", "files/same.csv"]
+    assert sorted(path.name for path in files.iterdir()) == ["nested", "same.csv"]
+    assert list((tmp_path / "artifacts").iterdir()) == []
 
 
 @pytest.mark.asyncio

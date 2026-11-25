@@ -269,6 +269,89 @@ for path in (Path('/workspace/files'), Path('/workspace/artifacts')):
         raise SandboxStartupError("Could not reset the Daytona workspace")
 
 
+async def reconcile_managed_workspace(
+    sandbox: AsyncSandbox, expected: Mapping[str, tuple[str, int]], *, timeout: int
+) -> set[str]:
+    """Keep files that match the manifest, delete all other entries, and return the kept paths."""
+    manifest = f"/tmp/fleet-manifest-{uuid4().hex}.json"
+    try:
+        async with asyncio.timeout(timeout):
+            await sandbox.fs.write_bytes(manifest, json.dumps(expected).encode(), atomic=True)
+            kept = await _workspace_query(
+                sandbox, _RECONCILE_WORKSPACE, timeout, WORKSPACE, manifest
+            )
+    except (Exception, asyncio.CancelledError):
+        with suppress(DaytonaError):
+            await sandbox.fs.remove(manifest)
+        raise
+    return set(kept)
+
+
+_RECONCILE_WORKSPACE = """\
+import hashlib
+import json
+import os
+import sys
+
+workspace, manifest = sys.argv[1:]
+with open(manifest, encoding='utf-8') as file:
+    expected = json.load(file)
+os.unlink(manifest)
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+kept = []
+
+
+def matches(name, dir_fd, relative):
+    record = expected.get(relative)
+    if record is None:
+        return False
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    with os.fdopen(fd, 'rb') as data:
+        info = os.fstat(data.fileno())
+        return (
+            info.st_size == record[1]
+            and hashlib.file_digest(data, 'sha256').hexdigest() == record[0]
+        )
+
+
+def reconcile(dir_fd, relative):
+    with os.scandir(dir_fd) as entries:
+        names = [
+            (entry.name, entry.is_dir(follow_symlinks=False), entry.is_file(follow_symlinks=False))
+            for entry in entries
+        ]
+    for name, is_directory, is_file in names:
+        path = f'{relative}/{name}'
+        if is_directory:
+            child = os.open(name, directory_flags, dir_fd=dir_fd)
+            try:
+                empty = reconcile(child, path)
+            finally:
+                os.close(child)
+            if empty:
+                os.rmdir(name, dir_fd=dir_fd)
+        elif is_file and matches(name, dir_fd, path):
+            kept.append(path)
+        else:
+            os.unlink(name, dir_fd=dir_fd)
+    return not os.listdir(dir_fd)
+
+
+for root in ('files', 'artifacts'):
+    path = os.path.join(workspace, root)
+    try:
+        fd = os.open(path, directory_flags)
+    except FileNotFoundError:
+        os.mkdir(path)
+        continue
+    try:
+        reconcile(fd, root)
+    finally:
+        os.close(fd)
+print(json.dumps(kept))
+"""
+
+
 async def upload_workspace_file(
     sandbox: AsyncSandbox,
     source: Path,

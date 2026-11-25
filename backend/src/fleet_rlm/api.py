@@ -63,6 +63,7 @@ from .interpreter import (
     make_interpreter_factory,
     prepare_sandbox,
     read_browsable_workspace_file,
+    reconcile_managed_workspace,
     reset_managed_workspace,
     reusable_session_sandbox,
     sandbox_cleanup_failed,
@@ -1335,21 +1336,57 @@ def _file_manifest(file: store.File) -> dict:
     }
 
 
+_HYDRATE_CONCURRENCY = 4
+
+
 async def _hydrate_workspace(
-    runtime: Runtime, sandbox: AsyncSandbox, files: list[store.File], timeout: int
-) -> None:
-    await reset_managed_workspace(sandbox, timeout=timeout)
+    runtime: Runtime,
+    sandbox: AsyncSandbox,
+    files: list[store.File],
+    timeout: int,
+    *,
+    reused: bool,
+) -> list[store.File]:
+    """Make the managed workspace match the file records and return the transferred files."""
+    if not all(_valid_file_path(file.path) for file in files):
+        raise StorageError("Invalid durable workspace path")
+    kept: set[str] = set()
+    if reused:
+        expected = {file.path: (file.sha256, file.size_bytes) for file in files}
+        try:
+            kept = await reconcile_managed_workspace(sandbox, expected, timeout=timeout)
+        except (DaytonaError, RuntimeError, TimeoutError, ValueError) as error:
+            _LOG.warning("Workspace audit failed; resetting it (%s)", type(error).__name__)
+            reused = False
+    if not reused:
+        await reset_managed_workspace(sandbox, timeout=timeout)
+    missing = [file for file in files if file.path not in kept]
+    limit = asyncio.Semaphore(_HYDRATE_CONCURRENCY)
     with TemporaryDirectory(prefix="fleet-hydrate-") as temporary:
-        path = Path(temporary) / "file"
-        for file in files:
-            if not _valid_file_path(file.path):
-                raise StorageError("Invalid durable workspace path")
-            await runtime.storage.download(
-                file.object_key, path, sha256=file.sha256, size=file.size_bytes
-            )
-            await upload_workspace_file(
-                sandbox, path, file.path, sha256=file.sha256, size=file.size_bytes, timeout=timeout
-            )
+
+        async def transfer(index: int, file: store.File) -> None:
+            path = Path(temporary) / str(index)
+            async with limit:
+                await runtime.storage.download(
+                    file.object_key, path, sha256=file.sha256, size=file.size_bytes
+                )
+                await upload_workspace_file(
+                    sandbox,
+                    path,
+                    file.path,
+                    sha256=file.sha256,
+                    size=file.size_bytes,
+                    timeout=timeout,
+                )
+                path.unlink()
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for index, file in enumerate(missing):
+                    group.create_task(transfer(index, file))
+        except ExceptionGroup as failures:
+            raise failures.exceptions[0] from None
+    return missing
 
 
 async def _retire_workspace(runtime: Runtime, sandbox_id: str) -> None:
@@ -1560,12 +1597,23 @@ async def _execute_turn(
                         }
                     )
             files = await store.list_session_files(sessionmaker, turn.session_id)
+            reused = sandbox.id == existing_sandbox_id
             with workspace_span(
-                "fleet.workspace.hydrate", attributes={"fleet.file_count": len(files)}
-            ):
-                await _hydrate_workspace(
-                    runtime, sandbox, files, effective.daytona_exec_timeout_seconds
+                "fleet.workspace.hydrate",
+                attributes={"fleet.file_count": len(files), "daytona.sandbox.reused": reused},
+            ) as hydration:
+                transferred = await _hydrate_workspace(
+                    runtime, sandbox, files, effective.daytona_exec_timeout_seconds, reused=reused
                 )
+                if hydration is not None:
+                    hydration.set_attributes(
+                        {
+                            "fleet.workspace.transferred_count": len(transferred),
+                            "fleet.workspace.transferred_bytes": sum(
+                                file.size_bytes for file in transferred
+                            ),
+                        }
+                    )
             hydrated = True
             decision_lm = _request_decision_lm(runtime, effective)
             selection = await asyncio.to_thread(
