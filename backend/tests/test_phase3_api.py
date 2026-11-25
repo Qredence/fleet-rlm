@@ -601,13 +601,11 @@ def test_startup_warns_on_open_auth_and_floating_decision_model(offline, caplog)
     assert not [r for r in caplog.get_records("setup") if r.levelname == "WARNING"]
     caplog.set_level("WARNING", logger=api.__name__)
 
-    for token in (None, SecretStr("")):
-        caplog.clear()
-        api._warn_on_unsafe_config(offline.settings.model_copy(update={"api_bearer_token": token}))
-        assert [r.getMessage() for r in caplog.records] == [
-            "FLEET_API_BEARER_TOKEN is unset or empty; every protected API route, "
-            "including sandbox execution and settings, accepts unauthenticated requests"
-        ]
+    api._warn_on_unsafe_config(offline.settings.model_copy(update={"api_bearer_token": None}))
+    assert [r.getMessage() for r in caplog.records] == [
+        "FLEET_API_BEARER_TOKEN is unset or empty; every protected API route, "
+        "including sandbox execution and settings, accepts unauthenticated requests"
+    ]
 
     for gate in ("skill_selector_path", "memory_gate_path"):
         caplog.clear()
@@ -624,12 +622,9 @@ def test_startup_warns_on_open_auth_and_floating_decision_model(offline, caplog)
     assert not caplog.records
 
 
-@pytest.mark.asyncio
-async def test_empty_bearer_token_disables_auth(offline):
-    offline.settings.api_bearer_token = SecretStr("")
-    response = await offline.client.get("/api/settings", headers={"Authorization": ""})
-    assert response.status_code == 200
-    assert response.json()["status"]["bearer_auth_enabled"] is False
+def test_empty_bearer_token_is_unset(offline):
+    data = offline.settings.model_dump() | {"api_bearer_token": ""}
+    assert Settings.model_validate(data).api_bearer_token is None
 
 
 @pytest.mark.asyncio
