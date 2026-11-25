@@ -25,7 +25,7 @@ from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 from pydantic import SecretStr
 
-from fleet_rlm import api, db, interpreter
+from fleet_rlm import api, db, interpreter, sandboxes
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
@@ -504,8 +504,8 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "Settings", lambda: settings)
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
-    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
-    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
+    monkeypatch.setattr(sandboxes, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(sandboxes, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", reap)
@@ -702,6 +702,7 @@ async def test_body_size_limits(offline):
     json_headers = {"Content-Type": "application/json"}
     response = await offline.client.post(f"{offline.base}/chat", content=body, headers=json_headers)
     assert response.status_code == 422
+    assert response.json() == {"detail": "The latest user message must contain text"}
     response = await offline.client.post(
         f"{offline.base}/chat", content=body + b" ", headers=json_headers
     )
@@ -1180,7 +1181,7 @@ async def test_refine_saved_turn_creates_one_reviewable_lesson(offline, monkeypa
             {"lesson": lesson},
         ]
     )
-    monkeypatch.setattr(api, "_request_sub_lm", lambda *_: model)
+    monkeypatch.setattr(api, "request_sub_lm", lambda *_: model)
     refine = api.agent.refine_turn
 
     async def predict(*args, **kwargs):
@@ -1347,7 +1348,7 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     caplog.set_level("INFO", logger=api.__name__)
     monkeypatch.setattr(
         api,
-        "_chat_sandbox",
+        "chat_sandbox",
         AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
     )
     response = await offline.client.post(
@@ -2167,16 +2168,16 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
             raise api.SandboxStartupError("create response unavailable")
         return recovered
 
-    monkeypatch.setattr(api, "allocate_session_sandbox", AsyncMock(side_effect=allocate))
-    monkeypatch.setattr(api, "prepare_sandbox", AsyncMock())
+    monkeypatch.setattr(sandboxes, "allocate_session_sandbox", AsyncMock(side_effect=allocate))
+    monkeypatch.setattr(sandboxes, "prepare_sandbox", AsyncMock())
     first_id = offline.store.active_by_session[sid] = uuid4()
     with pytest.raises(api.SandboxStartupError, match="create response"):
-        await api._chat_sandbox(
+        await sandboxes.chat_sandbox(
             api.app.state.runtime, session, offline.settings, owner_run_id=first_id
         )
     pending = session.pending_sandbox_name
     replacement_id = offline.store.active_by_session[sid] = uuid4()
-    sandbox = await api._chat_sandbox(
+    sandbox = await sandboxes.chat_sandbox(
         api.app.state.runtime, session, offline.settings, owner_run_id=replacement_id
     )
     assert sandbox is recovered and pending == f"fleet-{first_id.hex}"
@@ -2457,8 +2458,8 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
 
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
-    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
-    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
+    monkeypatch.setattr(sandboxes, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(sandboxes, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", AsyncMock(return_value=0))
@@ -2644,7 +2645,7 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
         payload = {
             "messages": [{"role": "user", "parts": [{"type": "text", "text": f"Open {url}"}]}],
         }
-    monkeypatch.setattr(api, "_chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path)))
+    monkeypatch.setattr(api, "chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path)))
     response = await offline.client.post(route, json=payload)
     expected = {
         "search": ["search", "extract"],

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -36,7 +36,6 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
 from mlflow.entities.trace_location import MlflowExperimentLocation
 from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,48 +46,70 @@ from . import db as store
 from .config import Settings
 from .interpreter import (
     WORKSPACE,
-    AsyncDaytona,
     AsyncSandbox,
     DaytonaError,
     SandboxStartupError,
     WorkspaceBrowseLimit,
-    allocate_session_sandbox,
     delete_pending_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
-    get_running_sandbox,
     list_new_artifacts,
     list_workspace_files,
     make_daytona_client,
     make_interpreter_factory,
-    prepare_sandbox,
     read_browsable_workspace_file,
-    reset_managed_workspace,
-    reusable_session_sandbox,
     sandbox_cleanup_failed,
-    upload_workspace_file,
     workspace_span,
+)
+from .memory import consolidate, memory_entry
+from .runtime import (
+    Runtime,
+    active_session,
+    effective_settings,
+    merge_settings,
+    request_decision_lm,
+    request_root_lm,
+    request_sub_lm,
+    sanitize_overrides,
+)
+from .sandboxes import (
+    browsable_workspace_path,
+    browse_sandbox,
+    chat_sandbox,
+    file_manifest,
+    hydrate_workspace,
+    reclaim_discarded_objects,
+    retire_workspace,
+    safe_component,
+    try_object_cleanup,
+    valid_file_path,
+)
+from .schemas import (
+    EDITABLE_SETTINGS_FIELDS,
+    CatalogModel,
+    ChatPayload,
+    FileView,
+    MemoryEdit,
+    MemoryView,
+    ModelCatalog,
+    RefineTurnView,
+    SessionCreate,
+    SessionEdit,
+    SessionView,
+    SkillDetail,
+    SkillInstall,
+    SkillView,
+    WorkspaceEntry,
+    WorkspaceSettingsFields,
+    WorkspaceSettingsPatch,
+    WorkspaceSettingsStatus,
+    WorkspaceSettingsView,
 )
 from .skills import MAX_SKILL_BYTES, SkillRegistry, load_host_tools, select_skills
 from .storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
 
 _STREAM_HEADER = "x-vercel-ai-ui-message-stream"
 _LOG = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class Runtime:
-    settings: Settings
-    sessionmaker: store.SessionFactory
-    daytona: AsyncDaytona
-    storage: ObjectStorage
-    skills: SkillRegistry
-    lm: dspy.BaseLM
-    sub_lm: dspy.BaseLM
-    decision_lm: dspy.BaseLM
-    turn_semaphore: asyncio.Semaphore
-    optimized_program_state: dict[str, Any] | None
-    mlflow_experiment_id: str | None = None
 
 
 def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> dict[str, Any] | None:
@@ -223,195 +244,6 @@ async def turn_slot(runtime: RuntimeDep) -> AsyncIterator[None]:
 TurnConcurrencySlot = Annotated[None, Depends(turn_slot)]
 
 
-class SessionCreate(BaseModel):
-    title: str = Field(default="New session", min_length=1)
-
-
-class SessionEdit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str | None = None
-    model_override: str | None = None
-
-
-class SessionView(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    title: str
-    model_override: str | None = None
-    daytona_sandbox_id: str | None = None
-    deleting: bool = False
-    created_at: datetime
-    updated_at: datetime
-
-
-_NON_EMPTY_SETTINGS_FIELDS = (
-    "llm_model",
-    "sub_llm_model",
-    "decision_model",
-)
-
-
-class WorkspaceSettingsFields(BaseModel):
-    llm_model: str = Field(min_length=1)
-    sub_llm_model: str = Field(min_length=1)
-    decision_model: str = Field(min_length=1)
-    rlm_max_iters: int = Field(ge=1, le=100)
-    rlm_max_llm_calls: int = Field(ge=1, le=500)
-    rlm_max_depth: int = Field(ge=1, le=7)
-    rlm_max_output_chars: int = Field(ge=500, le=200_000)
-    history_max_turns: int = Field(ge=0, le=100)
-    history_max_chars: int = Field(ge=1_000, le=200_000)
-    daytona_exec_timeout_seconds: int = Field(ge=5, le=600)
-
-
-_EDITABLE_SETTINGS_FIELDS = frozenset(WorkspaceSettingsFields.model_fields)
-
-
-class WorkspaceSettingsPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    llm_model: str | None = None
-    sub_llm_model: str | None = None
-    decision_model: str | None = None
-    rlm_max_iters: int | None = Field(default=None, ge=1, le=100)
-    rlm_max_llm_calls: int | None = Field(default=None, ge=1, le=500)
-    rlm_max_depth: int | None = Field(default=None, ge=1, le=7)
-    rlm_max_output_chars: int | None = Field(default=None, ge=500, le=200_000)
-    history_max_turns: int | None = Field(default=None, ge=0, le=100)
-    history_max_chars: int | None = Field(default=None, ge=1_000, le=200_000)
-    daytona_exec_timeout_seconds: int | None = Field(default=None, ge=5, le=600)
-
-    @field_validator(*_NON_EMPTY_SETTINGS_FIELDS)
-    @classmethod
-    def validate_non_empty(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Must not be empty")
-        return cleaned
-
-
-class WorkspaceSettingsStatus(BaseModel):
-    database_configured: bool
-    daytona_configured: bool
-    daytona_image: str
-    daytona_region: str | None
-    daytona_idle_timeout_minutes: int
-    daytona_max_lifetime_minutes: int
-    storage_bucket: str
-    llm_api_key_configured: bool
-    llm_base_url: str | None
-    bearer_auth_enabled: bool
-    max_concurrent_turns_per_worker: int
-    mlflow_tracking_uri: str | None
-    mlflow_experiment: str
-    optimized_program_path: str | None
-    skill_selector_path: str | None
-    memory_gate_path: str | None
-    skills_count: int
-
-
-class WorkspaceSettingsView(BaseModel):
-    effective: WorkspaceSettingsFields
-    defaults: WorkspaceSettingsFields
-    overrides: dict[str, Any]
-    status: WorkspaceSettingsStatus
-
-
-class CatalogModel(BaseModel):
-    id: str
-    label: str
-
-
-class ModelCatalog(BaseModel):
-    workspace_default: str
-    catalog_status: Literal["ready", "unavailable", "unconfigured"]
-    models: list[CatalogModel] = Field(default_factory=list)
-
-
-class FileView(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    session_id: UUID
-    path: str
-    sha256: str
-    size_bytes: int
-    kind: str
-    created_at: datetime
-
-
-class SkillView(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    description: str
-
-
-class SkillDetail(SkillView):
-    body: str
-
-
-class SkillInstall(BaseModel):
-    path: str = Field(min_length=1, max_length=4096)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class MemoryView(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    session_id: UUID | None
-    source_run_id: UUID | None
-    skill_name: str | None
-    content: str
-    approved: bool
-    created_at: datetime
-
-    @field_validator("content")
-    @classmethod
-    def display_fact(cls, content: str) -> str:
-        return agent.memory_fact(content)
-
-
-class MemoryEdit(BaseModel):
-    content: str | None = Field(default=None, min_length=1)
-    approved: bool | None = None
-
-
-class RefineTurnView(BaseModel):
-    memory: MemoryView | None
-
-
-class MessagePart(BaseModel):
-    type: str
-    text: str | None = None
-
-
-class Message(BaseModel):
-    role: str
-    parts: list[MessagePart]
-
-
-class ChatPayload(BaseModel):
-    messages: list[Message]
-    pinned_skills: list[str] = Field(default_factory=list)
-
-    def latest_prompt(self) -> str:
-        for message in reversed(self.messages):
-            if message.role == "user":
-                prompt = "\n".join(
-                    part.text for part in message.parts if part.type == "text" and part.text
-                ).strip()
-                if prompt:
-                    return prompt
-                break
-        raise HTTPException(422, "The latest user message must contain text")
-
-
 @app.exception_handler(store.SessionNotFoundError)
 async def session_not_found(_request: Request, _error: store.SessionNotFoundError) -> JSONResponse:
     return JSONResponse({"detail": "Session not found"}, status_code=404)
@@ -445,20 +277,9 @@ async def storage_error(_request: Request, _error: StorageError) -> JSONResponse
     return JSONResponse({"detail": "Workspace storage unavailable"}, status_code=503)
 
 
-async def _session(
-    db: AsyncSession, session_id: UUID, *, for_update: bool = False
-) -> store.Session:
-    session = await db.get(
-        store.Session, session_id, with_for_update=store.SESSION_WRITE_LOCK if for_update else None
-    )
-    if session is None or session.deleting:
-        raise store.SessionNotFoundError(session_id)
-    return session
-
-
 async def _editable_session(db: AsyncSession, session_id: UUID) -> store.Session:
     # FOR UPDATE serializes mutations with the FK check on a concurrent root INSERT.
-    session = await _session(db, session_id, for_update=True)
+    session = await active_session(db, session_id, for_update=True)
     if await db.scalar(
         select(store.Run.id).where(
             store.Run.session_id == session_id,
@@ -542,28 +363,10 @@ async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> Ses
     return SessionView.model_validate(session)
 
 
-def _sanitize_overrides(raw: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in raw.items()
-        if key in _EDITABLE_SETTINGS_FIELDS and value is not None
-    }
-
-
 def _settings_fields(settings: Settings) -> WorkspaceSettingsFields:
     return WorkspaceSettingsFields(
-        **{field: getattr(settings, field) for field in _EDITABLE_SETTINGS_FIELDS}
+        **{field: getattr(settings, field) for field in EDITABLE_SETTINGS_FIELDS}
     )
-
-
-def _merge_settings(base: Settings, overrides: dict[str, Any]) -> Settings:
-    clean = _sanitize_overrides(overrides)
-    return base.model_copy(update=clean) if clean else base
-
-
-async def _effective_settings(runtime: Runtime) -> Settings:
-    overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
-    return _merge_settings(runtime.settings, overrides)
 
 
 async def _skill_registry(runtime: Runtime) -> SkillRegistry:
@@ -573,9 +376,9 @@ async def _skill_registry(runtime: Runtime) -> SkillRegistry:
 async def _workspace_settings_view(
     runtime: Runtime, raw_overrides: dict[str, Any]
 ) -> WorkspaceSettingsView:
-    overrides = _sanitize_overrides(raw_overrides)
+    overrides = sanitize_overrides(raw_overrides)
     base = runtime.settings
-    effective = _merge_settings(base, overrides)
+    effective = merge_settings(base, overrides)
     return WorkspaceSettingsView(
         effective=_settings_fields(effective),
         defaults=_settings_fields(base),
@@ -607,24 +410,6 @@ async def _workspace_settings_view(
             skills_count=len((await _skill_registry(runtime)).available_skills(base)),
         ),
     )
-
-
-def _request_root_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
-    if effective.llm_model != runtime.settings.llm_model:
-        return agent._model(effective, effective.llm_model)
-    return runtime.lm
-
-
-def _request_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
-    if effective.sub_llm_model != runtime.settings.sub_llm_model:
-        return agent._model(effective, effective.sub_llm_model)
-    return runtime.sub_lm
-
-
-def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
-    if effective.decision_model != runtime.settings.decision_model:
-        return dspy.LM(effective.decision_model)
-    return runtime.decision_lm
 
 
 async def _gateway_model_labels(base_url: str, api_key: str) -> list[str]:
@@ -668,7 +453,7 @@ async def _gateway_model_labels(base_url: str, api_key: str) -> list[str]:
 
 @app.get("/api/models", dependencies=[Depends(require_auth)])
 async def list_models(runtime: RuntimeDep, response: Response) -> ModelCatalog:
-    effective = await _effective_settings(runtime)
+    effective = await effective_settings(runtime)
     response.headers["Cache-Control"] = "private, no-store"
     if not effective.llm_base_url:
         return ModelCatalog(workspace_default=effective.llm_model, catalog_status="unconfigured")
@@ -728,7 +513,7 @@ async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
             await delete_sandbox_by_id(runtime.daytona, sandbox_id)
         if pending_name:
             await delete_pending_sandbox(runtime.daytona, runtime.settings, pending_name)
-        await _reclaim_discarded_objects(runtime, session_id)
+        await reclaim_discarded_objects(runtime, session_id)
         await runtime.storage.delete_session(session_id)
     except (DaytonaError, SandboxStartupError, StorageError) as error:
         raise HTTPException(503, "Workspace deletion can be retried") from error
@@ -744,82 +529,6 @@ async def session_messages(session_id: UUID, runtime: RuntimeDep) -> list[dict]:
     return await store.get_session_ui_messages(runtime.sessionmaker, session_id)
 
 
-def _safe_component(name: str) -> bool:
-    return (
-        bool(name)
-        and name == name.strip()
-        and name not in {".", ".."}
-        and not any(char in name for char in "/\\:%")
-        and name.isprintable()
-        and len(name.encode()) <= 255
-    )
-
-
-def _valid_file_path(path: str) -> bool:
-    root, *parts = path.split("/")
-    return root in {"files", "artifacts"} and bool(parts) and all(map(_safe_component, parts))
-
-
-async def _ensure_bound_sandbox(
-    runtime: Runtime,
-    effective: Settings,
-    session_id: UUID,
-    existing_sandbox_id: str | None,
-    *,
-    owner_run_id: UUID,
-    needs_cleanup: bool = False,
-) -> AsyncSandbox:
-    if existing_sandbox_id:
-        if needs_cleanup:
-            try:
-                await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
-            except DaytonaError as error:
-                raise SandboxStartupError(
-                    "Could not retire the previous Daytona workspace"
-                ) from error
-        elif sandbox := await reusable_session_sandbox(runtime.daytona, existing_sandbox_id):
-            if sandbox.state != "started":
-                await prepare_sandbox(sandbox)
-            return sandbox
-    name, recovering = await store.reserve_session_sandbox(
-        runtime.sessionmaker, session_id, owner_run_id, expected=existing_sandbox_id
-    )
-    sandbox = await allocate_session_sandbox(
-        runtime.daytona, effective, name, recovering=recovering
-    )
-    # A stale worker leaves the reservation for the next owner to reconcile.
-    _, won = await store.rebind_session_sandbox(
-        runtime.sessionmaker,
-        session_id,
-        sandbox.id,
-        expected=existing_sandbox_id,
-        owner_run_id=owner_run_id,
-        allocation_name=name,
-    )
-    if not won:
-        raise SandboxStartupError("The Daytona workspace binding changed during startup")
-    await prepare_sandbox(sandbox)
-    return sandbox
-
-
-async def _reclaim_discarded_objects(runtime: Runtime, session_id: UUID) -> None:
-    reclaimed = []
-    try:
-        for entry in await store.list_discarded_objects(runtime.sessionmaker, session_id):
-            await runtime.storage.reclaim(entry.object_key, entry.upload_id)
-            reclaimed.append(entry.object_key)
-    finally:
-        if reclaimed:
-            await store.forget_discarded_objects(runtime.sessionmaker, reclaimed)
-
-
-async def _try_object_cleanup(runtime: Runtime, session_id: UUID) -> None:
-    try:
-        await _reclaim_discarded_objects(runtime, session_id)
-    except (StorageError, SQLAlchemyError) as error:
-        _LOG.warning("Workspace object cleanup will retry (%s)", type(error).__name__)
-
-
 @app.post(
     "/api/sessions/{session_id}/files",
     status_code=201,
@@ -831,7 +540,7 @@ async def upload_file(
     session_id: UUID, file: Annotated[UploadFile, Upload()], runtime: RuntimeDep
 ) -> FileView:
     name = file.filename or ""
-    if not _safe_component(name):
+    if not safe_component(name):
         raise HTTPException(400, "Invalid filename")
 
     key = ObjectStorage.new_key(session_id)
@@ -868,54 +577,29 @@ async def upload_file(
             await store.release_upload(runtime.sessionmaker, session_id, key)
         raise
     finally:
-        await _try_object_cleanup(runtime, session_id)
+        await try_object_cleanup(runtime, session_id)
     return FileView.model_validate(record)
 
 
 @app.get("/api/sessions/{session_id}/files", dependencies=[Depends(require_auth)])
 async def session_files(session_id: UUID, db: DbDep) -> list[FileView]:
-    await _session(db, session_id)
+    await active_session(db, session_id)
     files = await db.scalars(
         select(store.File).where(store.File.session_id == session_id).order_by(store.File.path)
     )
     return [FileView.model_validate(file) for file in files]
 
 
-class WorkspaceEntry(BaseModel):
-    path: str
-    size_bytes: int
-    revision: str
-
-
-def _browsable_workspace_path(path: str) -> bool:
-    parts = path.split("/")
-    return parts[0] != "artifacts" and ".git" not in parts and all(map(_safe_component, parts))
-
-
-async def _browse_sandbox(runtime: Runtime, session_id: UUID) -> tuple[AsyncSandbox | None, int]:
-    async with runtime.sessionmaker() as db:
-        session = await _session(db, session_id)
-        sandbox_id = session.daytona_sandbox_id
-    if sandbox_id is None or session.sandbox_needs_cleanup:
-        return None, 0
-    effective = await _effective_settings(runtime)
-    try:
-        sandbox = await get_running_sandbox(runtime.daytona, sandbox_id)
-    except DaytonaError:
-        sandbox = None
-    return sandbox, effective.daytona_exec_timeout_seconds
-
-
 @app.get("/api/sessions/{session_id}/workspace", dependencies=[Depends(require_auth)])
 async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[WorkspaceEntry]:
-    sandbox, timeout = await _browse_sandbox(runtime, session_id)
+    sandbox, timeout = await browse_sandbox(runtime, session_id)
     records = await store.list_session_files(runtime.sessionmaker, session_id)
     entries = {
         record.path: WorkspaceEntry(
             path=record.path, size_bytes=record.size_bytes, revision=record.sha256
         )
         for record in records
-        if record.kind == "input" and _browsable_workspace_path(record.path)
+        if record.kind == "input" and browsable_workspace_path(record.path)
     }
     if sandbox is None:
         return sorted(entries.values(), key=lambda value: value.path)
@@ -926,7 +610,7 @@ async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[Worksp
     except (DaytonaError, RuntimeError, ValueError):
         workspace = []
     for entry in workspace:
-        if entry["path"] not in entries and _browsable_workspace_path(entry["path"]):
+        if entry["path"] not in entries and browsable_workspace_path(entry["path"]):
             entries[entry["path"]] = WorkspaceEntry.model_validate(entry)
     return sorted(entries.values(), key=lambda value: value.path)
 
@@ -937,9 +621,9 @@ async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[Worksp
 async def download_workspace_entry(
     session_id: UUID, file_path: str, runtime: RuntimeDep
 ) -> Response:
-    if not _browsable_workspace_path(file_path):
+    if not browsable_workspace_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
-    if _valid_file_path(file_path):
+    if valid_file_path(file_path):
         try:
             stored = await _workspace_file(runtime, session_id, file_path)
         except HTTPException as error:
@@ -950,7 +634,7 @@ async def download_workspace_entry(
                 raise HTTPException(413, "Workspace file preview supports files up to 1 MiB")
             content = await _read_workspace_file(runtime, stored, max_bytes=1024 * 1024)
             return _workspace_response(file_path, content)
-    sandbox, timeout = await _browse_sandbox(runtime, session_id)
+    sandbox, timeout = await browse_sandbox(runtime, session_id)
     if sandbox is None:
         raise HTTPException(404, "File not found")
     try:
@@ -963,10 +647,10 @@ async def download_workspace_entry(
 
 
 async def _workspace_file(runtime: Runtime, session_id: UUID, file_path: str) -> store.File:
-    if not _valid_file_path(file_path):
+    if not valid_file_path(file_path):
         raise HTTPException(400, "Invalid workspace path")
     async with runtime.sessionmaker() as db:
-        await _session(db, session_id)
+        await active_session(db, session_id)
         file = await db.scalar(
             select(store.File).where(
                 store.File.session_id == session_id, store.File.path == file_path
@@ -1115,11 +799,11 @@ async def refine_turn(session_id: UUID, run_id: UUID, runtime: RuntimeDep) -> Re
     skills, observations = agent.refinement_evidence(run.ui_parts)
     if not observations:
         raise HTTPException(409, "This turn has no saved RLM telemetry")
-    effective = await _effective_settings(runtime)
+    effective = await effective_settings(runtime)
     try:
         async with asyncio.timeout(30):
             lesson = await agent.refine_turn(
-                run.prompt, skills, observations, lm=_request_sub_lm(runtime, effective)
+                run.prompt, skills, observations, lm=request_sub_lm(runtime, effective)
             )
     except TimeoutError as error:
         raise HTTPException(504, "Refinement timed out. Try again.") from error
@@ -1248,6 +932,8 @@ async def _prepare_turn(
     _slot: TurnConcurrencySlot,
 ) -> AsyncIterator[Turn]:
     prompt = payload.latest_prompt()
+    if prompt is None:
+        raise HTTPException(422, "The latest user message must contain text")
     registry = await _skill_registry(runtime)
     mentioned = [
         skill.name
@@ -1306,105 +992,6 @@ async def _prepare_turn(
                 await turn.worker
         if not turn.finalized:
             await _finish_root(sessionmaker, turn, "cancelled")
-
-
-async def _chat_sandbox(
-    runtime: Runtime,
-    session: store.Session,
-    settings: Settings | None = None,
-    *,
-    owner_run_id: UUID,
-) -> AsyncSandbox:
-    effective = settings if settings is not None else await _effective_settings(runtime)
-    return await _ensure_bound_sandbox(
-        runtime,
-        effective,
-        session.id,
-        session.daytona_sandbox_id,
-        owner_run_id=owner_run_id,
-        needs_cleanup=session.sandbox_needs_cleanup,
-    )
-
-
-def _file_manifest(file: store.File) -> dict:
-    return {
-        "path": file.path,
-        "kind": file.kind,
-        "sha256": file.sha256,
-        "size_bytes": file.size_bytes,
-    }
-
-
-async def _hydrate_workspace(
-    runtime: Runtime, sandbox: AsyncSandbox, files: list[store.File], timeout: int
-) -> None:
-    await reset_managed_workspace(sandbox, timeout=timeout)
-    with TemporaryDirectory(prefix="fleet-hydrate-") as temporary:
-        path = Path(temporary) / "file"
-        for file in files:
-            if not _valid_file_path(file.path):
-                raise StorageError("Invalid durable workspace path")
-            await runtime.storage.download(
-                file.object_key, path, sha256=file.sha256, size=file.size_bytes
-            )
-            await upload_workspace_file(
-                sandbox, path, file.path, sha256=file.sha256, size=file.size_bytes, timeout=timeout
-            )
-
-
-async def _retire_workspace(runtime: Runtime, sandbox_id: str) -> None:
-    try:
-        await delete_sandbox_by_id(runtime.daytona, sandbox_id)
-    except DaytonaError as error:
-        _LOG.warning("Could not retire Daytona VM %s (%s)", sandbox_id, type(error).__name__)
-
-
-async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list[dict]) -> None:
-    async def save(candidate: agent.MemoryCandidate) -> None:
-        if candidate.content is None:
-            return
-        await store.save_or_update_memory(
-            runtime.sessionmaker,
-            session_id=turn.session_id if candidate.scope == "session" else None,
-            content=candidate.content,
-            approved=candidate.approved,
-            memory_id=UUID(candidate.supersedes_id) if candidate.supersedes_id else None,
-        )
-
-    try:
-        effective = await _effective_settings(runtime)
-        decision_lm = _request_decision_lm(runtime, effective)
-        candidates = await store.search_memories(
-            runtime.sessionmaker,
-            turn.session_id,
-            f"{turn.prompt}\n{answer}",
-            limit=3,
-            include_unapproved=True,
-        )
-        merged = [
-            {
-                "id": str(record.id),
-                "content": record.content,
-                "scope": "global" if record.session_id is None else "session",
-                "approved": bool(record.approved),
-            }
-            for record in candidates
-        ]
-        seen_ids = {item["id"] for item in merged}
-        for memory in memories:
-            if memory["id"] not in seen_ids:
-                merged.append(memory)
-                seen_ids.add(memory["id"])
-        await agent.consolidate_memory(
-            effective,
-            turn.prompt,
-            answer,
-            merged[:3],
-            on_save=save,
-            decision_lm=decision_lm,
-        )
-    except Exception as error:
-        _LOG.warning("Memory consolidation failed for %s (%s)", turn.run_id, type(error).__name__)
 
 
 async def _run_turn(
@@ -1539,10 +1126,10 @@ async def _execute_turn(
 
     try:
         async with asyncio.timeout_at(turn.deadline):
-            effective = await _effective_settings(runtime)
+            effective = await effective_settings(runtime)
             # Read history after acquiring the root so it includes the previous completed turn.
             async with sessionmaker() as db:
-                session = await _session(db, turn.session_id)
+                session = await active_session(db, turn.session_id)
             prior_turns = await store.get_session_prior_turns(
                 sessionmaker,
                 turn.session_id,
@@ -1551,7 +1138,7 @@ async def _execute_turn(
             )
             with workspace_span("daytona.sandbox.acquire") as acquisition:
                 existing_sandbox_id = session.daytona_sandbox_id
-                sandbox = await _chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
+                sandbox = await chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
                 if acquisition is not None:
                     acquisition.set_attributes(
                         {
@@ -1563,11 +1150,11 @@ async def _execute_turn(
             with workspace_span(
                 "fleet.workspace.hydrate", attributes={"fleet.file_count": len(files)}
             ):
-                await _hydrate_workspace(
+                await hydrate_workspace(
                     runtime, sandbox, files, effective.daytona_exec_timeout_seconds
                 )
             hydrated = True
-            decision_lm = _request_decision_lm(runtime, effective)
+            decision_lm = request_decision_lm(runtime, effective)
             selection = await asyncio.to_thread(
                 select_skills,
                 effective,
@@ -1590,16 +1177,8 @@ async def _execute_turn(
                 task_memories = await store.list_approved_session_memories(
                     sessionmaker, turn.session_id
                 )
-            memories = [
-                {
-                    "id": str(record.id),
-                    "content": record.content,
-                    "scope": "global" if record.session_id is None else "session",
-                    "approved": bool(record.approved),
-                }
-                for record in records
-            ]
-            manifest = [_file_manifest(file) for file in files]
+            memories = [memory_entry(record) for record in records]
+            manifest = [file_manifest(file) for file in files]
             known_files = {file.path: (file.sha256, file.size_bytes) for file in files}
 
             async def emit(run_id: str, event: agent.RunEvent) -> None:
@@ -1637,8 +1216,8 @@ async def _execute_turn(
                 prior_turns=prior_turns,
                 selection=selection,
                 host_tools=load_host_tools(runtime.skills, selection, effective),
-                model_override=session.model_override or _request_root_lm(runtime, effective),
-                sub_lm=_request_sub_lm(runtime, effective),
+                model_override=session.model_override or request_root_lm(runtime, effective),
+                sub_lm=request_sub_lm(runtime, effective),
                 optimized_state=runtime.optimized_program_state,
                 callbacks=agent.ChildCallbacks(start_child, finish_child),
                 telemetry=telemetry,
@@ -1650,7 +1229,7 @@ async def _execute_turn(
                 local = Path(temporary) / "file"
                 for artifact in await list_new_artifacts(sandbox, known_files):
                     path = artifact["path"].removeprefix(f"{WORKSPACE}/")
-                    if not (_valid_file_path(path) and path.startswith("artifacts/")):
+                    if not (valid_file_path(path) and path.startswith("artifacts/")):
                         continue
                     await download_workspace_file(
                         sandbox, path, local, timeout=effective.daytona_exec_timeout_seconds
@@ -1766,8 +1345,8 @@ async def _execute_turn(
                 finalization.set_status("ERROR")
         with workspace_span("fleet.workspace.cleanup"):
             if fence_committed and turn.sandbox_for_cleanup is not None:
-                await _retire_workspace(runtime, turn.sandbox_for_cleanup)
-            await _try_object_cleanup(runtime, turn.session_id)
+                await retire_workspace(runtime, turn.sandbox_for_cleanup)
+            await try_object_cleanup(runtime, turn.session_id)
         if trace is not None:
             outcome = "failed" if status == "completed" and not committed else status
             trace.set_attributes(
@@ -1784,7 +1363,15 @@ async def _execute_turn(
             trace.set_status("OK" if outcome == "completed" else "ERROR")
 
     if status == "completed" and committed and result is not None:
-        background.add_task(_consolidate, runtime, turn, result.answer, memories)
+        background.add_task(
+            consolidate,
+            runtime,
+            turn.session_id,
+            turn.run_id,
+            turn.prompt,
+            result.answer,
+            memories,
+        )
         return terminal_frames
     error_frame = ui_stream.error_frame(error_text or "Could not persist turn")
     if status != "completed" and fence_committed:
