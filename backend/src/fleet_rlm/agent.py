@@ -30,6 +30,9 @@ from pydantic import BaseModel, Field
 from .config import Settings
 
 _SKILL_PREVIEW_CHARS = 4000
+_TOOL_DOCS_HEADER = (
+    "\nAdditional tools available (use these instead of standard library equivalents):"
+)
 _SUBMISSION_GUIDANCE = """Use the current/limit iteration counter to budget your actions. As soon
 as the available evidence supports an answer, call SUBMIT(answer, artifact_paths). A printed draft
 or saved artifact does not finish the turn. Keep attached reports consistent with the findings and
@@ -40,6 +43,25 @@ action, call SUBMIT with the best supported answer and state what remains unreso
 last action for recovery. If the entire budget is one or two actions, submit by the last action.
 If the web allowance runs out, conclude the research with the opened evidence and identify gaps.
 """
+
+
+def strip_dynamic_tool_docs(instructions: str) -> str:
+    """Strip DSPy's generated user-tool documentation suffix if present."""
+    if _TOOL_DOCS_HEADER not in instructions:
+        return instructions
+    head, _, _ = instructions.partition(_TOOL_DOCS_HEADER)
+    return head
+
+
+def apply_submission_guidance(program: dspy.RLM) -> None:
+    """Append submission budget guidance once to the RLM action signature."""
+    action_signature = program.generate_action.signature
+    assert action_signature is not None
+    instructions = action_signature.instructions or ""
+    if _SUBMISSION_GUIDANCE.strip() not in instructions:
+        program.generate_action.signature = action_signature.append_instructions(
+            _SUBMISSION_GUIDANCE
+        )
 
 
 class WorkspaceTask(dspy.Signature):
@@ -146,16 +168,26 @@ def build_program(
             max_chars=settings.history_max_chars,
         ),
     )
+    runtime_tool_docs = program._format_tool_docs(program._user_tools)
+    loaded = False
     if optimized_state is not None:
         program.load_state(deepcopy(optimized_state))
-        # Keep optimized prompt state, with request-local serving model and endpoint selection.
-        for predictor in program.predictors():
-            predictor.lm = None
+        loaded = True
     elif settings.optimized_program_path is not None:
         program.load(settings.optimized_program_path)
+        loaded = True
+    if loaded:
         # Keep optimized prompt state, with request-local serving model and endpoint selection.
         for predictor in program.predictors():
             predictor.lm = None
+        action_signature = program.generate_action.signature
+        assert action_signature is not None
+        current_instructions = action_signature.instructions or ""
+        if runtime_tool_docs or _TOOL_DOCS_HEADER in current_instructions:
+            base_instructions = strip_dynamic_tool_docs(current_instructions)
+            program.generate_action.signature = action_signature.with_instructions(
+                base_instructions + runtime_tool_docs
+            )
     return program
 
 
@@ -642,11 +674,7 @@ async def run_workspace_task(
                     sub_lm=sub_lm,
                     optimized_state=optimized_state,
                 )
-                action_signature = program.generate_action.signature
-                assert action_signature is not None
-                program.generate_action.signature = action_signature.append_instructions(
-                    _SUBMISSION_GUIDANCE
-                )
+                apply_submission_guidance(program)
                 program.generate_action.callbacks.append(action)
                 prediction = program(
                     task=prompt,

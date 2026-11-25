@@ -18,6 +18,7 @@ from .config import Settings
 
 _MAX_CANDIDATES = 40
 MAX_SKILL_BYTES = 64 * 1024
+DEFAULT_SELECTION_THRESHOLD = 0.25
 _INSTALL_DIR = ".installed"
 
 
@@ -356,6 +357,30 @@ def _analysis_and_chart(task: str) -> bool:
     )
 
 
+def format_selector_task(
+    task: str,
+    prior_turns: Sequence[dict[str, str]] = (),
+    *,
+    include_context: bool = True,
+) -> tuple[str, str]:
+    """Format a task and optional most recent prior turn for the Jev skill selector."""
+    if not include_context or not prior_turns:
+        return task, ""
+    previous = prior_turns[-1]
+    previous_user = str(previous.get("user", ""))[:1000]
+    previous_assistant = str(previous.get("assistant", ""))[:1000]
+    context = f"{previous_user}\n{previous_assistant}"
+    selector_task = json.dumps(
+        {
+            "current_request": task,
+            "previous_user_request": previous_user,
+            "previous_assistant_answer": previous_assistant,
+        },
+        ensure_ascii=False,
+    )
+    return selector_task, context
+
+
 def select_skills(
     settings: Settings,
     registry: SkillRegistry,
@@ -363,7 +388,7 @@ def select_skills(
     pinned_skills: list[str] | None = None,
     *,
     prior_turns: Sequence[dict[str, str]] = (),
-    threshold: float = 0.25,
+    threshold: float = DEFAULT_SELECTION_THRESHOLD,
     decision_lm: dspy.BaseLM | None = None,
 ) -> SkillSelection:
     """Resolve explicit pins or select up to two skills using Jev evidence."""
@@ -395,19 +420,11 @@ def select_skills(
         if web is not None and not re.search(r"\w", task[direct_url.end() :]):
             return _selection((), {}, required=web)
 
-    context = ""
-    selector_task = task
-    if settings.history_max_turns and settings.history_max_chars and prior_turns:
-        previous = prior_turns[-1]
-        context = previous["user"][:1000] + "\n" + previous["assistant"][:1000]
-        selector_task = json.dumps(
-            {
-                "current_request": task,
-                "previous_user_request": previous["user"][:1000],
-                "previous_assistant_answer": previous["assistant"][:1000],
-            },
-            ensure_ascii=False,
-        )
+    selector_task, context = format_selector_task(
+        task,
+        prior_turns,
+        include_context=bool(settings.history_max_turns and settings.history_max_chars),
+    )
     candidates = _candidates(
         task,
         tuple(skill for skill in available if skill != web),

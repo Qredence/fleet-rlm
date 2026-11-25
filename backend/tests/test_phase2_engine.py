@@ -27,6 +27,8 @@ from pydantic import ValidationError
 
 from fleet_rlm import skills
 from fleet_rlm.agent import (
+    _SUBMISSION_GUIDANCE,
+    _TOOL_DOCS_HEADER,
     ChildCallbacks,
     DistillMemory,
     MemoryGate,
@@ -37,10 +39,12 @@ from fleet_rlm.agent import (
     SubagentCompletedEvent,
     SubagentStartedEvent,
     TurnTelemetry,
+    apply_submission_guidance,
     bound_history,
     build_program,
     consolidate_memory,
     run_workspace_task,
+    strip_dynamic_tool_docs,
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
@@ -50,6 +54,7 @@ from fleet_rlm.interpreter import (
     SandboxCleanupError,
     SandboxStartupError,
     allocate_session_sandbox,
+    collect_workspace_artifacts,
     delete_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
@@ -59,9 +64,16 @@ from fleet_rlm.interpreter import (
     make_interpreter_factory,
     prepare_sandbox,
     reusable_session_sandbox,
+    stage_workspace_bytes,
     upload_workspace_file,
 )
-from fleet_rlm.skills import SkillRegistry, build_skill_selector, select_skills
+from fleet_rlm.skills import (
+    DEFAULT_SELECTION_THRESHOLD,
+    SkillRegistry,
+    build_skill_selector,
+    format_selector_task,
+    select_skills,
+)
 
 
 @pytest.fixture
@@ -2333,3 +2345,240 @@ async def test_turn_telemetry_detects_real_iteration_limit(settings, tmp_path):
     assert result.answer == "Partial" and result.history.messages == []
     assert telemetry.completion == "iteration_limit"
     assert telemetry.root_actions == 1 and telemetry.elapsed_ms is not None
+
+
+def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings, tmp_path):
+    def spawn_agent(task: str) -> dict:
+        """Delegate a workspace subtask."""
+        return {"answer": task, "artifact_paths": []}
+
+    def web_search(query: str) -> dict:
+        """Search public web sources."""
+        return {"results": [query]}
+
+    def stale_tool(value: str) -> str:
+        """Legacy compiled-only tool."""
+        return value
+
+    # strip_dynamic_tool_docs keeps plain instructions intact and strips the tool docs suffix.
+    assert strip_dynamic_tool_docs("Plain optimized prompt") == "Plain optimized prompt"
+    with_docs = f"Plain optimized prompt{_TOOL_DOCS_HEADER}\n- `stale_tool(value: string)` - Old."
+    assert strip_dynamic_tool_docs(with_docs) == "Plain optimized prompt"
+
+    # Artifact compiled with tools=[] preserves exact instructions when loaded with tools=[]
+    # and appends current-turn tool docs when loaded with active tools.
+    no_tools_program = build_program(settings, [])
+    no_tools_program.generate_action.signature = (
+        no_tools_program.generate_action.signature.with_instructions("Compiled base prompt")
+    )
+    no_tools_state = no_tools_program.dump_state()
+
+    restored_no_tools = build_program(settings, [], optimized_state=no_tools_state)
+    assert restored_no_tools.generate_action.signature.instructions == "Compiled base prompt"
+    assert all(predictor.lm is None for predictor in restored_no_tools.predictors())
+
+    restored_with_tools = build_program(
+        settings, [spawn_agent, web_search], optimized_state=no_tools_state
+    )
+    with_tools_instructions = restored_with_tools.generate_action.signature.instructions
+    assert with_tools_instructions.startswith("Compiled base prompt" + _TOOL_DOCS_HEADER)
+    assert "spawn_agent(task: string)" in with_tools_instructions
+    assert "web_search(query: string)" in with_tools_instructions
+    assert all(predictor.lm is None for predictor in restored_with_tools.predictors())
+
+    # Artifact compiled with stale tools strips stale tool docs and re-appends only current tools.
+    stale_program = build_program(settings, [stale_tool, web_search])
+    stale_base = strip_dynamic_tool_docs(stale_program.generate_action.signature.instructions)
+    stale_path = tmp_path / "stale_optimized.json"
+    stale_program.save(stale_path)
+    stale_state = json.loads(stale_path.read_text(encoding="utf-8"))
+
+    refreshed = build_program(settings, [spawn_agent], optimized_state=stale_state)
+    refreshed_instructions = refreshed.generate_action.signature.instructions
+    assert refreshed_instructions.count(_TOOL_DOCS_HEADER) == 1
+    assert "spawn_agent(task: string)" in refreshed_instructions
+    assert "stale_tool" not in refreshed_instructions
+    assert "web_search" not in refreshed_instructions
+    assert strip_dynamic_tool_docs(refreshed_instructions) == stale_base
+
+    # Disk-loaded artifact with tools=[] strips stale tool docs completely.
+    disk_stripped = build_program(
+        settings.model_copy(update={"optimized_program_path": stale_path}), []
+    )
+    assert disk_stripped.generate_action.signature.instructions == stale_base
+    assert _TOOL_DOCS_HEADER not in disk_stripped.generate_action.signature.instructions
+
+
+@pytest.mark.asyncio
+async def test_apply_submission_guidance_is_idempotent(settings, tmp_path):
+    program = build_program(settings, [])
+    apply_submission_guidance(program)
+    once = program.generate_action.signature.instructions
+    assert once.count(_SUBMISSION_GUIDANCE.strip()) == 1
+
+    apply_submission_guidance(program)
+    assert program.generate_action.signature.instructions == once
+    assert program.generate_action.signature.instructions.count(_SUBMISSION_GUIDANCE.strip()) == 1
+
+    # Saved state that already includes _SUBMISSION_GUIDANCE is not duplicated in run_workspace_task
+    # and still receives runtime spawn_agent tool docs.
+    state = program.dump_state()
+    root_lm = DummyLM([{"plan": "Submit", "code": "SUBMIT('done', [])"}])
+    sub_lm = DummyLM([{"text": "unused"}])
+
+    async def emit(*_):
+        pass
+
+    prediction = await run_workspace_task(
+        settings,
+        task="Return done",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=make_interpreter_factory(
+            _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
+        ),
+        run_id="idempotent-guidance",
+        emit=emit,
+        model_override=root_lm,
+        sub_lm=sub_lm,
+        optimized_state=state,
+    )
+    assert prediction.answer == "done"
+    prompt = json.dumps(root_lm.get_convo(0)[0])
+    assert prompt.count("On the penultimate") == 1
+    assert "spawn_agent(task: string)" in prompt
+
+
+def test_format_selector_task_matches_single_and_multi_turn_payloads():
+    assert DEFAULT_SELECTION_THRESHOLD == 0.25
+
+    assert format_selector_task("Summarize CSV") == ("Summarize CSV", "")
+
+    prior_turns = [
+        {"user": "Old turn", "assistant": "Old answer"},
+        {"user": "Café " + ("u" * 1200), "assistant": "Résumé " + ("a" * 1200)},
+    ]
+    assert format_selector_task("Who won in Georgia?", prior_turns, include_context=False) == (
+        "Who won in Georgia?",
+        "",
+    )
+
+    selector_task, context = format_selector_task("Who won in Georgia?", prior_turns)
+    expected_user = prior_turns[-1]["user"][:1000]
+    expected_assistant = prior_turns[-1]["assistant"][:1000]
+    assert context == f"{expected_user}\n{expected_assistant}"
+    assert "Café" in selector_task and "Résumé" in selector_task
+    assert json.loads(selector_task) == {
+        "current_request": "Who won in Georgia?",
+        "previous_user_request": expected_user,
+        "previous_assistant_answer": expected_assistant,
+    }
+
+
+@pytest.mark.asyncio
+async def test_stage_workspace_bytes_and_collect_workspace_artifacts(tmp_path, monkeypatch):
+    class _StageableLocalSandbox(_LocalSandbox):
+        async def upload_file(self, source, destination, *, atomic=False):
+            assert atomic
+            dest = Path(destination)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(Path(source).read_bytes())
+
+        async def download_file(self, source, destination):
+            Path(destination).write_bytes(Path(source).read_bytes())
+
+        async def run(self, *, argv, timeout, execution_timeout):
+            if argv[:2] == ["mkdir", "-p"]:
+                for directory in argv[2:]:
+                    Path(directory).mkdir(parents=True, exist_ok=True)
+                return SimpleNamespace(exit_code=0, stdout="")
+            return await super().run(
+                argv=argv, timeout=timeout, execution_timeout=execution_timeout
+            )
+
+    sandbox = _StageableLocalSandbox(tmp_path)
+    monkeypatch.setattr("fleet_rlm.interpreter.WORKSPACE", str(tmp_path))
+    monkeypatch.setattr("fleet_rlm.interpreter.ARTIFACTS", str(tmp_path / "artifacts"))
+
+    # Pre-populate stale files to verify reset_managed_workspace clears them.
+    (tmp_path / "files").mkdir()
+    (tmp_path / "artifacts").mkdir()
+    (tmp_path / "files" / "stale.txt").write_bytes(b"stale")
+    (tmp_path / "artifacts" / "old.txt").write_bytes(b"old")
+
+    # Invalid paths and normalized duplicates are rejected before resetting workspace.
+    for bad_files in (
+        {"": b"x"},
+        {"/etc/passwd": b"x"},
+        {"../escape.txt": b"x"},
+        {"files/../escape.txt": b"x"},
+        {"files/": b"x"},
+        {"files//double.csv": b"x"},
+        {"files\\win.csv": b"x"},
+        {"./dot.csv": b"x"},
+        {"dup.csv": b"1", "files/dup.csv": b"2"},
+    ):
+        with pytest.raises(ValueError, match="workspace input path"):
+            await stage_workspace_bytes(sandbox, bad_files, timeout=20)
+    assert (tmp_path / "files" / "stale.txt").exists()
+
+    csv_bytes = b"k,v\n1,2\n"
+    txt_bytes = b"hello world"
+    manifest = await stage_workspace_bytes(
+        sandbox,
+        {"files/nested/a.txt": txt_bytes, "b.csv": csv_bytes},
+        timeout=20,
+    )
+    assert not (tmp_path / "files" / "stale.txt").exists()
+    assert not (tmp_path / "artifacts" / "old.txt").exists()
+    assert (tmp_path / "files" / "b.csv").read_bytes() == csv_bytes
+    assert (tmp_path / "files" / "nested" / "a.txt").read_bytes() == txt_bytes
+    assert manifest == [
+        {
+            "path": "files/b.csv",
+            "kind": "input",
+            "sha256": hashlib.sha256(csv_bytes).hexdigest(),
+            "size_bytes": len(csv_bytes),
+        },
+        {
+            "path": "files/nested/a.txt",
+            "kind": "input",
+            "sha256": hashlib.sha256(txt_bytes).hexdigest(),
+            "size_bytes": len(txt_bytes),
+        },
+    ]
+
+    # Collect newly created artifacts; skip known unchanged, oversized, and symlink entries.
+    artifacts_root = tmp_path / "artifacts"
+    existing = artifacts_root / "existing.txt"
+    existing.write_bytes(b"v1")
+    report = artifacts_root / "report.json"
+    report.write_bytes(b'{"ok": true}')
+    nested = artifacts_root / "sub" / "chart.svg"
+    nested.parent.mkdir()
+    nested.write_bytes(b"<svg/>")
+    oversized = artifacts_root / "huge.bin"
+    oversized.write_bytes(b"x" * 64)
+    (artifacts_root / "linked.json").symlink_to(report)
+
+    known_files = {
+        "artifacts/existing.txt": (hashlib.sha256(b"v1").hexdigest(), 2),
+        "files/b.csv": (hashlib.sha256(csv_bytes).hexdigest(), len(csv_bytes)),
+    }
+    collected = await collect_workspace_artifacts(sandbox, known_files, timeout=20, max_bytes=32)
+    assert collected == {
+        "artifacts/report.json": b'{"ok": true}',
+        "artifacts/sub/chart.svg": b"<svg/>",
+    }
+
+    # Overwriting a known artifact causes it to be collected on the next scan.
+    existing.write_bytes(b"v2-updated")
+    collected_after_update = await collect_workspace_artifacts(
+        sandbox, known_files, timeout=20, max_bytes=32
+    )
+    assert collected_after_update["artifacts/existing.txt"] == b"v2-updated"
+
+    # Staging empty dict resets /workspace and returns [].
+    assert await stage_workspace_bytes(sandbox, {}, timeout=20) == []
+    assert list((tmp_path / "files").iterdir()) == []
+    assert list((tmp_path / "artifacts").iterdir()) == []

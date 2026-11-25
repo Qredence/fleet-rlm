@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import codecs
+import hashlib
 import inspect
 import json
 import logging
@@ -20,6 +21,7 @@ from collections.abc import (
 from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
 from contextvars import Context, copy_context
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 from uuid import uuid4
 
@@ -252,14 +254,16 @@ async def reset_managed_workspace(sandbox: AsyncSandbox, *, timeout: int) -> Non
         argv=[
             "python",
             "-c",
-            """from pathlib import Path
+            f"root = {WORKSPACE!r}\n"
+            + """from pathlib import Path
 import shutil
-for path in (Path('/workspace/files'), Path('/workspace/artifacts')):
+for name in ('files', 'artifacts'):
+    path = Path(root) / name
     if path.is_symlink() or path.is_file():
         path.unlink()
     elif path.exists():
         shutil.rmtree(path)
-    path.mkdir()
+    path.mkdir(parents=True, exist_ok=True)
 """,
         ],
         execution_timeout=timeout,
@@ -267,6 +271,87 @@ for path in (Path('/workspace/files'), Path('/workspace/artifacts')):
     )
     if result.exit_code != 0:
         raise SandboxStartupError("Could not reset the Daytona workspace")
+
+
+def _safe_workspace_component(name: str) -> bool:
+    return (
+        bool(name)
+        and name == name.strip()
+        and name not in {".", ".."}
+        and not any(char in name for char in "/\\")
+        and "\x00" not in name
+        and name.isprintable()
+        and len(name.encode("utf-8")) <= 255
+    )
+
+
+def _is_valid_relative_path(path: str, *, root: str) -> bool:
+    if not path or path.startswith("/") or "\\" in path:
+        return False
+    parts = path.split("/")
+    return (
+        len(parts) >= 2
+        and parts[0] == root
+        and all(_safe_workspace_component(part) for part in parts)
+    )
+
+
+def _normalize_input_path(raw_path: str) -> str:
+    if not raw_path or raw_path.startswith("/") or "\\" in raw_path:
+        raise ValueError(f"Invalid workspace input path: {raw_path!r}")
+    parts = raw_path.split("/")
+    if not all(_safe_workspace_component(part) for part in parts):
+        raise ValueError(f"Invalid workspace input path: {raw_path!r}")
+    normalized_parts = parts if parts[0] == "files" and len(parts) >= 2 else ["files", *parts]
+    posix = PurePosixPath(*normalized_parts)
+    if posix.is_absolute() or ".." in posix.parts or "." in posix.parts:
+        raise ValueError(f"Invalid workspace input path: {raw_path!r}")
+    return str(posix)
+
+
+async def stage_workspace_bytes(
+    sandbox: AsyncSandbox,
+    files: Mapping[str, bytes],
+    *,
+    timeout: int,
+) -> list[dict]:
+    """Reset /workspace and stage in-memory input files with verified SHA-256 and size."""
+    staged: dict[str, bytes] = {}
+    for raw_path, payload in files.items():
+        relative_path = _normalize_input_path(raw_path)
+        if relative_path in staged:
+            raise ValueError(f"Duplicate workspace input path: {relative_path!r}")
+        staged[relative_path] = bytes(payload)
+
+    await reset_managed_workspace(sandbox, timeout=timeout)
+    manifest: list[dict] = []
+    if not staged:
+        return manifest
+
+    with TemporaryDirectory(prefix="fleet-stage-") as temporary:
+        local = Path(temporary) / "file"
+        for relative_path in sorted(staged):
+            data = staged[relative_path]
+            digest = hashlib.sha256(data).hexdigest()
+            size = len(data)
+            local.write_bytes(data)
+            await upload_workspace_file(
+                sandbox,
+                local,
+                relative_path,
+                sha256=digest,
+                size=size,
+                timeout=timeout,
+            )
+            manifest.append(
+                {
+                    "path": relative_path,
+                    "kind": "input",
+                    "sha256": digest,
+                    "size_bytes": size,
+                }
+            )
+    return manifest
 
 
 async def upload_workspace_file(
@@ -1064,6 +1149,44 @@ async def list_new_artifacts(
         with suppress(DaytonaError):
             await sandbox.fs.remove(manifest)
         raise
+
+
+async def collect_workspace_artifacts(
+    sandbox: AsyncSandbox,
+    known_files: Mapping[str, tuple[str, int]],
+    *,
+    timeout: int,
+    max_bytes: int = 2 * 1024 * 1024,
+) -> dict[str, bytes]:
+    """Download newly created or modified artifacts/... files within max_bytes."""
+    if max_bytes < 0:
+        raise ValueError("max_bytes must be non-negative")
+    discovered = await list_new_artifacts(sandbox, known_files)
+    collected: dict[str, bytes] = {}
+    if not discovered:
+        return collected
+    prefix = f"{WORKSPACE.rstrip('/')}/"
+    with TemporaryDirectory(prefix="fleet-collect-") as temporary:
+        local = Path(temporary) / "artifact"
+        for artifact in discovered:
+            raw_path = str(artifact.get("path", ""))
+            if raw_path.startswith(prefix):
+                relative_path = raw_path.removeprefix(prefix)
+            elif raw_path.startswith("artifacts/"):
+                relative_path = raw_path
+            else:
+                continue
+            if not _is_valid_relative_path(relative_path, root="artifacts"):
+                continue
+            size_bytes = artifact.get("size_bytes")
+            if isinstance(size_bytes, int) and size_bytes > max_bytes:
+                continue
+            local.unlink(missing_ok=True)
+            await download_workspace_file(sandbox, relative_path, local, timeout=timeout)
+            data = local.read_bytes()
+            if len(data) <= max_bytes:
+                collected[relative_path] = data
+    return collected
 
 
 _SCAN_ARTIFACTS = """\
