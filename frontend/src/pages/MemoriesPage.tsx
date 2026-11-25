@@ -26,7 +26,7 @@ import { errorMessage, type FleetApi, type Memory, type MemoryEdit, type MemoryF
 const followUpDelays = [2500, 6000]
 const memoryLimit = 100
 const maxMemoryLimit = 500
-const scopeLabels: Record<string, string> = { global: 'Global memories', session: 'All session memories' }
+const scopeLabels = { global: 'Global memories', session: 'All session memories' }
 
 export function MemoriesPage({ api, sessions, completedAt }: {
   api: FleetApi
@@ -47,21 +47,13 @@ export function MemoriesPage({ api, sessions, completedAt }: {
   const scopedSession = sessions.find(({ id }) => id === sessionId)
   const scopeLabel = scope ? scopeLabels[scope] : scopedSession?.title ?? (sessionId ? 'Linked session' : 'All scopes')
 
-  function changeFilter(key: string, value: string) {
+  function changeFilters(changes: Record<string, string>) {
     const next = new URLSearchParams(params)
     next.delete('memory_id')
-    if (value) next.set(key, value)
-    else next.delete(key)
-    setParams(next)
-  }
-
-  function changeScope(value: string) {
-    const next = new URLSearchParams(params)
-    next.delete('memory_id')
-    next.delete('scope')
-    next.delete('session_id')
-    if (value === 'global' || value === 'session') next.set('scope', value)
-    else if (value) next.set('session_id', value)
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
     setParams(next)
   }
 
@@ -70,14 +62,16 @@ export function MemoriesPage({ api, sessions, completedAt }: {
       <PageHeader title="Memories" />
       <ScrollArea className="min-h-0 flex-1">
         <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-7" aria-label="Memory review">
-          <MemorySearch key={search} initial={search} onSearch={(value) => changeFilter('q', value)} />
+          <MemorySearch key={search} initial={search} onSearch={(q) => changeFilters({ q })} />
           <div className="flex flex-wrap items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="max-w-full" aria-label={`Memory scope: ${scopeLabel}`} />}>
                 <span className="truncate">{scopeLabel}</span><ChevronDown data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent className="max-w-[min(20rem,calc(100vw-2rem))]">
-                <DropdownMenuRadioGroup value={scopeValue} onValueChange={changeScope}>
+                <DropdownMenuRadioGroup value={scopeValue} onValueChange={(value) => changeFilters(
+                  value === 'global' || value === 'session' ? { scope: value, session_id: '' } : { scope: '', session_id: value },
+                )}>
                   <DropdownMenuRadioItem value="">All sessions and global</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="global">{scopeLabels.global}</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="session">{scopeLabels.session}</DropdownMenuRadioItem>
@@ -89,7 +83,7 @@ export function MemoriesPage({ api, sessions, completedAt }: {
             <ToggleGroup
               aria-label="Filter by approval" variant="outline" size="sm"
               value={[approval === 'true' || approval === 'false' ? approval : 'all']}
-              onValueChange={([value]) => { if (value) changeFilter('approved', value === 'all' ? '' : value) }}
+              onValueChange={([value]) => { if (value) changeFilters({ approved: value === 'all' ? '' : value }) }}
             >
               <ToggleGroupItem value="all">All statuses</ToggleGroupItem>
               <ToggleGroupItem value="false">Pending</ToggleGroupItem>
@@ -98,7 +92,7 @@ export function MemoriesPage({ api, sessions, completedAt }: {
             <ToggleGroup
               aria-label="Filter by kind" variant="outline" size="sm"
               value={[kind ?? 'all']}
-              onValueChange={([value]) => { if (value) changeFilter('kind', value === 'all' ? '' : value) }}
+              onValueChange={([value]) => { if (value) changeFilters({ kind: value === 'all' ? '' : value }) }}
             >
               <ToggleGroupItem value="all">All kinds</ToggleGroupItem>
               <ToggleGroupItem value="fact">Facts</ToggleGroupItem>
@@ -108,7 +102,7 @@ export function MemoriesPage({ api, sessions, completedAt }: {
           <MemoryList
             key={`${scopeValue}:${approved}:${kind}:${search}:${memoryId}`} api={api}
             filters={{ session_id: sessionId || undefined, scope, approved, kind, q: search || undefined, memory_id: memoryId || undefined }}
-            onShowAll={() => changeFilter('memory_id', '')}
+            onShowAll={() => changeFilters({})}
             sessions={sessions} completedAt={completedAt}
           />
         </section>
@@ -186,18 +180,16 @@ function MemoryList({ api, filters, onShowAll, sessions, completedAt }: {
 
   function loadMore() {
     const last = rows?.at(-1)
-    if (!last) return
+    if (!rows || !last) return
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setLoadingMore(true)
     void api.listMemories({ ...filters, before_id: last.id, limit: memoryLimit }, controller.signal).then((items) => {
       if (controller.signal.aborted) return
-      setRows((current) => {
-        const next = [...current ?? [], ...items]
-        loaded.current = next.length
-        return next
-      })
+      const next = [...rows, ...items]
+      loaded.current = next.length
+      setRows(next)
       setHasMore(items.length === memoryLimit)
       setError('')
     }).catch((failure) => {
