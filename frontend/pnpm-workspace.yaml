@@ -1,0 +1,3 @@
+overrides:
+  # GHSA-g3hv-75wg-m249. Remove when shadcn's ts-morph chain uses a patched release.
+  "@ts-morph/common@0.27.0>minimatch": "11.0.9"
