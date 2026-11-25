@@ -1,0 +1,16 @@
+backend/src/fleet_rlm/optimize.py
+  h_f276322eb5eb9f 1346,1348,1351
+backend/tests/test_phase5_optimize.py
+  h_f276322eb5eb9f 1880-1925
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b9aad532a32f0f5f0da31f80270df32addd3673c",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
