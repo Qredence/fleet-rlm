@@ -27,7 +27,7 @@ from sqlalchemy import (
     text,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSQUERY, TSVECTOR, insert
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, TSQUERY, TSVECTOR, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql.elements import ColumnElement
 
 from fleet_rlm.config import Settings
 
@@ -158,9 +159,14 @@ class ObjectCleanup(Base):
 
 class Memory(Base):
     __tablename__ = "memories"
+    __table_args__ = (UniqueConstraint("source_run_id", name="uq_memories_source_run_id"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
     session_id: Mapped[UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
+    source_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("runs.id", name="fk_memories_source_run_id", ondelete="CASCADE")
+    )
+    skill_name: Mapped[str | None] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
     approved: Mapped[bool] = mapped_column(server_default=text("false"))
     search_tsv: Mapped[str] = mapped_column(
@@ -496,6 +502,60 @@ async def get_session_ui_messages(db: SessionFactory, session_id: UUID) -> list[
         return messages
 
 
+async def get_turn_for_refinement(
+    db: SessionFactory, session_id: UUID, run_id: UUID
+) -> tuple[Run, Memory | None] | None:
+    async with db() as connection:
+        row = (
+            await connection.execute(
+                select(Run, Memory)
+                .join(Session, Session.id == Run.session_id)
+                .outerjoin(Memory, Memory.source_run_id == Run.id)
+                .where(
+                    Run.id == run_id,
+                    Run.session_id == session_id,
+                    Run.parent_run_id.is_(None),
+                    Session.deleting.is_(False),
+                )
+            )
+        ).one_or_none()
+        return (row[0], row[1]) if row is not None else None
+
+
+async def save_turn_lesson(
+    db: SessionFactory,
+    session_id: UUID,
+    run_id: UUID,
+    *,
+    content: str,
+    skill_name: str | None,
+) -> Memory:
+    async with db.begin() as connection:
+        # Recheck the source after the model call and serialize concurrent saves for this session.
+        source = await connection.scalar(
+            select(Session.id)
+            .join(Run, Run.session_id == Session.id)
+            .where(
+                Session.id == session_id,
+                Session.deleting.is_(False),
+                Run.id == run_id,
+                Run.parent_run_id.is_(None),
+                Run.status == "completed",
+            )
+            .with_for_update(of=Session, **SESSION_WRITE_LOCK)
+        )
+        if source is None:
+            raise SessionNotFoundError(session_id)
+        existing = await connection.scalar(select(Memory).where(Memory.source_run_id == run_id))
+        if existing is not None:
+            return existing
+        memory = Memory(
+            session_id=session_id, source_run_id=run_id, content=content, skill_name=skill_name
+        )
+        connection.add(memory)
+    return memory
+
+
 async def get_session_prior_turns(
     db: SessionFactory, session_id: UUID, *, max_turns: int, max_chars: int
 ) -> list[dict[str, str]]:
@@ -505,7 +565,13 @@ async def get_session_prior_turns(
     async with db() as connection:
         rows = (
             await connection.execute(
-                select(func.left(Run.prompt, max_chars), func.left(Run.answer, max_chars))
+                select(
+                    func.left(Run.prompt, max_chars),
+                    func.left(Run.answer, max_chars),
+                    func.jsonb_path_query_first(
+                        Run.ui_parts, cast('$[*] ? (@.type == "data-turn-details").data', JSONPATH)
+                    ),
+                )
                 .where(
                     Run.session_id == session_id,
                     Run.parent_run_id.is_(None),
@@ -519,10 +585,18 @@ async def get_session_prior_turns(
 
     turns = []
     remaining = max_chars
-    for prompt, answer in rows:
+    for prompt, answer, details in rows:
         user = prompt[:remaining]
         assistant = answer[: remaining - len(user)]
-        turns.append({"user": user, "assistant": assistant})
+        turn = {"user": user, "assistant": assistant}
+        if details and details.get("runtime") == "dspy.RLM":
+            turn["runtime"] = (
+                f"dspy.RLM, {details['root_actions']} root actions, "
+                f"{details['child_rlms']} child RLMs started, "
+                f"{details['sub_lm_queries']} sub-LM queries launched. "
+                f"Completion: {details['completion']}."
+            )
+        turns.append(turn)
         remaining -= len(user) + len(assistant)
         if remaining == 0:
             break
@@ -696,6 +770,19 @@ async def search_memories(
     limit: int = 10,
     include_unapproved: bool = False,
 ) -> list[Memory]:
+    scope = Memory.session_id.is_(None)
+    if session_id is not None:
+        scope = scope | (Memory.session_id == session_id)
+    filters = [scope, Memory.source_run_id.is_(None)]
+    if not include_unapproved:
+        filters.append(Memory.approved.is_(True))
+    async with db() as connection:
+        return await _match_memories(connection, query, filters, limit)
+
+
+async def _match_memories(
+    connection: AsyncSession, query: str, filters: list[ColumnElement[bool]], limit: int
+) -> list[Memory]:
     strict_q = func.websearch_to_tsquery("english", query)
     relaxed_q = cast(
         func.replace(cast(func.plainto_tsquery("english", query), Text), " & ", " | "),
@@ -707,50 +794,77 @@ async def search_memories(
         select(func.count()).where(memory_lexeme == func.any_(query_lexemes)).scalar_subquery()
     )
     min_overlap = case((func.cardinality(query_lexemes) <= 2, 1), else_=2)
-    scope = Memory.session_id.is_(None)
-    if session_id is not None:
-        scope = scope | (Memory.session_id == session_id)
-    approval_filter = () if include_unapproved else (Memory.approved.is_(True),)
-    async with db() as connection:
-        matches = list(
-            await connection.scalars(
-                select(Memory)
-                .where(scope, *approval_filter, Memory.search_tsv.bool_op("@@")(strict_q))
-                .order_by(func.ts_rank(Memory.search_tsv, strict_q).desc(), Memory.id.desc())
-                .limit(limit)
-            )
+    matches = list(
+        await connection.scalars(
+            select(Memory)
+            .where(*filters, Memory.search_tsv.bool_op("@@")(strict_q))
+            .order_by(func.ts_rank(Memory.search_tsv, strict_q).desc(), Memory.id.desc())
+            .limit(limit)
         )
-        seen_ids = {memory.id for memory in matches}
-        if len(matches) < limit:
-            relaxed_stmt = (
-                select(Memory)
-                .where(
-                    scope,
-                    *approval_filter,
-                    Memory.search_tsv.bool_op("@@")(relaxed_q),
-                    overlap_count >= min_overlap,
-                )
-                .order_by(
-                    overlap_count.desc(),
-                    func.ts_rank(Memory.search_tsv, relaxed_q).desc(),
-                    Memory.id.desc(),
-                )
-                .limit(limit - len(matches))
+    )
+    if len(matches) < limit:
+        relaxed_stmt = (
+            select(Memory)
+            .where(
+                *filters,
+                Memory.search_tsv.bool_op("@@")(relaxed_q),
+                overlap_count >= min_overlap,
             )
-            if seen_ids:
-                relaxed_stmt = relaxed_stmt.where(Memory.id.not_in(seen_ids))
-            matches.extend(await connection.scalars(relaxed_stmt))
-        return matches
+            .order_by(
+                overlap_count.desc(),
+                func.ts_rank(Memory.search_tsv, relaxed_q).desc(),
+                Memory.id.desc(),
+            )
+            .limit(limit - len(matches))
+        )
+        if matches:
+            relaxed_stmt = relaxed_stmt.where(Memory.id.not_in([memory.id for memory in matches]))
+        matches.extend(await connection.scalars(relaxed_stmt))
+    return matches
+
+
+async def recall_procedures(
+    db: SessionFactory, session_id: UUID, query: str, selected_skills: list[str]
+) -> list[Memory]:
+    """Prefer lessons for active skills, then match general lessons against the task."""
+    limit = 2
+    filters = [
+        Memory.session_id == session_id,
+        Memory.approved.is_(True),
+        Memory.source_run_id.is_not(None),
+    ]
+    async with db() as connection:
+        lessons = []
+        if selected_skills:
+            lessons = list(
+                await connection.scalars(
+                    select(Memory)
+                    .where(*filters, Memory.skill_name.in_(selected_skills))
+                    .order_by(Memory.id.desc())
+                    .limit(limit)
+                )
+            )
+        if len(lessons) < limit:
+            lessons.extend(
+                await _match_memories(
+                    connection, query, [*filters, Memory.skill_name.is_(None)], limit - len(lessons)
+                )
+            )
+        return lessons
 
 
 async def list_approved_session_memories(
     db: SessionFactory, session_id: UUID, *, limit: int = 10
 ) -> list[Memory]:
-    """Return the most recent approved memories belonging to this session."""
+    """Return the most recent approved factual memories belonging to this session."""
     async with db() as connection:
         result = await connection.scalars(
             select(Memory)
-            .where(Memory.session_id == session_id, Memory.approved.is_(True))
+            .where(
+                Memory.session_id == session_id,
+                Memory.approved.is_(True),
+                Memory.source_run_id.is_(None),
+            )
             .order_by(Memory.id.desc())
             .limit(limit)
         )
@@ -772,7 +886,11 @@ async def save_or_update_memory(
         else:
             memory = await connection.scalar(
                 update(Memory)
-                .where(Memory.id == memory_id, Memory.session_id == session_id)
+                .where(
+                    Memory.id == memory_id,
+                    Memory.session_id == session_id,
+                    Memory.source_run_id.is_(None),
+                )
                 .values(content=content, approved=approved)
                 .returning(Memory)
             )

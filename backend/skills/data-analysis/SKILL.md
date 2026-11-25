@@ -1,6 +1,8 @@
 ---
 name: data-analysis
-description: Use when profiling, filtering, grouping, or aggregating CSV, Parquet, or other tabular data, or exporting derived tables.
+description: Filter, group, reconcile, or summarize tabular records from CSV, Parquet, or spreadsheet exports. Use for derived tables and aggregate figures.
 ---
 
-Read `/workspace/files` without modifying inputs. Inspect schema, row counts, units, and nulls. Track included and excluded rows, including missing group keys; make the null-key policy explicit. Reconcile counts and totals against the raw data using pandas or PyArrow. Report filters, units, and exclusions. Save requested derived tables in `/workspace/artifacts` and return their paths.
+Read inputs from `/workspace/files`. Inspect column types, units and missing values before choosing grouping keys. Decide whether a missing key forms its own group or excludes a row and report that choice when it affects the result.
+
+Use pandas or PyArrow to compute the requested transformation. Reconcile included and excluded counts against the input and check group totals against an independent source total. Report the filters and units. Write requested derived tables under `/workspace/artifacts` and return their paths.

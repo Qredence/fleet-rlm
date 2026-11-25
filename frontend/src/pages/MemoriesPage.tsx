@@ -32,6 +32,7 @@ export function MemoriesPage({ api, sessions, completedAt }: {
 }) {
   const [params, setParams] = useSearchParams()
   const scope = params.get('session_id') ?? ''
+  const memoryId = params.get('memory_id') ?? ''
   const approval = params.get('approved')
   const approved = approval === 'true' ? true : approval === 'false' ? false : undefined
   const scopedSession = sessions.find(({ id }) => id === scope)
@@ -39,6 +40,7 @@ export function MemoriesPage({ api, sessions, completedAt }: {
 
   function changeFilter(key: string, value: string) {
     const next = new URLSearchParams(params)
+    next.delete('memory_id')
     if (value) next.set(key, value)
     else next.delete(key)
     setParams(next)
@@ -73,7 +75,8 @@ export function MemoriesPage({ api, sessions, completedAt }: {
             </ToggleGroup>
           </div>
           <MemoryList
-            key={`${scope}:${approved}`} api={api} scope={scope} approved={approved}
+            key={`${scope}:${approved}:${memoryId}`} api={api} scope={scope} approved={approved}
+            memoryId={memoryId} onShowAll={() => changeFilter('memory_id', '')}
             sessions={sessions} completedAt={completedAt}
           />
         </section>
@@ -82,10 +85,12 @@ export function MemoriesPage({ api, sessions, completedAt }: {
   )
 }
 
-function MemoryList({ api, scope, approved, sessions, completedAt }: {
+function MemoryList({ api, scope, approved, memoryId, onShowAll, sessions, completedAt }: {
   api: FleetApi
   scope: string
   approved?: boolean
+  memoryId: string
+  onShowAll: () => void
   sessions: Session[]
   completedAt: number
 }) {
@@ -99,7 +104,8 @@ function MemoryList({ api, scope, approved, sessions, completedAt }: {
       request.current?.abort()
       const controller = new AbortController()
       request.current = controller
-      void api.listMemories({ session_id: scope || undefined, approved, limit: memoryLimit }, controller.signal).then((items) => {
+      const filters = { session_id: scope || undefined, memory_id: memoryId || undefined, approved, limit: memoryLimit }
+      void api.listMemories(filters, controller.signal).then((items) => {
         if (controller.signal.aborted) return
         setRows(items)
         setError('')
@@ -116,12 +122,14 @@ function MemoryList({ api, scope, approved, sessions, completedAt }: {
       request.current?.abort()
       timers.forEach((timer) => window.clearTimeout(timer))
     }
-  }, [api, scope, approved, attempt, completedAt])
+  }, [api, scope, approved, memoryId, attempt, completedAt])
 
   return (
     <>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">Showing up to {memoryLimit} recent memories for these filters.</p>
+        {memoryId ? (
+          <Button variant="outline" size="sm" onClick={onShowAll}>Show all in this scope</Button>
+        ) : <p className="text-xs text-muted-foreground">Showing up to {memoryLimit} recent memories for these filters.</p>}
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Refresh memories" onClick={() => retry((value) => value + 1)} />}>
             <RefreshCw />
@@ -141,8 +149,8 @@ function MemoryList({ api, scope, approved, sessions, completedAt }: {
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon"><Brain /></EmptyMedia>
-            <EmptyTitle>No memories found</EmptyTitle>
-            <EmptyDescription>{scope || approved !== undefined ? 'Change the filters to see more memories.' : 'Memory candidates appear here after conversations.'}</EmptyDescription>
+            <EmptyTitle>{memoryId ? 'Lesson unavailable' : 'No memories found'}</EmptyTitle>
+            {!memoryId && <EmptyDescription>{scope || approved !== undefined ? 'Change the filters to see more memories.' : 'Memory candidates appear here after conversations.'}</EmptyDescription>}
           </EmptyHeader>
         </Empty>
       ) : (
@@ -210,6 +218,9 @@ function MemoryRow({ memory, sessionTitle, api, onChange }: {
           <Badge variant={memory.approved ? 'secondary' : 'outline'}>
             {memory.approved ? 'Approved' : 'Pending review'}
           </Badge>
+          {memory.source_run_id && (
+            <Badge variant="outline">{memory.skill_name ? `Procedure · @${memory.skill_name}` : 'Procedure'}</Badge>
+          )}
         </div>
         {draft !== null ? (
           <form className="flex flex-col gap-2" onSubmit={(event) => {
@@ -235,6 +246,13 @@ function MemoryRow({ memory, sessionTitle, api, onChange }: {
                 {memory.approved ? <Undo2 data-icon="inline-start" /> : <Check data-icon="inline-start" />}
                 {memory.approved ? 'Revoke approval' : 'Approve'}
               </Button>
+              {memory.approved && memory.source_run_id && memory.session_id && (
+                <Button variant="outline" size="sm" render={
+                  <Link to={`/sessions/${memory.session_id}`} state={{ skillDraft: skillDraftPrompt(memory) }} />
+                }>
+                  Draft a skill
+                </Button>
+              )}
               <Button variant="ghost" size="sm" disabled={working} onClick={() => setDraft(memory.content)}>
                 <Pencil data-icon="inline-start" /> Edit
               </Button>
@@ -261,4 +279,9 @@ function MemoryRow({ memory, sessionTitle, api, onChange }: {
       </ItemContent>
     </Item>
   )
+}
+
+function skillDraftPrompt(memory: Memory) {
+  const dependency = memory.skill_name ? ` Document any dependency on the existing ${memory.skill_name} skill.` : ''
+  return `@skill-creator Draft an installable Fleet skill from the approved procedure below. Make it reusable and include a verification step.${dependency} Write a SKILL.md artifact for review.\n\n${memory.content}`
 }

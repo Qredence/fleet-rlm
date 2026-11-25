@@ -298,7 +298,8 @@ async def evaluate(
                             and metadata.get("name") == name
                             and isinstance(metadata.get("description"), str)
                             and 0 < len(metadata["description"].strip()) <= 1024
-                            and 0 < len(body.strip()) <= 450
+                            and bool(body.strip())
+                            and len(payload) <= 65536
                             and token in body
                             and pending not in text
                             and global_token not in text

@@ -25,6 +25,8 @@ export interface WorkspaceFile extends WorkspaceFileEntry {
 export interface Memory {
   id: string
   session_id: string | null
+  source_run_id: string | null
+  skill_name: string | null
   content: string
   approved: boolean
   created_at: string
@@ -195,9 +197,10 @@ export function createApi(token?: string) {
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     },
-    listMemories(filters: { session_id?: string; approved?: boolean; limit?: number } = {}, signal?: AbortSignal) {
+    listMemories(filters: { session_id?: string; memory_id?: string; approved?: boolean; limit?: number } = {}, signal?: AbortSignal) {
       const params = new URLSearchParams()
       if (filters.session_id) params.set('session_id', filters.session_id)
+      if (filters.memory_id) params.set('memory_id', filters.memory_id)
       if (filters.approved !== undefined) params.set('approved', String(filters.approved))
       if (filters.limit !== undefined) params.set('limit', String(filters.limit))
       return json<Memory[]>(`/api/memories${params.size ? `?${params}` : ''}`, { signal })
@@ -206,6 +209,12 @@ export function createApi(token?: string) {
       json<Memory>(`/api/memories/${encodeURIComponent(id)}`, writeJson('PATCH', changes)),
     async deleteMemory(id: string) {
       await request(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+    async refineTurn(sessionId: string, runId: string) {
+      const result = await json<{ memory: Memory | null }>(
+        `${sessionPath(sessionId)}/runs/${encodeURIComponent(runId)}/refine`, { method: 'POST' },
+      )
+      return result.memory
     },
     listSkills: (signal?: AbortSignal) => json<Skill[]>('/api/skills', { signal }),
     getSkill: (name: string, signal?: AbortSignal) =>

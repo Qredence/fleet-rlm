@@ -7,17 +7,23 @@ import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
 } from '@/components/ui/trace'
 import { followMarkdownFragment } from '@/lib/markdown-fragments'
+import type { Memory } from '@/lib/api'
 import type { FleetPart } from '@/lib/messages'
 import { FileTree } from './FileTree'
 import { PythonToolTrace } from './PythonToolTrace'
 import { SubagentTrace } from './SubagentTrace'
+import { TurnDetailsActivity, WebResearchActivity } from './TurnActivity'
 
-export function MessageParts({ parts, live = false, preview, download }: {
+export function MessageParts({ parts, live = false, preview, download, refine }: {
   parts: FleetPart[]
   live?: boolean
   preview: (path: string) => void
   download: (path: string) => void
+  refine?: () => Promise<Memory | null>
 }) {
+  const webCalls = parts.filter((part) => part.type === 'data-web-call')
+  const firstWebCall = webCalls[0]
+
   function renderPart(part: FleetPart, index: number) {
     switch (part.type) {
       case 'data-skills':
@@ -30,6 +36,10 @@ export function MessageParts({ parts, live = false, preview, download }: {
             ))}
           </div>
         )
+      case 'data-web-call':
+        return part === firstWebCall && <WebResearchActivity key={part.id} calls={webCalls.map((call) => call.data)} live={live} />
+      case 'data-turn-details':
+        return <TurnDetailsActivity key={part.id} details={part.data} refine={live ? undefined : refine} />
       case 'reasoning': {
         const streaming = live && part.state === 'streaming'
         return (

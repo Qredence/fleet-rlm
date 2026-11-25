@@ -7,7 +7,6 @@ import json
 import os
 import sys
 from contextlib import aclosing
-from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,11 +21,11 @@ from dspy.primitives.code_interpreter import (
     CodeInterpreterError,
     FinalOutput,
 )
-from dspy.primitives.repl_types import REPLVariable
 from dspy.utils.dummies import DummyLM
 from mlflow.entities import SpanStatusCode
 from pydantic import ValidationError
 
+from fleet_rlm import skills
 from fleet_rlm.agent import (
     ChildCallbacks,
     DistillMemory,
@@ -37,6 +36,7 @@ from fleet_rlm.agent import (
     RunStartedEvent,
     SubagentCompletedEvent,
     SubagentStartedEvent,
+    TurnTelemetry,
     bound_history,
     build_program,
     consolidate_memory,
@@ -1275,8 +1275,9 @@ async def test_decision_lm_reuse_and_calibrated_primary_fallback(settings, tmp_p
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("max_iters", [1, 3])
 async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_lms(
-    settings, tmp_path
+    settings, tmp_path, max_iters
 ):
     base_program = build_program(settings, [])
     base_program.generate_action.signature = (
@@ -1290,7 +1291,9 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
     state_snapshot = json.dumps(state, sort_keys=True)
     # Remove file on disk to prove build_program & run_workspace_task never read from disk.
     path.unlink()
-    configured = settings.model_copy(update={"optimized_program_path": path})
+    configured = settings.model_copy(
+        update={"optimized_program_path": path, "rlm_max_iters": max_iters}
+    )
 
     restored = build_program(configured, [], optimized_state=state)
     assert restored.generate_action.signature.instructions == "Preloaded optimized workspace prompt"
@@ -1299,8 +1302,12 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
 
     sandbox = _LocalSandbox(tmp_path)
     factory = make_interpreter_factory(sandbox, configured, asyncio.get_running_loop())
-    root_lm = DummyLM([{"plan": "Finish", "code": "SUBMIT('ok', [])"}])
+    actions = [{"plan": "Finish", "code": "SUBMIT('ok', [])"}]
+    if max_iters == 3:
+        actions.insert(0, {"plan": "Check", "code": "print('verified')"})
+    root_lm = DummyLM(actions)
     sub_lm = DummyLM([{"text": "unused"}])
+    telemetry = TurnTelemetry()
 
     async def emit(_run_id, _event):
         return None
@@ -1316,9 +1323,15 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
         model_override=root_lm,
         sub_lm=sub_lm,
         optimized_state=state,
+        telemetry=telemetry,
     )
     assert prediction.answer == "ok"
-    assert "Preloaded optimized workspace prompt" in json.dumps(root_lm.get_convo(0)[0])
+    prompt = json.dumps(root_lm.get_convo(0)[0])
+    assert "Preloaded optimized workspace prompt" in prompt
+    assert "On the penultimate" in prompt and "submit by the last action" in prompt
+    assert f"1/{max_iters}" in prompt
+    assert telemetry.completion == "submit"
+    assert telemetry.root_actions == len(actions)
 
 
 @pytest.mark.skipif(
@@ -1647,9 +1660,7 @@ def test_compound_analysis_and_chart_selection(settings, monkeypatch, prompt, pi
 
 
 @pytest.mark.asyncio
-async def test_production_skills_catalog_repl_preview_budget_and_choice_selection(
-    settings, tmp_path, monkeypatch
-):
+async def test_production_skills_catalog_and_choice_selection(settings, tmp_path, monkeypatch):
     skills_root = Path(__file__).resolve().parents[1] / "skills"
     registry = SkillRegistry.load(skills_root)
     expected_names = (
@@ -1660,6 +1671,7 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
         "scientific-computing",
         "skill-creator",
         "spreadsheet-audit",
+        "web-research",
     )
     assert tuple(skill.name for skill in registry.skills) == expected_names
 
@@ -1667,24 +1679,6 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
     assert set(selector.signature.output_fields) == {"needs_skill", "primary_skill"}
     choice_criteria = selector.signature.output_fields["primary_skill"].annotation.criteria()
     assert tuple(sorted(choice_criteria)) == expected_names
-
-    # Verify every single skill and all 21 co-activated 2-skill pairs fit 100% inside DSPy 3.5's
-    # 1,000-char REPLVariable preview without head/tail truncation.
-    for skill in registry.skills:
-        assert len(skill.body) <= 450, f"{skill.name} body exceeds 450 chars"
-        single_text = f"## {skill.name}\n{skill.body}"
-        single_var = REPLVariable.from_value("active_skills", single_text)
-        assert single_var.total_length <= 1000
-        assert single_var.preview == single_text
-
-    for first_skill, second_skill in combinations(registry.skills, 2):
-        combined_text = (
-            f"## {first_skill.name}\n{first_skill.body}\n\n"
-            f"## {second_skill.name}\n{second_skill.body}"
-        )
-        pair_var = REPLVariable.from_value("active_skills", combined_text)
-        assert len(combined_text) <= 1000, f"{first_skill.name}+{second_skill.name} > 1000 chars"
-        assert pair_var.preview == combined_text
 
     # Verify multi-skill co-activation via Jev and end-to-end RLM execution in _LocalSandbox.
     def fake_jev_decide(self, *, task, lm):
@@ -1734,6 +1728,7 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
                     "import csv\n"
                     "assert '## chart-visualization' in active_skills\n"
                     "assert '## data-analysis' in active_skills\n"
+                    "assert 'when it affects the result' in active_skills\n"
                     "with open('files/sales.csv', encoding='utf-8') as f:\n"
                     "    rows = list(csv.DictReader(f))\n"
                     "comp = [int(r['amount_eur']) for r in rows if r['status'] == 'completed']\n"
@@ -1779,9 +1774,6 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
     prompt_dump = json.dumps(root_lm.get_convo(0)[0])
     assert "## chart-visualization" in prompt_dump
     assert "In this app, Fleet means Fleet-RLM" in prompt_dump
-    assert "## data-analysis" in prompt_dump
-    assert "PIL.Image.open()" in prompt_dump
-    assert "make the null-key policy explicit" in prompt_dump
 
     # Verify @skill-creator synthesizes and validates a SKILL.md artifact from memories.
     creator_sel = select_skills(prod_settings, registry, "Create a skill", ["@skill-creator"])
@@ -1794,7 +1786,7 @@ async def test_production_skills_catalog_repl_preview_budget_and_choice_selectio
                     "import yaml\n"
                     "assert 'Always report revenue in EUR' in memories[0]\n"
                     "body = 'Report revenue in EUR and exclude cancelled rows.'\n"
-                    "assert 0 < len(body) <= 450\n"
+                    "assert body.strip()\n"
                     "doc = '---\\nname: eur-revenue\\ndescription: Report EUR revenue.\\n---\\n\\n'"
                     " + body + '\\n'\n"
                     "meta = yaml.safe_load(doc.split('---')[1])\n"
@@ -1852,6 +1844,7 @@ async def test_recursive_synthesis_can_recover_a_failed_batch_item(settings, tmp
     async def emit(_run_id, _event):
         pass
 
+    telemetry = TurnTelemetry()
     result = await run_workspace_task(
         settings,
         task="Synthesize chunks",
@@ -1863,17 +1856,76 @@ async def test_recursive_synthesis_can_recover_a_failed_batch_item(settings, tmp
         run_id="partial-batch",
         emit=emit,
         selection=selection,
+        telemetry=telemetry,
         model_override=root_lm,
         sub_lm=PartiallyFailingLM([]),
     )
     assert result.answer == "29"
+    assert telemetry.sub_lm_queries == 3
 
 
 @pytest.mark.asyncio
-async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path):
+async def test_two_pinned_skills_have_complete_instructions_in_first_prompt(settings, tmp_path):
+    registry = SkillRegistry.load(tmp_path)
+    middle_rule = "Check the synthetic label CEDAR-47 / café."
+    second_rule = "Verify the row labeled ALDER-29."
+    for name, body in (
+        ("first-review", "Inspect the schema.\n" * 30 + middle_rule + "\nCheck edge cases." * 12),
+        ("second-review", "Corroborate the totals.\n" * 24 + second_rule),
+    ):
+        registry.install(
+            tmp_path, f"---\nname: {name}\ndescription: Review the output.\n---\n{body}\n".encode()
+        )
+    selection = select_skills(
+        settings,
+        registry.with_installed(tmp_path),
+        "Review output",
+        ["first-review", "second-review"],
+    )
+    expected = "\n\n".join(f"## {skill.name}\n{skill.body}" for skill in selection.active_skills)
+    assert middle_rule not in expected[:500] + expected[-500:]
+    root_lm = DummyLM(
+        [
+            {
+                "plan": "Use both checks.",
+                "code": (
+                    "assert type(active_skills) is str\n"
+                    f"assert active_skills == {expected!r}\n"
+                    "SUBMIT('CEDAR-47 and ALDER-29', [])"
+                ),
+            }
+        ]
+    )
+
+    async def emit(*_):
+        pass
+
+    result = await run_workspace_task(
+        settings,
+        task="Review output",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=make_interpreter_factory(
+            _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
+        ),
+        run_id="two-pinned-skills",
+        emit=emit,
+        selection=selection,
+        model_override=root_lm,
+        sub_lm=DummyLM([]),
+    )
+    prompt = json.dumps(root_lm.get_convo(0)[0], ensure_ascii=False)
+    assert middle_rule in prompt and second_rule in prompt
+    assert result.answer == "CEDAR-47 and ALDER-29"
+    assert json.loads(result.history.model_dump_json())["messages"][0]["active_skills"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pins", [None, ["short-review", "long-review"]])
+async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path, monkeypatch, pins):
     registry = SkillRegistry.load(tmp_path)
     rule = "Return the synthetic code GROVE-27."
-    padding = "Verify each output against the fixture. " * 16
+    padding = "Verify each output against the fixture. " * 55
     registry.install(
         tmp_path,
         (
@@ -1881,9 +1933,25 @@ async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path)
             f"{padding}\n{rule}\n{padding.strip()}\n"
         ).encode(),
     )
-    selection = select_skills(
-        settings, registry.with_installed(tmp_path), "Review output", ["long-review"]
-    )
+    if pins:
+        registry.install(
+            tmp_path,
+            b"---\nname: short-review\ndescription: Format the audit.\n---\n"
+            b"Use the audit code only.\n",
+        )
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            dspy.Predict,
+            "forward",
+            lambda *a, **kw: SimpleNamespace(
+                needs_skill=SimpleNamespace(value=True, probability=1.0)
+            ),
+        )
+        selection = select_skills(
+            settings, registry.with_installed(tmp_path), "Review output", pins
+        )
+    expected = "\n\n".join(f"## {skill.name}\n{skill.body}" for skill in selection.active_skills)
+    rule_offset = expected.index(rule)
     factory = make_interpreter_factory(
         _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
     )
@@ -1891,7 +1959,7 @@ async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path)
         [
             {
                 "plan": "Read the omitted instructions.",
-                "code": "print(active_skills[500:850])",
+                "code": f"print(active_skills[{rule_offset}:{rule_offset + len(rule)}])",
             },
             {"plan": "Follow the revealed rule.", "code": "SUBMIT('GROVE-27', [])"},
         ]
@@ -1913,7 +1981,12 @@ async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path)
         sub_lm=DummyLM([]),
     )
     first_prompt = json.dumps(root_lm.get_convo(0)[0])
-    assert "read the full active_skills variable in bounded slices" in first_prompt
+    assert (
+        f"Omitted. Read active_skills[{expected.index('## long-review')}:{len(expected)}]"
+        in first_prompt
+    )
+    if pins:
+        assert "Use the audit code only." in first_prompt
     assert rule not in first_prompt
     assert rule in json.dumps(root_lm.get_convo(1)[0])
     assert result.answer == "GROVE-27"
@@ -2091,3 +2164,172 @@ async def test_live_skill_selection_and_ab_results():
         assert result["t"] == pytest.approx(16.3978, abs=0.01), label
         assert result["df"] == pytest.approx(12.1326, abs=0.01), label
         assert 0 < result["p"] < 1e-7, label
+
+
+@pytest.mark.parametrize(
+    "content,reason",
+    [
+        ("---\nname: broken\ndescription: [\n---\nBody", "YAML"),
+        ("---\nname: bad--name\ndescription: Desc\n---\nBody", "kebab-case"),
+        ("---\nname: broken\ndescription: Desc\n---\n", "instructions"),
+        ("---\nname: broken\ndescription: " + "x" * 1025 + "\n---\nBody", "1024"),
+        ("x" * 65537, "64 KiB"),
+    ],
+)
+def test_skill_validation_on_load_and_install(tmp_path, monkeypatch, content, reason):
+    monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: tmp_path)
+    registry = SkillRegistry.load(tmp_path)
+    path = tmp_path / "broken" / "SKILL.md"
+    path.parent.mkdir()
+    path.write_text(content)
+    with pytest.raises(ValueError, match=reason):
+        SkillRegistry.load(tmp_path)
+    with pytest.raises(ValueError, match=reason):
+        registry.install(tmp_path, content.encode())
+
+
+def test_skill_directory_and_legacy_description(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled_skills"
+    bundled.mkdir()
+    monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: bundled)
+    path = _skill(bundled, "old")
+    path.write_text(path.read_text().replace("name: old", "name: another"))
+    with pytest.raises(ValueError, match="directory"):
+        SkillRegistry.load(bundled)
+
+    configured = tmp_path / "configured"
+    configured.mkdir()
+    custom = _skill(configured, "old-folder")
+    custom.write_text(
+        custom.read_text()
+        .replace("name: old-folder", "name: old_skill")
+        .replace("Analyze CSV data", "L" * 1025)
+    )
+    installed = configured / ".installed" / "another.md"
+    installed.parent.mkdir()
+    installed.write_text(path.read_text().replace("Analyze CSV data", "L" * 1025))
+    catalog = SkillRegistry.load(configured, fallback_to_bundled=True).with_installed(configured)
+    assert [skill.name for skill in catalog.skills] == ["another", "old_skill"]
+    for skill in catalog.skills:
+        assert len(skill.description) == 1025
+        assert skill.allowed_tools == ("inspect_csv", "retrieve")
+
+
+def test_persistent_install_directory_retains_bundled_skills(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled_skills"
+    bundled.mkdir()
+    _skill(bundled, "web-research")
+    monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: bundled)
+    configured = tmp_path / "persistent"
+    registry = SkillRegistry.load(configured, fallback_to_bundled=True)
+    registry.install(configured, b"---\nname: custom\ndescription: Custom skill\n---\nRead it.")
+    reloaded = SkillRegistry.load(configured, fallback_to_bundled=True)
+    assert [skill.name for skill in reloaded.with_installed(configured).skills] == [
+        "custom",
+        "web-research",
+    ]
+
+
+def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(settings, monkeypatch):
+    from pydantic import SecretStr
+
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+
+    def decide(self, *, task, lm):
+        choices = self.signature.output_fields["primary_skill"].annotation.criteria()
+        assert "web-research" not in choices
+        assert "plot" in task or "summarize" in task
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value="plot" in task),
+            primary_skill=SimpleNamespace(
+                value="chart-visualization", probabilities={"chart-visualization": 0.9}
+            ),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", decide)
+    prompt = "Read https://example.org and summarize what it says."
+    assert not select_skills(
+        settings.model_copy(update={"tavily_api_key": None}), registry, prompt
+    ).active_skills
+    settings = settings.model_copy(update={"tavily_api_key": SecretStr("mock")})
+    assert select_skills(settings, registry, prompt).allowed_tools == ("web_search", "web_open")
+    plain = select_skills(settings, registry, "Open https://example.org/report")
+    assert [skill.name for skill in plain.active_skills] == ["web-research"]
+    compound = select_skills(settings, registry, "Read https://example.org/report and plot revenue")
+    assert [skill.name for skill in compound.active_skills] == [
+        "web-research",
+        "chart-visualization",
+    ]
+    assert compound.allowed_tools == ("web_search", "web_open")
+
+
+def test_skill_selector_resolves_a_followup_and_keeps_current_guidance(
+    settings, monkeypatch, tmp_path
+):
+    from pydantic import SecretStr
+
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+    state = build_skill_selector(registry.skills).dump_state()
+    state["signature"]["instructions"] = "Treat short follow-ups as irrelevant."
+    path = tmp_path / "selector.json"
+    path.write_text(json.dumps(state))
+    settings = settings.model_copy(
+        update={"tavily_api_key": SecretStr("offline"), "skill_selector_path": path}
+    )
+    prompt = "Who won in Georgia?"
+    earlier = [{"user": "Search for U.S. midterm results", "assistant": "Details pending."}]
+
+    def decide(self, *, task, lm):
+        assert "Treat short follow-ups as irrelevant" not in self.signature.instructions
+        assert "previous exchange" in self.signature.instructions
+        needs = task.startswith("{") and json.loads(task) == {
+            "current_request": prompt,
+            "previous_user_request": earlier[0]["user"],
+            "previous_assistant_answer": earlier[0]["assistant"],
+        }
+        return SimpleNamespace(
+            needs_skill=SimpleNamespace(value=needs),
+            primary_skill=SimpleNamespace(value="web-research", probabilities={"web-research": 1}),
+        )
+
+    monkeypatch.setattr(dspy.Predict, "forward", decide)
+    assert not select_skills(settings, registry, prompt).active_skills
+    assert select_skills(settings, registry, prompt, prior_turns=earlier).allowed_tools
+    assert not select_skills(settings, registry, "Hi", prior_turns=earlier).active_skills
+    assert not select_skills(
+        settings, registry, "Explain addition", prior_turns=earlier
+    ).active_skills
+    disabled = settings.model_copy(update={"history_max_turns": 0})
+    assert not select_skills(disabled, registry, prompt, prior_turns=earlier).active_skills
+
+
+@pytest.mark.asyncio
+async def test_turn_telemetry_detects_real_iteration_limit(settings, tmp_path):
+    telemetry = TurnTelemetry()
+    model = DummyLM(
+        [
+            {"plan": "Inspect", "code": "print('available evidence')"},
+            {"answer": "Partial", "artifact_paths": []},
+        ]
+    )
+
+    async def emit(*_):
+        pass
+
+    result = await run_workspace_task(
+        settings.model_copy(update={"rlm_max_iters": 1, "history_max_chars": 0}),
+        task="Inspect evidence",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=make_interpreter_factory(
+            _LocalSandbox(tmp_path), settings, asyncio.get_running_loop()
+        ),
+        run_id="extract",
+        emit=emit,
+        model_override=model,
+        sub_lm=model,
+        telemetry=telemetry,
+    )
+    assert result.answer == "Partial" and result.history.messages == []
+    assert telemetry.completion == "iteration_limit"
+    assert telemetry.root_actions == 1 and telemetry.elapsed_ms is not None

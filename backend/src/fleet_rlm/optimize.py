@@ -779,7 +779,7 @@ def optimize_skills(
     require_cache: bool = True,
 ) -> OptimizationResult:
     """Calibrate SkillSelector thresholds and Choice weights via 5-fold ReAnchor CV."""
-    registry = skills.SkillRegistry.load(settings.skills_dir)
+    registry = skills.SkillRegistry.load(settings.skills_dir, fallback_to_bundled=True)
     if not registry.skills:
         raise ValueError(f"No skills found in {settings.skills_dir}")
     examples = load_skills_dataset(dataset, registry)

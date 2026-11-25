@@ -1,6 +1,8 @@
 ---
 name: chart-visualization
-description: Use when the task requests a chart, plot, or figure from data. Render and verify Matplotlib artifacts in the requested format.
+description: Create a chart, plot, or publication figure from data when the deliverable is a visual artifact.
 ---
 
-Use Matplotlib with Agg. Verify plotted values against source data and label axes, units, and legends. Save the requested format in `/workspace/artifacts` (PNG by default). Reopen PNGs with `PIL.Image.open()` and check dimensions and nonblank content. Parse SVGs and check labels. Use `llm_query([prompt, dspy.Image.from_path(path)])` for visual review when supported; rely on local checks if unavailable. Return artifact paths.
+Choose a visual encoding that answers the question. Compare the plotted series and group order against the source calculation. Label units and distinguish series where needed.
+
+Render with Matplotlib’s Agg backend and save the requested format under `/workspace/artifacts` (PNG by default). Reopen a PNG with Pillow and check dimensions and nonblank content. For SVG, parse the output and verify expected labels. Use visual review when available to check clipping or overlap. Return the verified artifact path.

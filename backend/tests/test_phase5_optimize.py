@@ -11,6 +11,7 @@ import dspy
 import pytest
 from dspy.clients.base_lm import BaseLM
 from dspy.experimental import ReAnchor
+from pydantic import SecretStr
 
 from fleet_rlm import agent, db, interpreter, optimize, skills
 from fleet_rlm.config import Settings
@@ -1076,6 +1077,7 @@ def test_optimize_production_skill_catalog_with_reanchor(
         "scientific-computing",
         "skill-creator",
         "spreadsheet-audit",
+        "web-research",
     )
 
     rows = []
@@ -1119,7 +1121,9 @@ def test_optimize_production_skill_catalog_with_reanchor(
     fake_lm = FakeSixSkillDecisionLM()
     dataset = _write_jsonl(tmp_path / "six-skills.jsonl", rows)
     output_path = tmp_path / "six_skill_selector.json"
-    prod_settings = settings.model_copy(update={"skills_dir": prod_skills_dir})
+    prod_settings = settings.model_copy(
+        update={"skills_dir": prod_skills_dir, "tavily_api_key": SecretStr("offline")}
+    )
 
     monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_lm)
     result = optimize.optimize_skills(
