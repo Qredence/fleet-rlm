@@ -699,9 +699,8 @@ class DaytonaCodeInterpreter:
                 if self._handle is not None:
                     operation.cancel()
                 try:
-                    await asyncio.shield(operation)
-                except asyncio.CancelledError:
-                    pass  # The execution was cancelled so the worker can be stopped below.
+                    with suppress(asyncio.CancelledError):
+                        await asyncio.shield(operation)
                 except Exception as error:
                     if sandbox_cleanup_failed(error):
                         cleanup_error = error

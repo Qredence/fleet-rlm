@@ -10,7 +10,7 @@ from contextlib import aclosing
 from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -1057,18 +1057,20 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
     daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
     daytona.v2.delete.reset_mock()
-    crash = Mock(side_effect=RuntimeError("eval crashed"))
-    with pytest.raises(RuntimeError, match="eval crashed"):
-        async with ephemeral_sandbox(daytona, configured):
-            crash()
-    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
-
-    daytona.v2.delete.reset_mock()
     sandbox.process.run.return_value = SimpleNamespace(exit_code=1)
     with pytest.raises(SandboxStartupError, match="initialize the Daytona workspace"):
         async with ephemeral_sandbox(daytona, configured):
             pytest.fail("must not yield when init fails")
     daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
+
+    daytona.v2.delete.reset_mock()
+    sandbox.process.run.return_value = SimpleNamespace(exit_code=0)
+    with pytest.raises(RuntimeError, match="eval crashed"):
+        try:
+            async with ephemeral_sandbox(daytona, configured):
+                raise RuntimeError("eval crashed")
+        finally:
+            daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
 
 @pytest.mark.asyncio

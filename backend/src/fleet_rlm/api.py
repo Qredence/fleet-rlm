@@ -804,9 +804,7 @@ async def _try_object_cleanup(runtime: Runtime, session_id: UUID) -> None:
     try:
         await _reclaim_discarded_objects(runtime, session_id)
     except (StorageError, SQLAlchemyError) as error:
-        _LOG.warning(
-            "Workspace object cleanup will retry for %s (%s)", session_id, type(error).__name__
-        )
+        _LOG.warning("Workspace object cleanup will retry (%s)", type(error).__name__)
 
 
 @app.post(
