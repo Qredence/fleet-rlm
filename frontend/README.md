@@ -1,9 +1,11 @@
 # Fleet RLM frontend
 
-Start the FastAPI backend (`make dev-backend`) on port 8000, then start the frontend from this directory.
+Use Node.js `26.13.1` from the repository’s [`.node-version`](../.node-version) and pnpm `12.23.0` to match CircleCI. Check your active versions with `node --version` and `pnpm --version`.
+
+Run `make dev-backend` from the repository root to start FastAPI on port 8000. Then run these commands from `frontend/`.
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 

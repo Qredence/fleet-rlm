@@ -18,7 +18,9 @@
 
 ## Quick Start
 
-**Prerequisites** include Python `3.13` with `uv`, Node `22+` with `pnpm`, **Neon Postgres 18** with pooled and direct URLs, a private **Neon Object Storage** bucket on the same branch, a **Daytona v2** API key and image, and LLM and TypeSafe credentials. Local MLflow also uses Docker.
+**Prerequisites** include Python `3.13` with `uv`, Node.js `26.13.1` with pnpm `12.23.0`, **Neon Postgres 18** with pooled and direct URLs, a private **Neon Object Storage** bucket on the same branch, a **Daytona v2** API key and image, and LLM and TypeSafe credentials. Local MLflow also uses Docker.
+
+For frontend development, select the Node version in [`.node-version`](./.node-version) before running the install or `make` commands. These frontend tool versions match CircleCI.
 
 1. **Configure environment variables:**
    ```bash
@@ -31,7 +33,7 @@
 2. **Install dependencies and run database migrations:**
    ```bash
    cd backend && uv sync --python 3.13 && uv run alembic upgrade head
-   cd ../frontend && pnpm install
+   cd ../frontend && pnpm install --frozen-lockfile
    ```
    For an existing v0 deployment, rehearse the Alembic upgrade through `0006_workspace_recovery` on an isolated branch. Revision `0004_daytona_v2_cutover` clears old sandbox bindings and file manifests. Conversations and memories are retained. Users re-upload any files they want in the new workspace. Keep the old Volume and the pre-cutover database restore point for the migration window. [Migration plan](./docs/daytona-v2-migration-plan.md)
 
