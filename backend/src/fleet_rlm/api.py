@@ -1578,9 +1578,11 @@ async def _execute_turn(
                 decision_lm=decision_lm,
             )
             records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
-            selected_skill_names = [skill.name for skill in selection.active_skills]
             procedures = await store.recall_procedures(
-                sessionmaker, turn.session_id, turn.prompt, selected_skill_names
+                sessionmaker,
+                turn.session_id,
+                turn.prompt,
+                [skill.name for skill in selection.active_skills],
             )
             task_memories = records
             if any(
