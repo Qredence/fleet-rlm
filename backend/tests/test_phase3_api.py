@@ -1322,6 +1322,31 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
 
 
 @pytest.mark.asyncio
+async def test_artifact_limits_fail_turn_before_download(offline, monkeypatch):
+    async def turn(_settings, **_):
+        return dspy.Prediction(answer="Done", history=dspy.History(messages=[]))
+
+    monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+    offline.settings.artifact_max_file_bytes = 5
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}],
+            "pinned_skills": ["table"],
+        },
+    )
+    assert response.status_code == 200
+    message = "Each artifact can be at most 5 bytes"
+    frames = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
+    ]
+    assert frames[-1] == {"type": "error", "errorText": message}
+    assert offline.finish.await_args.kwargs["error"] == message
+    offline.pull.assert_not_awaited()
+    offline.storage.put.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_workspace_startup_failure_returns_actionable_stream_error(
     offline, monkeypatch, tmp_path, caplog, request
 ):
@@ -2340,7 +2365,7 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
         observed["pinned_skills"] = list(pinned_skills or [])
         return real_select_skills(settings, registry, task, pinned_skills, **kwargs)
 
-    async def spy_list_artifacts(_sandbox, known):
+    async def spy_list_artifacts(_sandbox, known, _limits):
         observed["known_files"] = dict(known)
         return [
             {

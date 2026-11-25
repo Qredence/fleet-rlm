@@ -47,6 +47,8 @@ from . import db as store
 from .config import Settings
 from .interpreter import (
     WORKSPACE,
+    ArtifactLimitError,
+    ArtifactLimits,
     AsyncDaytona,
     AsyncSandbox,
     DaytonaError,
@@ -1645,10 +1647,18 @@ async def _execute_turn(
                 TemporaryDirectory(prefix="fleet-publish-") as temporary,
             ):
                 local = Path(temporary) / "file"
-                for artifact in await list_new_artifacts(sandbox, known_files):
+                limits = ArtifactLimits.from_settings(effective)
+                total_bytes = 0
+                for artifact in await list_new_artifacts(sandbox, known_files, limits):
                     path = artifact["path"].removeprefix(f"{WORKSPACE}/")
                     if not (_valid_file_path(path) and path.startswith("artifacts/")):
                         continue
+                    total_bytes += artifact["size_bytes"]
+                    limits.check(
+                        files=len(artifacts) + 1,
+                        file_bytes=artifact["size_bytes"],
+                        total_bytes=total_bytes,
+                    )
                     await download_workspace_file(
                         sandbox, path, local, timeout=effective.daytona_exec_timeout_seconds
                     )
@@ -1704,6 +1714,8 @@ async def _execute_turn(
             raise asyncio.CancelledError from error
         if timed_out:
             error_text = "Turn timed out"
+        elif isinstance(error, ArtifactLimitError):
+            error_text = str(error)
         else:
             error_text = (
                 _WORKSPACE_STARTUP_HELP if isinstance(error, SandboxStartupError) else "Turn failed"

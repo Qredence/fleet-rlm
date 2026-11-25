@@ -19,6 +19,7 @@ from collections.abc import (
 )
 from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
 from contextvars import Context, copy_context
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from uuid import uuid4
@@ -1044,9 +1045,38 @@ def make_interpreter_factory(
     return _DaytonaInterpreterFactory(sandbox, settings, loop, turn_deadline=turn_deadline)
 
 
+class ArtifactLimitError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ArtifactLimits:
+    max_files: int
+    max_file_bytes: int
+    max_total_bytes: int
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "ArtifactLimits":
+        return cls(
+            settings.artifact_max_files,
+            settings.artifact_max_file_bytes,
+            settings.artifact_max_total_bytes,
+        )
+
+    def check(self, *, files: int, file_bytes: int, total_bytes: int) -> None:
+        for actual, limit, message in (
+            (file_bytes, self.max_file_bytes, "Each artifact can be at most {:,} bytes"),
+            (files, self.max_files, "A turn can publish at most {:,} artifacts"),
+            (total_bytes, self.max_total_bytes, "A turn can publish at most {:,} artifact bytes"),
+        ):
+            if actual > limit:
+                raise ArtifactLimitError(message.format(limit))
+
+
 async def list_new_artifacts(
     sandbox: AsyncSandbox,
     known_paths: Collection[str] | Mapping[str, tuple[str, int]],
+    limits: ArtifactLimits,
 ) -> list[dict]:
     """Hash new or modified regular files within the artifact tree without downloading contents."""
     known = {
@@ -1059,11 +1089,24 @@ async def list_new_artifacts(
     try:
         async with asyncio.timeout(60):
             await sandbox.fs.write_bytes(manifest, json.dumps(known).encode(), atomic=True)
-            return await _workspace_query(sandbox, _SCAN_ARTIFACTS, 60, ARTIFACTS, manifest)
+            result = await _workspace_query(
+                sandbox,
+                _SCAN_ARTIFACTS,
+                60,
+                ARTIFACTS,
+                manifest,
+                str(limits.max_files),
+                str(limits.max_file_bytes),
+                str(limits.max_total_bytes),
+            )
     except (Exception, asyncio.CancelledError):
         with suppress(DaytonaError):
             await sandbox.fs.remove(manifest)
         raise
+    if isinstance(result, dict):
+        limits.check(**result)
+        raise ArtifactLimitError("Artifacts exceed the publication limits")
+    return result
 
 
 _SCAN_ARTIFACTS = """\
@@ -1073,13 +1116,19 @@ import os
 import stat
 import sys
 
-root, manifest = sys.argv[1:]
+root, manifest = sys.argv[1:3]
+max_files, max_file_bytes, max_total_bytes = map(int, sys.argv[3:])
 with open(manifest, encoding='utf-8') as file:
     known = json.load(file)
 os.unlink(manifest)
 
-files = []
-if os.path.isdir(root) and not os.path.islink(root):
+
+def scan():
+    # Stop at the first limit breach; the host turns the totals into a turn error.
+    files = []
+    total = 0
+    if not os.path.isdir(root) or os.path.islink(root):
+        return files
     for directory, _, names, dir_fd in os.fwalk(root, follow_symlinks=False):
         for name in names:
             path = os.path.join(directory, name)
@@ -1090,14 +1139,19 @@ if os.path.isdir(root) and not os.path.islink(root):
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
             with os.fdopen(fd, "rb") as data:
                 info = os.fstat(data.fileno())
-                if stat.S_ISREG(info.st_mode):
-                    digest = hashlib.file_digest(data, "sha256").hexdigest()
-                    if known.get(path) == [digest, info.st_size]:
-                        continue
-                    files.append({
-                        "path": path,
-                        "sha256": digest,
-                        "size_bytes": info.st_size,
-                    })
-print(json.dumps(sorted(files, key=lambda item: item["path"])))
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                if info.st_size > max_file_bytes:
+                    return {"files": len(files), "file_bytes": info.st_size, "total_bytes": total}
+                digest = hashlib.file_digest(data, "sha256").hexdigest()
+            if known.get(path) == [digest, info.st_size]:
+                continue
+            files.append({"path": path, "sha256": digest, "size_bytes": info.st_size})
+            total += info.st_size
+            if len(files) > max_files or total > max_total_bytes:
+                return {"files": len(files), "file_bytes": info.st_size, "total_bytes": total}
+    return sorted(files, key=lambda item: item["path"])
+
+
+print(json.dumps(scan()))
 """

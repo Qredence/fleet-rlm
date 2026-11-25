@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     daytona_optimize_spot: bool = False
     daytona_otel_enabled: bool = False
     daytona_exec_timeout_seconds: int = Field(default=120, ge=5, le=600)
+    artifact_max_files: int = Field(default=200, ge=1, le=5_000)
+    artifact_max_file_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+    artifact_max_total_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
 
     tavily_api_key: SecretStr | None = Field(
         default=None, validation_alias="TAVILY_API_KEY", repr=False
