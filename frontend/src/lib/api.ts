@@ -78,6 +78,7 @@ export interface WorkspaceSettingsStatus {
   llm_api_key_configured: boolean
   llm_base_url: string | null
   bearer_auth_enabled: boolean
+  decision_model_uncalibrated: boolean
   max_concurrent_turns_per_worker: number
   mlflow_tracking_uri: string | null
   mlflow_experiment: string
