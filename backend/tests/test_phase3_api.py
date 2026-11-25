@@ -1089,14 +1089,25 @@ def test_ui_frames_and_lossless_nested_snapshots():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("skill_name", ["table", "skill-creator"])
+@pytest.mark.parametrize("skill_name", ["table", "skill-creator", "installed"])
 async def test_chat_supplies_session_only_memories_to_skill_creator(
     offline, monkeypatch, skill_name
 ):
     runtime = api.app.state.runtime
-    creator = SkillDefinition("skill-creator", "Draft a skill", "Use memories.", Path("SKILL.md"))
+    creator = SkillDefinition(
+        "skill-creator",
+        "Draft a skill",
+        "Use memories.",
+        Path("SKILL.md"),
+        approved_session_memories=True,
+    )
     api.app.state.runtime = replace(
         runtime, skills=SkillRegistry((*runtime.skills.skills, creator))
+    )
+    # Installed skills cannot opt in to approved session memories.
+    api.app.state.runtime.skills.install(
+        runtime.settings.skills_dir,
+        b"---\nname: installed\ndescription: Draft\napproved-session-memories: true\n---\nUse.",
     )
     global_memory = db.Memory(
         id=uuid4(),
@@ -1111,7 +1122,7 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
         approved=True,
     )
     procedure = db.Memory(content="Verify column types before aggregating.")
-    procedure_lookup = AsyncMock(return_value=[procedure] if skill_name == "table" else [])
+    procedure_lookup = AsyncMock(return_value=[] if skill_name == "skill-creator" else [procedure])
     monkeypatch.setattr(db, "recall_procedures", procedure_lookup)
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[global_memory]))
     session_lookup = AsyncMock(return_value=[session_memory])

@@ -39,8 +39,8 @@ Owns **100%** of `daytona==0.232.0` imports. No other module may import `daytona
 ### 2. Agent Skills & TypeSafe Jev Selector (`backend/src/fleet_rlm/skills.py`)
 Implements open **Agent Skills (`SKILL.md`)** progressive disclosure with zero mutable per-session state.
 
-- **`SkillDefinition` (frozen dataclass):** `name`, `description`, `body`, `path`, `allowed_tools: tuple[str, ...]`, `mcp_servers: tuple[str, ...]`.
-- **`SkillRegistry.load(skills_dir: Path)`:** Called once at FastAPI `lifespan` startup. Scans `skills/*/SKILL.md`, parses YAML frontmatter (`name`, `description`, optional `allowed_tools`, `mcp_servers`), keeps the body ready in memory, and freezes the registry.
+- **`SkillDefinition` (frozen dataclass):** `name`, `description`, `body`, `path`, `allowed_tools: tuple[str, ...]`, and the capability fields `requires_host_tools`, `required_settings`, `handles_direct_urls`, `companion_skills`, and `approved_session_memories`.
+- **`SkillRegistry.load(skills_dir: Path)`:** Called once at FastAPI `lifespan` startup. Scans `skills/*/SKILL.md`, parses YAML frontmatter (`name`, `description`, optional `allowed_tools` and capability fields), keeps the body ready in memory, and freezes the registry.
 - **Context-Driven Selector (`select_skills`):**
   - Supports explicit user overrides (`pinned_skills: list[str]`, e.g., `@data-analysis` from Vite UI) bypassing Jev deterministically.
   - Otherwise invokes a single `dspy.Predict` signature on `dspy.LM(settings.decision_model)` (`typesafe:jev-latest`) combining:

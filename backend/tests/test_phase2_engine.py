@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from contextlib import aclosing
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -84,7 +85,7 @@ def _skill(root, name, description="Analyze CSV data"):
     path.parent.mkdir()
     path.write_text(
         f"---\nname: {name}\ndescription: {description}\n"
-        "allowed_tools: [inspect_csv, retrieve]\nmcp_servers: [catalog]\n---\n"
+        "allowed_tools: [inspect_csv, retrieve]\n---\n"
         "Inspect the CSV header.\n\n---\nBody after the horizontal rule.\n",
         encoding="utf-8",
     )
@@ -104,7 +105,6 @@ def test_skill_registry_and_pinned_override(settings, tmp_path, monkeypatch):
     (skill,) = result.active_skills
     assert skill.path == path
     assert skill.body == "Inspect the CSV header.\n\n---\nBody after the horizontal rule."
-    assert skill.mcp_servers == ("catalog",)
     assert result.scores == {"data-analysis": 1.0}
     assert result.allowed_tools == ("inspect_csv", "retrieve")
     with pytest.raises(ValueError, match="Unknown pinned Skills"):
@@ -113,6 +113,44 @@ def test_skill_registry_and_pinned_override(settings, tmp_path, monkeypatch):
     assert registry.skills[-1].description == "Analyze CSV data"
     with pytest.raises(ValueError, match="description"):
         SkillRegistry.load(tmp_path)
+
+
+def test_skill_frontmatter_declares_capabilities(settings, tmp_path):
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+    by_name = {skill.name: skill for skill in registry.skills}
+    web = by_name["web-research"]
+    assert web.requires_host_tools and web.handles_direct_urls
+    assert web.required_settings == ("tavily_api_key",)
+    assert web.unavailable_reason(settings.model_copy(update={"tavily_api_key": None})) == (
+        "Configure TAVILY_API_KEY on the Fleet host to use web-research."
+    )
+    assert by_name["skill-creator"].approved_session_memories
+    assert by_name["data-analysis"].companion_skills == ("chart-visualization",)
+    assert by_name["chart-visualization"].companion_skills == ("data-analysis",)
+
+    path = tmp_path / "custom" / "SKILL.md"
+    path.parent.mkdir()
+    header = "---\nname: custom\ndescription: Custom\n"
+    path.write_text(
+        header + "required_settings: [s3_bucket]\nrequires-host-tools: true\n---\nRead."
+    )
+    (custom,) = SkillRegistry.load(tmp_path).skills
+    assert custom.required_settings == ("s3_bucket",)
+    assert custom.unavailable_reason(settings) == (
+        "Fleet's host tools require the bundled custom skill."
+    )
+    custom = replace(custom, requires_host_tools=False)
+    assert custom.unavailable_reason(settings) is None
+    assert custom.unavailable_reason(settings.model_copy(update={"s3_bucket": ""})) == (
+        "Configure FLEET_S3_BUCKET on the Fleet host to use custom."
+    )
+    for line, error in (
+        ("required-settings: missing_key", "unknown required_settings"),
+        ("handles-direct-urls: sometimes", "handles_direct_urls must be true or false"),
+    ):
+        path.write_text(header + line + "\n---\nRead.")
+        with pytest.raises(ValueError, match=error):
+            SkillRegistry.load(tmp_path)
 
 
 def test_jev_selector_shortlists_and_applies_calibration(settings, tmp_path, monkeypatch):

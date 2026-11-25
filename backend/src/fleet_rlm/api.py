@@ -1583,7 +1583,10 @@ async def _execute_turn(
                 sessionmaker, turn.session_id, turn.prompt, selected_skill_names
             )
             task_memories = records
-            if "skill-creator" in selected_skill_names:
+            if any(
+                skill.approved_session_memories and skill in runtime.skills.skills
+                for skill in selection.active_skills
+            ):
                 task_memories = await store.list_approved_session_memories(
                     sessionmaker, turn.session_id
                 )

@@ -2,6 +2,9 @@
 name: web-research
 description: Find current public information, verify claims against online sources, or read a supplied public HTTP or HTTPS page.
 allowed-tools: web_search web_open
+requires-host-tools: true
+required-settings: tavily_api_key
+handles-direct-urls: true
 ---
 
 If the user supplied a URL, start with `web_open(url)`. For an unknown source, call `web_search(query)` with public search terms and open the most relevant result. Prefer a primary source for the claim. Follow links in the extracted Markdown when they point to better evidence.
