@@ -23,6 +23,7 @@ import pytest
 import pytest_asyncio
 from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
+from pydantic import SecretStr
 
 from fleet_rlm import api, db, interpreter
 from fleet_rlm.config import Settings
@@ -451,6 +452,7 @@ async def offline(monkeypatch, tmp_path):
     )
     settings = Settings(
         _env_file=None,
+        TAVILY_API_KEY=None,
         database_url="postgresql://localhost/unused",
         database_direct_url="postgresql://localhost/unused",
         daytona_api_key="offline",
@@ -1491,9 +1493,13 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     offline.memory.assert_awaited_once()
 
 
-@pytest.mark.parametrize("status", ["failed", "cancelled"])
+@pytest.mark.parametrize(
+    ("status", "retry"), [("failed", False), ("failed", True), ("cancelled", False)]
+)
 @pytest.mark.asyncio
-async def test_incomplete_child_snapshot_survives_root_teardown(offline, monkeypatch, status):
+async def test_incomplete_child_snapshot_survives_root_teardown(
+    offline, monkeypatch, status, retry
+):
     async def interrupt(_settings, *, run_id, emit, callbacks, **_):
         await emit(run_id, api.agent.RunStartedEvent("workspace"))
         child_id = await callbacks.on_child_start(
@@ -1511,25 +1517,40 @@ async def test_incomplete_child_snapshot_survives_root_teardown(offline, monkeyp
         raise RuntimeError("Turn interrupted before the child was finalized")
 
     monkeypatch.setattr(api.agent, "run_workspace_task", interrupt)
+    if retry:
+
+        async def fail_first_write(*_args, **_kwargs):
+            offline.finish.side_effect = offline.store.finish
+            raise RuntimeError("First root write failed")
+
+        offline.finish.side_effect = fail_first_write
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 200
     assert ("data: [DONE]" in response.text) is (status == "failed")
-    offline.finish.assert_awaited_once()
+    assert offline.finish.await_count == (2 if retry else 1)
     assert offline.finish.await_args.kwargs["status"] == status
     root_parts = offline.finish.await_args.kwargs["ui_parts"]
     child_part, web_part, details = root_parts[-3:]
     assert web_part["data"]["outcome"] == "interrupted"
     assert details["data"]["completion"] == status
+    if status == "failed":
+        events = [
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        ]
+        assert web_part in events and details in events
     assert child_part["preliminary"] is True
     parts = child_part["output"]["parts"]
     assert parts[-1]["state"] == "input-streaming"
     assert parts[-1]["input"] == "print('working')"
 
-    child_update, fallback_update = offline.store.statements
+    child_update, *fallback_updates = offline.store.statements
     assert child_update.compile().params["status"] == status
     assert child_update.compile().params["id_1"] == offline.create_child.return_value.id
     assert child_update.compile().params["ui_parts"] == parts
-    assert "ui_parts" not in fallback_update.compile().params
+    assert len(fallback_updates) == offline.finish.await_count
+    assert all("ui_parts" not in update.compile().params for update in fallback_updates)
 
 
 @pytest.mark.parametrize("asgi_version", ["2.3", "2.4"])
@@ -2479,9 +2500,48 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_configured_web_research_catalog_and_pins(offline, monkeypatch):
+    runtime = api.app.state.runtime
+    skill = runtime.settings.skills_dir / "web-research" / "SKILL.md"
+    skill.parent.mkdir()
+    skill.write_text(
+        "---\nname: web-research\ndescription: Read local notes\n---\nUse local notes."
+    )
+    api.app.state.runtime = replace(runtime, skills=SkillRegistry.load(runtime.settings.skills_dir))
+    payload = {
+        "messages": [{"role": "user", "parts": [{"type": "text", "text": "Read notes"}]}],
+        "pinned_skills": ["web-research"],
+    }
+
+    async def run(_settings, *, selection, host_tools, **_):
+        assert [skill.path for skill in selection.active_skills] == [skill]
+        assert host_tools == {}
+        return dspy.Prediction(answer="Used local notes", history=dspy.History(messages=[]))
+
+    run_mock = AsyncMock(side_effect=run)
+    monkeypatch.setattr(api.agent, "run_workspace_task", run_mock)
+    catalog = (await offline.client.get("/api/skills")).json()
+    assert "web-research" in {item["name"] for item in catalog}
+    response = await offline.client.post(f"{offline.base}/chat", json=payload)
+    assert response.status_code == 200 and "Used local notes" in response.text
+
+    shipped = Path(__file__).resolve().parents[1] / "skills" / "web-research" / "SKILL.md"
+    skill.write_bytes(shipped.read_bytes())
+    api.app.state.runtime = replace(
+        runtime,
+        skills=SkillRegistry.load(runtime.settings.skills_dir),
+        settings=runtime.settings.model_copy(update={"tavily_api_key": SecretStr("mock-host-key")}),
+    )
+    catalog = (await offline.client.get("/api/skills")).json()
+    assert "web-research" not in {item["name"] for item in catalog}
+    response = await offline.client.post(f"{offline.base}/chat", json=payload)
+    assert response.status_code == 422 and "bundled web-research" in response.text
+    run_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", ["search", "open", "failure", "cap", "installed", "ordinary"])
 async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenario):
-    from pydantic import SecretStr
     from test_phase2_engine import _LocalSandbox
 
     runtime = api.app.state.runtime
@@ -2570,6 +2630,9 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
     if scenario == "open":
         catalog = (await offline.client.get("/api/skills")).json()
         assert "web-research" in {skill["name"] for skill in catalog}
+        payload = {
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": f"Open {url}"}]}],
+        }
     monkeypatch.setattr(api, "_chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path)))
     response = await offline.client.post(route, json=payload)
     expected = {

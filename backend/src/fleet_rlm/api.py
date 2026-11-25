@@ -1257,10 +1257,12 @@ async def _prepare_turn(
     pinned = list(
         dict.fromkeys([*(name.removeprefix("@") for name in payload.pinned_skills), *mentioned])
     )
-    if "web-research" in pinned and not runtime.settings.tavily_api_key:
-        raise HTTPException(422, "Configure TAVILY_API_KEY on the Fleet host to use web-research.")
-    if set(pinned) - {skill.name for skill in registry.skills}:
+    skills_by_name = {skill.name: skill for skill in registry.skills}
+    if set(pinned) - skills_by_name.keys():
         raise HTTPException(422, "Unknown pinned Skill")
+    for name in pinned:
+        if reason := skills_by_name[name].unavailable_reason(runtime.settings):
+            raise HTTPException(422, reason)
 
     sessionmaker = runtime.sessionmaker
     await store.get_session_or_raise(sessionmaker, session_id)
@@ -1709,10 +1711,13 @@ async def _execute_turn(
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
+        interruption_frames = []
         if status != "completed":
-            terminal_frames.clear()
-            terminal_frames.extend(stream.interrupt_web_calls())
-            terminal_frames.append(stream.turn_details(details("timeout" if timed_out else status)))
+            interruption_frames = stream.interrupt_web_calls()
+            terminal_frames[:] = [
+                *interruption_frames,
+                stream.turn_details(details("timeout" if timed_out else status)),
+            ]
         with workspace_span("fleet.turn.finalize") as finalization:
             fence_committed = False
             try:
@@ -1744,7 +1749,7 @@ async def _execute_turn(
                     # Keep the failed transcript free of an answer that did not commit.
                     if failure_parts is not None:
                         failure_parts.append(failed_details)
-                    terminal_frames[:] = [failed_details]
+                    terminal_frames[:] = [*interruption_frames, failed_details]
                     fence_committed = await _finish_root(
                         sessionmaker,
                         turn,

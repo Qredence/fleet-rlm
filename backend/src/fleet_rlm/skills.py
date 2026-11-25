@@ -35,6 +35,17 @@ class SkillDefinition:
     allowed_tools: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] = ()
 
+    def unavailable_reason(self, settings: Settings) -> str | None:
+        if self.name != "web-research" or not {"web_search", "web_open"}.intersection(
+            self.allowed_tools
+        ):
+            return None
+        if _host_tools_path(self) is None:
+            return "Fleet's host web tools require the bundled web-research skill."
+        if not settings.tavily_api_key:
+            return "Configure TAVILY_API_KEY on the Fleet host to use web-research."
+        return None
+
 
 @dataclass(frozen=True)
 class SkillRegistry:
@@ -54,11 +65,7 @@ class SkillRegistry:
         return cls(tuple(sorted(skills, key=lambda skill: skill.name)))
 
     def available_skills(self, settings: Settings) -> tuple[SkillDefinition, ...]:
-        return tuple(
-            skill
-            for skill in self.skills
-            if skill.name != "web-research" or settings.tavily_api_key
-        )
+        return tuple(skill for skill in self.skills if skill.unavailable_reason(settings) is None)
 
     def with_installed(self, skills_dir: Path) -> "SkillRegistry":
         # Installs are published as complete files on disk so every worker sees them.
@@ -94,20 +101,23 @@ class SkillSelection:
     allowed_tools: tuple[str, ...]
 
 
+def _host_tools_path(skill: SkillDefinition) -> Path | None:
+    directory = skill.path.parent.resolve()
+    if directory.parent != _bundled_skills_dir().resolve() or directory.name != skill.name:
+        return None
+    path = directory / "scripts" / "host_tools.py"
+    return path if path.is_file() else None
+
+
 def load_host_tools(
     bundled: SkillRegistry, selection: SkillSelection, settings: Settings
 ) -> dict[str, Callable]:
     """Load selected tools from shipped code. Installed skill directories are data only."""
-    shipped = _bundled_skills_dir().resolve()
     tools = {}
     for skill in selection.active_skills:
         if not skill.allowed_tools or skill not in bundled.skills:
             continue
-        directory = skill.path.parent.resolve()
-        if directory.parent != shipped or directory.name != skill.name:
-            continue
-        path = directory / "scripts" / "host_tools.py"
-        if not path.is_file():
+        if (path := _host_tools_path(skill)) is None:
             continue
         spec = importlib.util.spec_from_file_location("fleet_skill_" + skill.name, path)
         if spec is None or spec.loader is None:
@@ -374,7 +384,14 @@ def select_skills(
     )
     web = None
     if direct_url:
-        web = next((skill for skill in available if skill.name == "web-research"), None)
+        web = next(
+            (
+                skill
+                for skill in available
+                if skill.name == "web-research" and _host_tools_path(skill) is not None
+            ),
+            None,
+        )
         if web is not None and not re.search(r"\w", task[direct_url.end() :]):
             return _selection((), {}, required=web)
 
