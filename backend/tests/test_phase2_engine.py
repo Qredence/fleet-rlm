@@ -394,6 +394,7 @@ class _LocalSandbox:
         self.deleted = []
         self.replies = []
         self.run_code_timeouts = []
+        self.worker_timeouts = []
         self.state = "started"
         self.id = "test-sandbox"
         self.wait = AsyncMock()
@@ -405,8 +406,9 @@ class _LocalSandbox:
     async def remove(self, path):
         Path(path).unlink(missing_ok=True)
 
-    async def start(self, *, argv, cwd, stdin, tag):
+    async def start(self, *, argv, cwd, stdin, tag, execution_timeout=None):
         assert cwd == "/workspace" and stdin == "open"
+        self.worker_timeouts.append(execution_timeout)
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             *argv[1:],
@@ -526,7 +528,13 @@ async def test_daytona_cell_spans_are_nested_and_preserve_execution_results(
     mlflow.flush_trace_async_logging()
     trace = mlflow.get_trace(root.trace_id)
     assert trace is not None
-    stdout, submitted, failure, cancelled = trace.data.spans[1:]
+    cells = [span for span in trace.data.spans if span.name == "daytona.python.execute"]
+    stdout, submitted, failure, cancelled = cells
+    start, stop = [span for span in trace.data.spans if span.name.startswith("daytona.worker.")]
+    assert (start.name, stop.name) == ("daytona.worker.start", "daytona.worker.stop")
+    for span in (start, stop):
+        assert span.parent_id == root.span_id
+        assert span.attributes["daytona.worker_id"] == sandbox.contexts[0].id
     for span in (stdout, submitted, failure, cancelled):
         assert span.name == "daytona.python.execute"
         assert span.span_type == "TOOL"
@@ -692,10 +700,63 @@ async def test_should_raise_recoverable_execution_error_and_reset_context_when_c
 
 
 @pytest.mark.asyncio
+async def test_expired_turn_does_not_start_a_worker(settings, tmp_path):
+    sandbox = _LocalSandbox(tmp_path)
+    loop = asyncio.get_running_loop()
+    interpreter = make_interpreter_factory(sandbox, settings, loop, turn_deadline=loop.time())()
+    with pytest.raises(TimeoutError, match="Turn timed out"):
+        await asyncio.to_thread(interpreter.start)
+    await interpreter.abort()
+    assert sandbox.worker_timeouts == []
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_benchmark_reads_only_the_rlm_subtree(monkeypatch, wrapped):
+    monkeypatch.syspath_prepend(Path(__file__).resolve().parents[2] / "scripts")
+    from dspy_baseline import workspace_trace_root, workspace_trace_task, workspace_trace_usage
+
+    usage = {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+    rlm = SimpleNamespace(
+        name="fleet.rlm.run",
+        span_id="rlm",
+        parent_id="turn" if wrapped else None,
+        inputs={"task": "Synthetic task"},
+        attributes={"fleet.depth": 0, "fleet.run_id": "run"},
+    )
+    forward = SimpleNamespace(
+        name="RLM.forward",
+        span_id="forward",
+        parent_id="rlm",
+        attributes={"mlflow.chat.tokenUsage": usage},
+    )
+    spans = [
+        rlm,
+        forward,
+        SimpleNamespace(name="LM.__call__", span_id="model", parent_id="forward"),
+    ]
+    if wrapped:
+        spans[:0] = [
+            SimpleNamespace(name="fleet.turn", span_id="turn", parent_id=None),
+            SimpleNamespace(name="LM.__call__", span_id="skill-selector", parent_id="turn"),
+        ]
+    trace = SimpleNamespace(
+        info=SimpleNamespace(tags={"fleet.run_id": "run"}, token_usage=None if wrapped else usage),
+        data=SimpleNamespace(spans=spans),
+    )
+    assert workspace_trace_root(trace) is rlm
+    assert (
+        workspace_trace_task(SimpleNamespace(get_trace=lambda _: trace), "trace")
+        == "Synthetic task"
+    )
+    assert workspace_trace_usage(trace, rlm) == (usage, 1)
+
+
+@pytest.mark.asyncio
 async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
     settings = settings.model_copy(update={"rlm_max_depth": 1})
     sandbox = _LocalSandbox(tmp_path)
-    factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())
+    loop = asyncio.get_running_loop()
+    factory = make_interpreter_factory(sandbox, settings, loop, turn_deadline=loop.time() + 60)
     (tmp_path / "sales.csv").write_text("value\n2\n5\n", encoding="utf-8")
     _skill(tmp_path, "csv")
     selection = select_skills(settings, SkillRegistry.load(tmp_path), "Count", ["@csv"])
@@ -780,6 +841,8 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
     )
     assert first.answer == "7" and second.answer == "Still 7"
     assert len(sandbox.contexts) == 3 and set(sandbox.contexts) == set(sandbox.deleted)
+    root_timeout, child_timeout, followup_timeout = sandbox.worker_timeouts
+    assert 0 < followup_timeout < child_timeout < root_timeout <= 60
     assert len(history.messages) == 1 and len(second.history.messages) == 2
     assert "Delegate CSV arithmetic" in json.dumps(root_lm.get_convo(1)[0])
     assert callbacks.on_child_start.await_count == callbacks.on_child_finish.await_count == 2
@@ -1256,6 +1319,46 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
     )
     assert prediction.answer == "ok"
     assert "Preloaded optimized workspace prompt" in json.dumps(root_lm.get_convo(0)[0])
+
+
+@pytest.mark.skipif(
+    os.environ.get("FLEET_RUN_PHASE2_LIVE") != "1", reason="Requires authorized live services"
+)
+@pytest.mark.asyncio
+async def test_live_daytona_enforces_worker_deadline():
+    settings = Settings()
+    async with make_daytona_client(settings) as daytona, ephemeral_sandbox(daytona, settings) as vm:
+        loop = asyncio.get_running_loop()
+        interpreter = make_interpreter_factory(vm, settings, loop, turn_deadline=loop.time() + 8)()
+        try:
+            output = await asyncio.to_thread(
+                interpreter.execute,
+                "import subprocess, sys\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                "print(child.pid)",
+            )
+            assert isinstance(output, str)
+            pid = int(output.strip())
+            handle = interpreter._handle
+            assert handle is not None
+            await handle.wait(timeout=15)
+            info = await handle.get()
+            assert info.state == "terminal" and info.reason == "timed_out"
+            assert info.execution_timeout is not None and 0 < info.execution_timeout <= 8
+            check_code = (
+                "from pathlib import Path\n"
+                "import sys\n"
+                "p = Path('/proc') / sys.argv[1] / 'stat'\n"
+                "assert not p.exists() or p.read_text().rsplit(') ', 1)[1].startswith('Z ')"
+            )
+            check = await vm.process.run(
+                argv=["python", "-c", check_code, str(pid)],
+                timeout=5,
+                execution_timeout=5,
+            )
+            assert check.exit_code == 0, check.stderr
+        finally:
+            await interpreter.abort()
 
 
 @pytest.mark.skipif(

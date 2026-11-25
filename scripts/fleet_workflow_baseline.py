@@ -15,7 +15,13 @@ import mlflow
 import yaml
 from bundled_skill_cases import cases as bundled_cases
 from bundled_skill_cases import verify_chart
-from dspy_baseline import CASES, answer_passes
+from dspy_baseline import (
+    CASES,
+    answer_passes,
+    workspace_trace_root,
+    workspace_trace_task,
+    workspace_trace_usage,
+)
 from fleet_rlm.config import Settings
 from fleet_rlm.db import create_db, save_or_update_memory
 from mlflow import MlflowClient
@@ -56,8 +62,7 @@ async def evaluate(
             raise ValueError(f"Unknown bundled cases: {sorted(unknown)}")
     else:
         tasks = {
-            case.id: tracker.get_trace(case.source_trace).data.spans[0].inputs["task"]
-            for case in CASES
+            case.id: workspace_trace_task(tracker, case.source_trace) for case in CASES
         }
         tasks["birch-invalid"] = tasks["birch-valid"].replace("C = 13.", "C = 13.5.")
     run_tag = uuid4().hex[:6]
@@ -484,7 +489,7 @@ async def evaluate(
                 ).content
                 if hashlib.sha256(contents).hexdigest() != original["sha256"]:
                     raise RuntimeError(f"{case} fixture hash changed")
-                task = tracker.get_trace(trace).data.spans[0].inputs["task"]
+                task = workspace_trace_task(tracker, trace)
                 row = await turn(session["id"], task)
                 files = (
                     await call("GET", f"/api/sessions/{session['id']}/files")
@@ -586,7 +591,7 @@ async def evaluate(
                 for row in sorted(unresolved, key=lambda item: item["start_ms"]):
                     matches = []
                     for trace in candidates:
-                        root = trace.data.spans[0] if trace.data.spans else None
+                        root = workspace_trace_root(trace)
                         if (
                             root is None
                             or not isinstance(root.inputs, dict)
@@ -597,22 +602,20 @@ async def evaluate(
                             or trace.info.tags.get("fleet.run_id") != row["run_id"]
                         ):
                             continue
-                        matches.append(trace)
+                        matches.append((trace, root))
                     if matches:
-                        trace = min(matches, key=lambda match: match.info.request_time)
+                        trace, root = min(
+                            matches, key=lambda match: match[0].info.request_time
+                        )
                         used.add(trace.info.trace_id)
                         row["trace_id"] = trace.info.trace_id
-                        row["tokens"] = (trace.info.token_usage or {}).get(
-                            "total_tokens"
-                        )
+                        tokens, row["model_calls"] = workspace_trace_usage(trace, root)
+                        row["tokens"] = (tokens or {}).get("total_tokens")
                         if bundled:
                             row["daytona_execution"] = any(
                                 span.attributes.get("daytona.sandbox_id")
                                 for span in trace.data.spans
                             )
-                        row["model_calls"] = sum(
-                            span.name == "LM.__call__" for span in trace.data.spans
-                        )
             path = output / "workflow.json"
             path.write_text(
                 json.dumps(

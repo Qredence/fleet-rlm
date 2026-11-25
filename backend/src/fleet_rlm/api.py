@@ -33,6 +33,9 @@ from fastapi import File as Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from mlflow.entities import LiveSpan
+from mlflow.entities.trace_location import MlflowExperimentLocation
+from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -64,6 +67,7 @@ from .interpreter import (
     reusable_session_sandbox,
     sandbox_cleanup_failed,
     upload_workspace_file,
+    workspace_span,
 )
 from .skills import MAX_SKILL_BYTES, SkillRegistry, select_skills
 from .storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
@@ -111,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             experiment = mlflow.set_experiment(settings.mlflow_experiment)
             # Concurrent creation can return the experiment without activating it.
             mlflow.set_experiment(experiment_id=experiment.experiment_id)
+            if settings.daytona_otel_enabled and not MLFLOW_USE_DEFAULT_TRACER_PROVIDER.get():
+                mlflow.tracing.set_destination(MlflowExperimentLocation(experiment.experiment_id))
             mlflow.dspy.autolog()
         skills = SkillRegistry.load(settings.skills_dir)
         lm = agent._model(settings, settings.llm_model)
@@ -1353,6 +1359,32 @@ async def _run_turn(
     queue: asyncio.Queue[dict],
     background: BackgroundTasks,
 ) -> list[dict]:
+    if not runtime.settings.mlflow_tracking_uri:
+        return await _execute_turn(request, runtime, turn, queue, background, trace=None)
+    with workspace_span(
+        "fleet.turn",
+        root=True,
+        attributes={"fleet.run_id": str(turn.run_id), "fleet.turn.status": "failed"},
+    ) as trace:
+        mlflow.update_current_trace(
+            tags={"fleet.run_id": str(turn.run_id)}, session_id=str(turn.session_id)
+        )
+        try:
+            return await _execute_turn(request, runtime, turn, queue, background, trace=trace)
+        finally:
+            if span := mlflow.get_current_active_span():
+                _LOG.info("Turn %s MLflow trace %s", turn.run_id, span.trace_id)
+
+
+async def _execute_turn(
+    request: Request,
+    runtime: Runtime,
+    turn: Turn,
+    queue: asyncio.Queue[dict],
+    background: BackgroundTasks,
+    *,
+    trace: LiveSpan | None,
+) -> list[dict]:
     sessionmaker = runtime.sessionmaker
     root_id = str(turn.run_id)
     status: store.TerminalStatus = "failed"
@@ -1422,11 +1454,23 @@ async def _run_turn(
                 max_turns=effective.history_max_turns,
                 max_chars=effective.history_max_chars,
             )
-            sandbox = await _chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
+            with workspace_span("daytona.sandbox.acquire") as acquisition:
+                existing_sandbox_id = session.daytona_sandbox_id
+                sandbox = await _chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
+                if acquisition is not None:
+                    acquisition.set_attributes(
+                        {
+                            "daytona.sandbox_id": sandbox.id,
+                            "daytona.sandbox.reused": sandbox.id == existing_sandbox_id,
+                        }
+                    )
             files = await store.list_session_files(sessionmaker, turn.session_id)
-            await _hydrate_workspace(
-                runtime, sandbox, files, effective.daytona_exec_timeout_seconds
-            )
+            with workspace_span(
+                "fleet.workspace.hydrate", attributes={"fleet.file_count": len(files)}
+            ):
+                await _hydrate_workspace(
+                    runtime, sandbox, files, effective.daytona_exec_timeout_seconds
+                )
             hydrated = True
             decision_lm = _request_decision_lm(runtime, effective)
             selection = await asyncio.to_thread(
@@ -1477,7 +1521,7 @@ async def _run_turn(
                     fact for record in task_memories if (fact := agent.memory_fact(record.content))
                 ],
                 interpreter_factory=make_interpreter_factory(
-                    sandbox, effective, asyncio.get_running_loop()
+                    sandbox, effective, asyncio.get_running_loop(), turn_deadline=turn.deadline
                 ),
                 run_id=root_id,
                 emit=emit,
@@ -1489,7 +1533,10 @@ async def _run_turn(
                 optimized_state=runtime.optimized_program_state,
                 callbacks=agent.ChildCallbacks(start_child, finish_child),
             )
-            with TemporaryDirectory(prefix="fleet-publish-") as temporary:
+            with (
+                workspace_span("fleet.workspace.publish") as publication,
+                TemporaryDirectory(prefix="fleet-publish-") as temporary,
+            ):
                 local = Path(temporary) / "file"
                 for artifact in await list_new_artifacts(sandbox, known_files):
                     path = artifact["path"].removeprefix(f"{WORKSPACE}/")
@@ -1511,6 +1558,8 @@ async def _run_turn(
                             "size_bytes": size,
                         }
                     )
+                if publication is not None:
+                    publication.set_attribute("fleet.file_count", len(artifacts))
             if await request.is_disconnected():
                 raise asyncio.CancelledError
             failure_parts = stream.snapshot(root_id)
@@ -1554,40 +1603,50 @@ async def _run_turn(
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
-        fence_committed = False
-        try:
-            persisted: dict[str, Any] = {}
-            if status == "completed" and result is not None:
-                persisted = {
-                    "answer": result.answer,
-                    "history_json": result.history.model_dump(mode="json"),
-                    "files": artifacts,
-                }
-            committed = await _finish_root(
-                sessionmaker,
-                turn,
-                status,
-                child_snapshots=stream.pending_child_snapshots() if status != "completed" else None,
-                ui_parts=stream.snapshot(root_id),
-                error=error_text,
-                **persisted,
-            )
-            fence_committed = committed
-        except Exception as error:
-            _LOG.warning("Could not finalize turn %s (%s)", turn.run_id, type(error).__name__)
-            if not turn.finalized:
-                fence_committed = await _finish_root(
+        with workspace_span("fleet.turn.finalize") as finalization:
+            fence_committed = False
+            try:
+                persisted: dict[str, Any] = {}
+                if status == "completed" and result is not None:
+                    persisted = {
+                        "answer": result.answer,
+                        "history_json": result.history.model_dump(mode="json"),
+                        "files": artifacts,
+                    }
+                committed = await _finish_root(
                     sessionmaker,
                     turn,
-                    "cancelled" if status == "cancelled" else "failed",
-                    error="Could not persist turn",
-                    ui_parts=failure_parts or stream.snapshot(root_id),
+                    status,
+                    child_snapshots=stream.pending_child_snapshots()
+                    if status != "completed"
+                    else None,
+                    ui_parts=stream.snapshot(root_id),
+                    error=error_text,
+                    **persisted,
                 )
-            status = "failed"
-            committed = False
-        if fence_committed and turn.sandbox_for_cleanup is not None:
-            await _retire_workspace(runtime, turn.sandbox_for_cleanup)
-        await _try_object_cleanup(runtime, turn.session_id)
+                fence_committed = committed
+            except Exception as error:
+                _LOG.warning("Could not finalize turn %s (%s)", turn.run_id, type(error).__name__)
+                if not turn.finalized:
+                    fence_committed = await _finish_root(
+                        sessionmaker,
+                        turn,
+                        "cancelled" if status == "cancelled" else "failed",
+                        error="Could not persist turn",
+                        ui_parts=failure_parts or stream.snapshot(root_id),
+                    )
+                status = "failed"
+                committed = False
+            if finalization is not None and not committed:
+                finalization.set_status("ERROR")
+        with workspace_span("fleet.workspace.cleanup"):
+            if fence_committed and turn.sandbox_for_cleanup is not None:
+                await _retire_workspace(runtime, turn.sandbox_for_cleanup)
+            await _try_object_cleanup(runtime, turn.session_id)
+        if trace is not None:
+            outcome = "failed" if status == "completed" and not committed else status
+            trace.set_attribute("fleet.turn.status", outcome)
+            trace.set_status("OK" if outcome == "completed" else "ERROR")
 
     if status == "completed" and committed and result is not None:
         background.add_task(_consolidate, runtime, turn, result.answer, memories)

@@ -24,7 +24,7 @@
    ```bash
    cp backend/.env.example backend/.env
    ```
-   Set the Postgres URLs, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_IMAGE`, `FLEET_DAYTONA_REGION`, and the `FLEET_S3_*` variables shown in the example. Set `FLEET_LLM_MODEL`, `FLEET_SUB_LLM_MODEL`, `FLEET_LLM_API_KEY`, and `TYPESAFE_API_KEY`. Unset `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` when running the v2 client. Register the image from a clean build context containing [`backend/snapshot/Dockerfile`](./backend/snapshot/Dockerfile) and `backend/skills`.
+   Set the Postgres URLs, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_IMAGE`, `FLEET_DAYTONA_REGION`, and the `FLEET_S3_*` variables shown in the example. Set `FLEET_LLM_MODEL`, `FLEET_SUB_LLM_MODEL`, `FLEET_LLM_API_KEY`, and `TYPESAFE_API_KEY`. Unset `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` when running the v2 client. See [Build and roll out the sandbox image](#build-and-roll-out-the-sandbox-image).
 
    > Models, RLM and history budgets, and the Python cell timeout can be edited in **Settings**. Environment variables control the Daytona image, region, and lifecycle, the storage bucket, the model gateway, MLflow, and worker concurrency.
 
@@ -39,13 +39,36 @@
    ```bash
    make mlflow
    ```
-   Enable SDK request spans within Fleet's MLflow traces by setting both `FLEET_DAYTONA_OTEL_ENABLED=true` and `MLFLOW_USE_DEFAULT_TRACER_PROVIDER=false` in the backend process environment.
+   With `FLEET_MLFLOW_TRACKING_URI` configured, admitted chat requests record a `fleet.turn` span in an MLflow trace keyed by `fleet.run_id`. The span covers sandbox acquisition, workspace hydration, RLM execution, artifact publication, and finalization. To include Daytona SDK request spans, set both `FLEET_DAYTONA_OTEL_ENABLED=true` and `MLFLOW_USE_DEFAULT_TRACER_PROVIDER=false` in the backend process environment.
 
 4. **Run the backend and frontend:**
    ```bash
    make dev-backend   # FastAPI on http://127.0.0.1:8000
    make dev-frontend  # Vite SPA on http://localhost:5173 (proxies /api, /healthz, /readyz)
    ```
+
+### Build and roll out the sandbox image
+
+Use the Daytona CLI for the target project and set `FLEET_DAYTONA_REGION` to the deployment region. Archive a committed revision. The archive contains the Dockerfile, locked dependencies, and tracked bundled Skills.
+
+```bash
+revision=$(git rev-parse HEAD)
+context=$(mktemp -d)/fleet-daytona-context.tar
+make daytona-image-context REV="$revision" OUT="$context"
+printf '%s\n' '{"cpu_arch":"amd64"}' | daytona image build "fleet-rlm-$(git rev-parse --short=12 "$revision")" \
+  --region "$FLEET_DAYTONA_REGION" --dockerfile backend/snapshot/Dockerfile \
+  --context "$context" --file - --yes
+```
+
+For dependency updates, edit the input requirements and refresh the Linux amd64 Python 3.13 lock with `uv`.
+
+```bash
+uv pip compile backend/snapshot/requirements.in --python-version 3.13 \
+  --python-platform x86_64-unknown-linux-gnu --generate-hashes \
+  --only-binary :all: -o backend/snapshot/requirements.lock
+```
+
+Record the source revision, Daytona image ID, region, and architecture. Use the ready `img_…` ID as `FLEET_DAYTONA_IMAGE` in staging, then verify a fresh session. Before increasing traffic, check `daytona org limits` and the live sandbox inventory against expected concurrent cold sessions across the deployment's backend workers. Reduce `FLEET_MAX_CONCURRENT_TURNS_PER_WORKER` if headroom is insufficient. Promote the tested backend and image ID together. Existing workspaces age out under the configured lifecycle. Keep the prior backend revision and image ID for rollback.
 
 ---
 

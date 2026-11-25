@@ -14,9 +14,11 @@ from collections.abc import (
     Callable,
     Collection,
     Coroutine,
+    Generator,
     Mapping,
 )
-from contextlib import aclosing, asynccontextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
+from contextvars import Context, copy_context
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from uuid import uuid4
@@ -36,6 +38,7 @@ from daytona.v2.process import AsyncProcessHandle
 from daytona.v2.types import StreamLogEvent
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import INTERPRETER_TOOL
+from mlflow.entities import LiveSpan
 
 from .config import Settings
 
@@ -47,6 +50,27 @@ _LOG = logging.getLogger(__name__)
 Execution = Callable[[], Awaitable[str | FinalOutput]]
 ExecutionObserver = Callable[[str, Execution], Awaitable[str | FinalOutput]]
 ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitable[Any]]
+
+
+@contextmanager
+def workspace_span(
+    name: str, *, root: bool = False, attributes: dict[str, Any] | None = None
+) -> Generator[LiveSpan | None]:
+    if not root and mlflow.get_current_active_span() is None:
+        yield None
+        return
+    with mlflow.start_span(name, span_type="CHAIN", attributes=attributes) as span:
+        try:
+            yield span
+        except BaseException as error:
+            # Provider exception details can contain URLs or other request data.
+            # End the span before re-raising so MLflow records only the error type.
+            span.set_status("ERROR")
+            span.set_attribute("error.type", type(error).__name__)
+            failure = error
+        else:
+            return
+    raise failure
 
 
 @asynccontextmanager
@@ -599,6 +623,7 @@ class DaytonaCodeInterpreter:
         *,
         timeout: int,
         max_output_chars: int,
+        turn_deadline: float | None = None,
         on_execution: ExecutionObserver | None = None,
         on_tool: ToolObserver | None = None,
     ):
@@ -607,12 +632,14 @@ class DaytonaCodeInterpreter:
         self._sandbox = sandbox
         self._loop = loop
         self._timeout = timeout
+        self._turn_deadline = turn_deadline
         self._limit = max(0, max_output_chars)
         self._on_execution = on_execution
         self._on_tool = on_tool
         self._tag: str | None = None
         self._cursor: str | None = None
         self._handle: AsyncProcessHandle | None = None
+        self._worker_context: Context | None = None
         self._stdin_lock = asyncio.Lock()
         self._operation: asyncio.Task | None = None
         self._closing = asyncio.Lock()
@@ -681,15 +708,30 @@ class DaytonaCodeInterpreter:
     async def _start(self) -> None:
         if self._handle is not None:
             return
+        remaining = None
+        if self._turn_deadline is not None:
+            remaining = self._turn_deadline - self._loop.time()
+            if remaining <= 0:
+                raise TimeoutError("Turn timed out before Daytona worker startup")
         self._tag = f"fleet-python-{uuid4().hex}"
         self._cursor = None
+        if mlflow.get_current_active_span() is not None:
+            self._worker_context = copy_context()
         try:
-            self._handle = await self._sandbox.process.start(
-                argv=["python", "-u", "-c", _WORKER],
-                cwd=WORKSPACE,
-                stdin="open",
-                tag=self._tag,
-            )
+            with workspace_span(
+                "daytona.worker.start", attributes={"daytona.sandbox_id": self._sandbox.id}
+            ) as span:
+                self._handle = await self._sandbox.process.start(
+                    argv=["python", "-u", "-c", _WORKER],
+                    cwd=WORKSPACE,
+                    stdin="open",
+                    tag=self._tag,
+                    execution_timeout=remaining,
+                )
+                if span is not None:
+                    span.set_attribute("daytona.worker_id", self._handle.id)
+                    if remaining is not None:
+                        span.set_attribute("daytona.worker.execution_timeout_seconds", remaining)
         except (Exception, asyncio.CancelledError) as error:
             self._closed = True
             await self._reset()
@@ -699,7 +741,8 @@ class DaytonaCodeInterpreter:
 
     async def abort(self) -> None:
         """Fence replies and wait for the worker and its descendants to stop."""
-        cleanup = asyncio.create_task(self._abort())
+        context = self._worker_context
+        cleanup = asyncio.create_task(self._abort(), context=context.copy() if context else None)
         cancelled = False
         while not cleanup.done():
             try:
@@ -731,18 +774,24 @@ class DaytonaCodeInterpreter:
     async def _reset(self) -> None:
         if self._tag is None:
             return
-        try:
-            with suppress(NotFoundError):
-                await self._sandbox.process.kill_all(tag=self._tag, timeout=10)
-        except Exception as error:
-            self._closed = True
-            raise SandboxCleanupError("Daytona worker cleanup could not be verified") from error
-        if self._handle is not None:
-            with suppress(DaytonaError):
-                await self._handle.delete()
+        with workspace_span(
+            "daytona.worker.stop", attributes={"daytona.sandbox_id": self._sandbox.id}
+        ) as span:
+            if span is not None and self._handle is not None:
+                span.set_attribute("daytona.worker_id", self._handle.id)
+            try:
+                with suppress(NotFoundError):
+                    await self._sandbox.process.kill_all(tag=self._tag, timeout=10)
+            except Exception as error:
+                self._closed = True
+                raise SandboxCleanupError("Daytona worker cleanup could not be verified") from error
+            if self._handle is not None:
+                with suppress(DaytonaError):
+                    await self._handle.delete()
         self._handle = None
         self._tag = None
         self._cursor = None
+        self._worker_context = None
 
     async def _send(self, handle: AsyncProcessHandle, frame: dict) -> None:
         message = json.dumps(frame, allow_nan=False, separators=(",", ":")) + "\n"
@@ -960,10 +1009,13 @@ class _DaytonaInterpreterFactory:
         sandbox: AsyncSandbox,
         settings: Settings,
         loop: asyncio.AbstractEventLoop,
+        *,
+        turn_deadline: float | None,
     ) -> None:
         self._sandbox = sandbox
         self._settings = settings
         self._loop = loop
+        self._turn_deadline = turn_deadline
 
     def __call__(
         self,
@@ -976,6 +1028,7 @@ class _DaytonaInterpreterFactory:
             self._loop,
             timeout=self._settings.daytona_exec_timeout_seconds,
             max_output_chars=self._settings.rlm_max_output_chars,
+            turn_deadline=self._turn_deadline,
             on_execution=on_execution,
             on_tool=on_tool,
         )
@@ -985,8 +1038,10 @@ def make_interpreter_factory(
     sandbox: AsyncSandbox,
     settings: Settings,
     loop: asyncio.AbstractEventLoop,
+    *,
+    turn_deadline: float | None = None,
 ) -> Callable[..., DaytonaCodeInterpreter]:
-    return _DaytonaInterpreterFactory(sandbox, settings, loop)
+    return _DaytonaInterpreterFactory(sandbox, settings, loop, turn_deadline=turn_deadline)
 
 
 async def list_new_artifacts(

@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import subprocess
+from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from fleet_rlm import agent
 from fleet_rlm.config import Settings
 from fleet_rlm.optimize import _ephemeral_daytona_interpreter
 from mlflow import MlflowClient
+from mlflow.entities import Span, Trace
 
 
 @dataclass(frozen=True)
@@ -118,11 +120,84 @@ def answer_passes(answer: str, expected: str | None) -> bool:
     )
 
 
+def workspace_trace_root(trace: Trace) -> Span | None:
+    run_id = trace.info.tags.get("fleet.run_id")
+    return next(
+        (
+            span
+            for span in trace.data.spans
+            if (
+                span.name == "fleet.rlm.run"
+                and span.attributes.get("fleet.depth") == 0
+                and span.attributes.get("fleet.run_id") == run_id
+            )
+            or (
+                span.parent_id is None and span.name in {"RLM.forward", "fleet.rlm.run"}
+            )
+        ),
+        None,
+    )
+
+
+def _root_forward(trace: Trace, root: Span) -> Span | None:
+    if root.name == "RLM.forward":
+        return root
+    return next(
+        (
+            s
+            for s in trace.data.spans
+            if s.parent_id == root.span_id and s.name == "RLM.forward"
+        ),
+        None,
+    )
+
+
+def workspace_trace_usage(trace: Trace, root: Span) -> tuple[dict | None, int]:
+    if root.parent_id is None:
+        return trace.info.token_usage, sum(
+            s.name == "LM.__call__" for s in trace.data.spans
+        )
+
+    children = defaultdict(list)
+    for span in trace.data.spans:
+        children[span.parent_id].append(span)
+    pending = list(children[root.span_id])
+    model_calls = 0
+    while pending:
+        span = pending.pop()
+        model_calls += span.name == "LM.__call__"
+        pending.extend(children[span.span_id])
+
+    forward = _root_forward(trace, root)
+    usage = (
+        forward.attributes.get("mlflow.chat.tokenUsage")
+        if forward is not None
+        else None
+    )
+    return usage, model_calls
+
+
+def workspace_trace_task(client: MlflowClient, trace_id: str) -> str:
+    trace = client.get_trace(trace_id)
+    root = workspace_trace_root(trace) if trace is not None else None
+    if (
+        root is None
+        or not isinstance(root.inputs, dict)
+        or not isinstance(root.inputs.get("task"), str)
+    ):
+        raise ValueError(f"Missing RLM task in source trace {trace_id}")
+    return root.inputs["task"]
+
+
 def example_from_trace(client: MlflowClient, case: Case, repeat: int) -> dspy.Example:
     trace = client.get_trace(case.source_trace)
-    if trace is None or trace.data.spans[0].name != "RLM.forward":
+    root = workspace_trace_root(trace) if trace is not None else None
+    forward = (
+        _root_forward(trace, root) if trace is not None and root is not None else None
+    )
+    if forward is None or not isinstance(forward.inputs, dict):
         raise ValueError(f"Missing RLM source trace for {case.id}")
-    captured = trace.data.spans[0].inputs
+    captured = forward.inputs
     context = {key: captured.get(key, []) for key in INPUTS}
     context["memories"] = [
         item

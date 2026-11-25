@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 
 import dspy
 import httpx
+import mlflow
 import pytest
 import pytest_asyncio
 from botocore.response import StreamingBody
@@ -1217,7 +1218,18 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
 
 
 @pytest.mark.asyncio
-async def test_workspace_startup_failure_returns_actionable_stream_error(offline, monkeypatch):
+async def test_workspace_startup_failure_returns_actionable_stream_error(
+    offline, monkeypatch, tmp_path, caplog, request
+):
+    tracking_uri = f"sqlite:///{tmp_path / 'traces.db'}"
+    previous_uri = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(tracking_uri)
+    request.addfinalizer(lambda: mlflow.set_tracking_uri(previous_uri))
+    runtime = api.app.state.runtime
+    api.app.state.runtime = replace(
+        runtime, settings=offline.settings.model_copy(update={"mlflow_tracking_uri": tracking_uri})
+    )
+    caplog.set_level("INFO", logger=api.__name__)
     monkeypatch.setattr(
         api,
         "_chat_sandbox",
@@ -1232,6 +1244,24 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(offline
     assert "Fleet could not start the workspace. Try again." in response.text
     assert "private provider diagnostics" not in response.text
     assert response.text.endswith("data: [DONE]\n\n")
+    trace_id = next(
+        record.args[1] for record in caplog.records if record.msg == "Turn %s MLflow trace %s"
+    )
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(trace_id)
+    assert trace is not None
+    root, acquisition, finalize, cleanup = trace.data.spans
+    assert (root.name, root.attributes["fleet.turn.status"]) == ("fleet.turn", "failed")
+    assert root.status.status_code.name == "ERROR"
+    assert trace.info.tags["fleet.run_id"] == str(offline.finish.await_args.args[1])
+    assert [span.name for span in (acquisition, finalize, cleanup)] == [
+        "daytona.sandbox.acquire",
+        "fleet.turn.finalize",
+        "fleet.workspace.cleanup",
+    ]
+    assert all(span.parent_id == root.span_id for span in (acquisition, finalize, cleanup))
+    assert acquisition.attributes["error.type"] == "SandboxStartupError"
+    assert "private provider diagnostics" not in trace.to_json()
 
 
 @pytest.mark.asyncio

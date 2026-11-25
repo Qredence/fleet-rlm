@@ -1,4 +1,4 @@
-.PHONY: help check check-backend check-frontend dev-backend dev-frontend mlflow
+.PHONY: help check check-backend check-frontend dev-backend dev-frontend mlflow daytona-image-context
 
 help:
 	@echo "Fleet-RLM targets:"
@@ -8,6 +8,7 @@ help:
 	@echo "  make dev-backend    Start FastAPI dev server on port 8000"
 	@echo "  make dev-frontend   Start Vite dev server on port 5173"
 	@echo "  make mlflow         Start external MLflow 3.18 server on 127.0.0.1:5001"
+	@echo "  make daytona-image-context REV=<commit> OUT=<tar>  Archive committed sandbox build inputs"
 
 check: check-backend check-frontend
 
@@ -26,3 +27,12 @@ dev-frontend:
 
 mlflow:
 	docker compose up -d mlflow
+
+daytona-image-context: export DAYTONA_CONTEXT_REV = $(REV)
+daytona-image-context: export DAYTONA_CONTEXT_OUT = $(OUT)
+daytona-image-context:
+	@test -n "$$DAYTONA_CONTEXT_REV" && test -n "$$DAYTONA_CONTEXT_OUT" || { echo 'Usage: make daytona-image-context REV=<commit> OUT=<tar>' >&2; exit 2; }
+	@commit=$$(git rev-parse --verify --end-of-options "$$DAYTONA_CONTEXT_REV^{commit}") && \
+		git archive --format=tar --output="$$DAYTONA_CONTEXT_OUT" "$$commit" -- \
+		backend/snapshot/Dockerfile backend/snapshot/requirements.lock backend/skills && \
+		echo "Daytona image context for $$commit: $$DAYTONA_CONTEXT_OUT"
