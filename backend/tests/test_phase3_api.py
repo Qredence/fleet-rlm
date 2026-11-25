@@ -717,6 +717,7 @@ async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monke
             _env_file=None,
             database_url="postgresql://localhost/unused",
             database_direct_url="postgresql://localhost/unused",
+            daytona_api_key="offline",
             llm_model="openai/gpt-4o-mini",
             sub_llm_model="openai/gpt-4o-mini",
             llm_api_key="offline",
