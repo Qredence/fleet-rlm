@@ -1,0 +1,63 @@
+backend/.env.example
+  s_31ac04ebb529d8::t_1472050bc4d4fb 54-56
+backend/alembic/versions/0007_turn_lessons.py
+  s_31ac04ebb529d8::t_a2014812cfd2dc 1-30
+backend/pyproject.toml
+  s_31ac04ebb529d8::t_7e62f3f7d54b26 152-160
+backend/skills/chart-visualization/SKILL.md
+  s_31ac04ebb529d8::t_9c9fa023716a5f 3,6-8
+backend/skills/data-analysis/SKILL.md
+  s_31ac04ebb529d8::t_bd67e22f2a47e1 3,6-8
+backend/skills/document-extraction/SKILL.md
+  s_31ac04ebb529d8::t_164516a5951880 3,6-8
+backend/skills/recursive-synthesis/SKILL.md
+  s_31ac04ebb529d8::t_79ed6ac60d21a1 3,6-8
+backend/skills/scientific-computing/SKILL.md
+  s_31ac04ebb529d8::t_910a9cb107226f 3,6-8
+backend/skills/skill-creator/SKILL.md
+  s_31ac04ebb529d8::t_a9cdf5c92886f0 3,6-10
+backend/skills/spreadsheet-audit/SKILL.md
+  s_31ac04ebb529d8::t_d3959a3c8bfc6e 3,6-8
+backend/skills/web-research/SKILL.md
+  s_31ac04ebb529d8::t_338474c3cb5cea 1-11
+backend/skills/web-research/scripts/host_tools.py
+  s_31ac04ebb529d8::t_d854c6ea3279a0 1-118
+backend/src/fleet_rlm/agent.py
+  s_31ac04ebb529d8::t_940af40ebb4792 6,16-18,25,28,32-43,50-53,64-70,73-74,78,180-232,290-358,373,414,417,427,463-464,533-547,552-554,572,591-592,645-649,663-664,687-690,772-875
+backend/src/fleet_rlm/config.py
+  s_31ac04ebb529d8::t_7f3b07318df91b 39-42
+backend/src/fleet_rlm/db.py
+  s_31ac04ebb529d8::t_7fe787bdcb17bd 30,39,162,166-169,505-558,568-574,588,591-599,772-784,797-816,818,820-844,846-850,853,859,863-867,889-893
+backend/src/fleet_rlm/ui_stream.py
+  s_31ac04ebb529d8::t_33f3f29c93f272 5,34-45,141,179-197,228-230
+backend/tests/test_phase1_locking.py
+  s_31ac04ebb529d8::t_46a2bce868c521 33,35,42,47,190-203,216-221,602-664
+backend/tests/test_phase5_optimize.py
+  s_31ac04ebb529d8::t_c7c65468c5f3ff 1079,1123-1125
+frontend/src/components/agent/SessionWorkspace.tsx
+  s_31ac04ebb529d8::t_505f29b784823b 3,61-62,74-86,121-122,266,305-309,311-313
+frontend/src/lib/api.ts
+  s_31ac04ebb529d8::t_3cb03316c0e79a 28-29,200,203,213-218
+frontend/src/lib/messages.ts
+  s_31ac04ebb529d8::t_25a1d95f65cc0c 17-36,40-41
+frontend/src/pages/MemoriesPage.tsx
+  s_31ac04ebb529d8::t_c48603da4d3c05 35,43,78-79,88,92-93,107-108,125,130-132,152-153,221-223,249-255,283-287
+scripts/fleet_workflow_baseline.py
+  s_31ac04ebb529d8::t_831779dac36b1b 301-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "436fe9ac1b340a3c620f15a71040a24e8422471b",
+  "prompts": {},
+  "sessions": {
+    "s_31ac04ebb529d8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21183-34a8-7d10-92b2-7d65775a6a81",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
