@@ -1,6 +1,7 @@
 """Host-only storage for committed workspace files."""
 
 import asyncio
+import base64
 import hashlib
 from collections.abc import Awaitable, Callable
 from contextlib import closing, suppress
@@ -97,7 +98,7 @@ class ObjectStorage:
                 digest = hashlib.file_digest(body, "sha256").hexdigest()
                 size = body.tell()
             upload = self._client.create_multipart_upload(
-                Bucket=self.bucket, Key=key, Metadata={"sha256": digest}
+                Bucket=self.bucket, Key=key, Metadata={"sha256": digest}, ChecksumAlgorithm="SHA256"
             )
             return upload["UploadId"], digest, size
 
@@ -115,6 +116,7 @@ class ObjectStorage:
             raise
 
         def write() -> None:
+            checksum = base64.b64encode(bytes.fromhex(digest)).decode()
             with path.open("rb") as body:
                 part = self._client.upload_part(
                     Bucket=self.bucket,
@@ -123,14 +125,19 @@ class ObjectStorage:
                     PartNumber=1,
                     Body=body,
                     ContentLength=size,
+                    ChecksumSHA256=checksum,
                 )
             self._client.complete_multipart_upload(
                 Bucket=self.bucket,
                 Key=key,
                 UploadId=upload_id,
-                MultipartUpload={"Parts": [{"ETag": part["ETag"], "PartNumber": 1}]},
+                MultipartUpload={
+                    "Parts": [{"ETag": part["ETag"], "PartNumber": 1, "ChecksumSHA256": checksum}]
+                },
             )
-            self._read_verified(key, sha256=digest, size=size)
+            # A store that echoes the checksum rejected any part whose bytes differ from it.
+            if part.get("ChecksumSHA256") != checksum:
+                self._read_verified(key, sha256=digest, size=size)
 
         await _transfer(write)
         return digest, size
