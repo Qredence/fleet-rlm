@@ -57,17 +57,12 @@ jobs:
   frontend-check:
     docker:
       - image: cimg/node:26.13.1
-    environment:
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
     steps:
       - checkout
       - run:
-          name: Enable Corepack and pnpm
+          name: Configure pnpm from the CI image
           command: |
             node --version
-            sudo npm install -g corepack@latest
-            sudo corepack enable
-            corepack prepare pnpm@latest --activate
             pnpm config set store-dir ~/.pnpm-store
             pnpm --version
       - restore_cache:
