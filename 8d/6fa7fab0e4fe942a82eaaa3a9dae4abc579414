@@ -1,0 +1,44 @@
+AGENTS.md
+  h_f276322eb5eb9f 9
+README.md
+  h_f276322eb5eb9f 36
+backend/alembic/versions/0006_workspace_recovery.py
+  h_f276322eb5eb9f 1-33
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 52,61,64,234,496-499,520,707,709-711,713-721,756,758-775,777-793,795-808,834-837,844,855-857,859-860,938-939,967-997,1000-1001,1025,1118-1120,1150,1178-1184,1252,1255,1291,1359,1373-1380,1499,1507-1508,1534,1539-1540,1554,1556,1572,1576,1585-1587
+backend/src/fleet_rlm/db.py
+  h_f276322eb5eb9f 6,65,138-158,237,245,248-251,257-271,273-283,366-367,401-408,547-558,560,587-608,613-667
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 21,27,33,51-53,59-60,86-87,123-173,193,195-202,205,263-271,294,296,704,716-717,746,770,972-989,994-999,1006,1015,1023
+backend/src/fleet_rlm/storage.py
+  h_f276322eb5eb9f 5-6,84-87,91-107,110-111,115-120,123-124,150-163,168-172
+backend/tests/test_phase1_locking.py
+  h_f276322eb5eb9f 36,40-41,321-344,429-430,437-442,452,456-459
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 13,47,52,60-61,392,401-407,444-447,450-452,459-462,465-466,485-486,790,792,811,989-992,1060,1063,1076-1077,1264,1388,1392
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 59,68,112-113,161,196-197,221,226-233,242-245,252-261,279-284,291,300,315-316,319,322-355,390-393,413,415,429,508-511,535,791-795,812-818,827,829,849-866,1476,1833-1834,1836-1842,1844-1845,1951-1953,1955-1965,1967,1969-1972,1974-1976,1984,1987,1995-1996,2002-2003
+docs/PRD.md
+  h_f276322eb5eb9f 70
+docs/daytona-v2-migration-plan.md
+  h_f276322eb5eb9f 74,76
+frontend/src/App.tsx
+  h_f276322eb5eb9f 102-110,154,178-184
+frontend/src/components/AppSidebar.tsx
+  h_f276322eb5eb9f 212,231-232
+frontend/src/hooks/use-sessions.ts
+  h_f276322eb5eb9f 98-105
+frontend/src/lib/api.ts
+  h_f276322eb5eb9f 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8d6fa7fab0e4fe942a82eaaa3a9dae4abc579414",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
