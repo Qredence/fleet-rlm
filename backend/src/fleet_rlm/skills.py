@@ -6,9 +6,10 @@ import os
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 
 import dspy
 import yaml
@@ -109,6 +110,16 @@ def _host_tools_path(skill: SkillDefinition) -> Path | None:
     return path if path.is_file() else None
 
 
+@cache
+def _host_tools_module(skill_name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location("fleet_skill_" + skill_name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Cannot load bundled tools for {skill_name}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_host_tools(
     bundled: SkillRegistry, selection: SkillSelection, settings: Settings
 ) -> dict[str, Callable]:
@@ -119,12 +130,7 @@ def load_host_tools(
             continue
         if (path := _host_tools_path(skill)) is None:
             continue
-        spec = importlib.util.spec_from_file_location("fleet_skill_" + skill.name, path)
-        if spec is None or spec.loader is None:
-            raise ValueError(f"Cannot load bundled tools for {skill.name}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        for name, tool in module.bind_tools(settings).items():
+        for name, tool in _host_tools_module(skill.name, path).bind_tools(settings).items():
             if name in skill.allowed_tools:
                 tools[name] = tool
     return tools

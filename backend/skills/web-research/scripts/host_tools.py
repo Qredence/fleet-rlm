@@ -1,11 +1,15 @@
 """Public web research tools. One instance and credit budget per workspace turn."""
 
+import atexit
 from ipaddress import ip_address
 from threading import Lock
 from urllib.parse import urlsplit
 
 import httpx
 from pydantic import SecretStr
+
+_client = httpx.Client(timeout=20)
+atexit.register(_client.close)
 
 
 def _public_url(url: str) -> bool:
@@ -50,11 +54,10 @@ class WebResearch:
             self._remaining -= 1
             budget = self._budget(requested=True)
         try:
-            response = httpx.post(
+            response = _client.post(
                 f"https://api.tavily.com/{endpoint}",
                 headers={"Authorization": f"Bearer {self._key.get_secret_value()}"},
                 json=payload,
-                timeout=20,
             )
             response.raise_for_status()
             data = response.json()
