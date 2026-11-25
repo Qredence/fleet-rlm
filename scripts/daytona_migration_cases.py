@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 import mlflow
 from bundled_skill_cases import verify_chart
+from dspy_baseline import workspace_trace_root, workspace_trace_usage
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
     delete_sandbox_by_id,
@@ -240,15 +241,15 @@ def _attach_traces(
             continue
         for trace in traces:
             spans = trace.data.spans
-            if not spans or not any(
+            root = workspace_trace_root(trace)
+            if root is None or not any(
                 span.name == "daytona.python.execute" for span in spans
             ):
                 continue
             if trace.info.tags.get("fleet.run_id") != turn["run_id"]:
                 continue
             turn["trace_id"] = trace.info.trace_id
-            turn["tokens"] = trace.info.token_usage
-            turn["model_calls"] = sum(span.name == "LM.__call__" for span in spans)
+            turn["tokens"], turn["model_calls"] = workspace_trace_usage(trace, root)
             turn["spans"] = [
                 {
                     "id": span.span_id,
