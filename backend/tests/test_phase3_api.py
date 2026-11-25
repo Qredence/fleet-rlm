@@ -2565,7 +2565,7 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
 
     requests = []
 
-    def post(endpoint, *, headers, json, timeout):
+    def post(_client, endpoint, *, headers, json):
         assert headers["Authorization"] == "Bearer mock-host-key"
         action = endpoint.rsplit("/", 1)[1]
         requests.append(action)
@@ -2590,7 +2590,7 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
             }
         return httpx.Response(200, json=result, request=request)
 
-    monkeypatch.setattr(httpx, "post", post)
+    monkeypatch.setattr(httpx.Client, "post", post)
     open_call = f"web_open({url!r})"
     code = {
         "search": "hit = web_search('public figures')['results'][0]\npage = web_open(hit['url'])",

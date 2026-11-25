@@ -851,7 +851,7 @@ async def upload_file(
             local = Path(temporary) / "upload"
             with local.open("wb") as destination:
                 while chunk := await file.read(1024 * 1024):
-                    destination.write(chunk)
+                    await asyncio.to_thread(destination.write, chunk)
             digest, size = await runtime.storage.put(key, local, register=register)
         record = await store.upsert_file_record(
             runtime.sessionmaker,
@@ -1013,7 +1013,7 @@ async def _read_workspace_file(
         await _copy_committed_file(
             runtime, record, path, max_bytes=max_bytes, expected_sha=expected_sha
         )
-        return path.read_bytes()
+        return await asyncio.to_thread(path.read_bytes)
 
 
 def _attachment_headers(file_path: str) -> dict[str, str]:

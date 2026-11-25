@@ -61,7 +61,7 @@ from fleet_rlm.interpreter import (
     reusable_session_sandbox,
     upload_workspace_file,
 )
-from fleet_rlm.skills import SkillRegistry, build_skill_selector, select_skills
+from fleet_rlm.skills import SkillRegistry, build_skill_selector, load_host_tools, select_skills
 
 
 @pytest.fixture
@@ -2228,6 +2228,17 @@ def test_persistent_install_directory_retains_bundled_skills(tmp_path, monkeypat
         "custom",
         "web-research",
     ]
+
+
+def test_host_tools_reuse_module_with_fresh_allowance(settings):
+    from pydantic import SecretStr
+
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+    settings = settings.model_copy(update={"tavily_api_key": SecretStr("mock")})
+    selection = select_skills(settings, registry, "Research", ["@web-research"])
+    first = load_host_tools(registry, selection, settings)["web_search"].__self__
+    second = load_host_tools(registry, selection, settings)["web_search"].__self__
+    assert type(first) is type(second) and first is not second
 
 
 def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(settings, monkeypatch):
