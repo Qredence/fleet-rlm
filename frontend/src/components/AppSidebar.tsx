@@ -209,6 +209,7 @@ export function AppSidebar({
                                   >
                                     <MessageSquare aria-hidden="true" />
                                     <span className="min-w-0 truncate">{session.title}</span>
+                                    {session.deleting && <span className="ml-auto shrink-0 text-xs text-muted-foreground">Deletion pending</span>}
                                     {running === session.id && (
                                       <span title="Run in progress" className="ml-auto shrink-0">
                                         <span className="block size-1.5 rounded-full bg-primary" aria-hidden="true" />
@@ -227,8 +228,8 @@ export function AppSidebar({
                                       ><Ellipsis aria-hidden="true" /></SidebarMenuAction>
                                     )}
                                     items={[
-                                      { label: 'Rename', icon: <Pencil />, onSelect: () => openAction('rename', session) },
-                                      { label: 'Delete', icon: <Trash2 />, variant: 'destructive', onSelect: () => openAction('delete', session) },
+                                      ...session.deleting ? [] : [{ label: 'Rename', icon: <Pencil />, onSelect: () => openAction('rename', session) }],
+                                      { label: session.deleting ? 'Retry deletion' : 'Delete', icon: <Trash2 />, variant: 'destructive', onSelect: () => openAction('delete', session) },
                                     ]}
                                   />
                                 </FluidRow>

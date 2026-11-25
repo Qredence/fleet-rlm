@@ -1,7 +1,9 @@
 """Postgres models and short, session-scoped repository operations."""
 
-from datetime import datetime, timedelta
-from typing import Any, Literal
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
+from typing import Any, Literal, TypedDict
 from uuid import UUID
 
 from sqlalchemy import (
@@ -18,6 +20,7 @@ from sqlalchemy import (
     Uuid,
     case,
     cast,
+    delete,
     func,
     literal,
     select,
@@ -38,6 +41,11 @@ from fleet_rlm.config import Settings
 
 _ROOT_LOCK_INDEX = "uq_runs_one_running_root_per_session"
 _RUNNING_ROOT = text("parent_run_id IS NULL AND status = 'running'")
+_UPLOAD_LEASE = timedelta(minutes=5)
+
+
+# Mutations lock the Session before its root Run. Allow foreign-key checks by child inserts.
+SESSION_WRITE_LOCK: dict[str, Any] = {"key_share": True}
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonObject = dict[str, Any]
@@ -54,6 +62,11 @@ class Session(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
     title: Mapped[str] = mapped_column(Text)
     daytona_sandbox_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    pending_sandbox_name: Mapped[str | None] = mapped_column(Text)
+    sandbox_needs_cleanup: Mapped[bool] = mapped_column(server_default=text("false"))
+    deleting: Mapped[bool] = mapped_column(server_default=text("false"))
+    upload_key: Mapped[str | None] = mapped_column(Text)
+    upload_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     history_json: Mapped[JsonObject] = mapped_column(
         JSONB, server_default=text("""'{"messages": []}'::jsonb""")
     )
@@ -115,10 +128,32 @@ class File(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
     session_id: Mapped[UUID] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
     path: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(CHAR(64))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StagedFile(TypedDict):
+    path: str
+    object_key: str
+    sha256: str
+    size_bytes: int
+    kind: Literal["input", "artifact"]
+
+
+class ObjectCleanup(Base):
+    """An uncommitted multipart write or an object retired by a manifest change."""
+
+    __tablename__ = "workspace_object_cleanup"
+
+    object_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), index=True
+    )
+    upload_id: Mapped[str | None] = mapped_column(Text)
+    run_id: Mapped[UUID | None] = mapped_column()
 
 
 class Memory(Base):
@@ -157,6 +192,15 @@ class TurnConflictError(RuntimeError):
     pass
 
 
+class UploadConflictError(TurnConflictError):
+    pass
+
+
+def upload_is_active(session: Session) -> bool:
+    started = session.upload_started_at
+    return started is not None and datetime.now(UTC) - started < _UPLOAD_LEASE
+
+
 def create_db(settings: Settings) -> tuple[AsyncEngine, SessionFactory]:
     engine = create_async_engine(
         settings.database_url,
@@ -182,35 +226,65 @@ async def create_session(
 async def get_session_or_raise(db: SessionFactory, session_id: UUID) -> Session:
     async with db() as connection:
         session = await connection.get(Session, session_id)
-        if session is None:
+        if session is None or session.deleting:
             raise SessionNotFoundError(f"Session {session_id} does not exist")
         return session
 
 
-async def bind_session_sandbox_if_unset(
-    db: SessionFactory, session_id: UUID, sandbox_id: str
-) -> tuple[str, bool]:
-    """Bind a sandbox id only if unset, returning (effective_sandbox_id, won)."""
+async def rebind_session_sandbox(
+    db: SessionFactory,
+    session_id: UUID,
+    sandbox_id: str | None,
+    *,
+    expected: str | None = None,
+    owner_run_id: UUID | None = None,
+    allocation_name: str | None = None,
+) -> tuple[str | None, bool]:
+    """Compare-and-swap the current allocation without holding a provider connection."""
     async with db.begin() as connection:
-        bound = await connection.scalar(
-            update(Session)
-            .where(Session.id == session_id, Session.daytona_sandbox_id.is_(None))
-            .values(daytona_sandbox_id=sandbox_id, updated_at=func.now())
-            .returning(Session.daytona_sandbox_id)
-        )
-        if bound is not None:
-            return bound, True
-        row = (
-            await connection.execute(
-                select(Session.daytona_sandbox_id).where(Session.id == session_id)
-            )
-        ).one_or_none()
-        if row is None:
+        session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+        if session is None or session.deleting:
             raise SessionNotFoundError(f"Session {session_id} does not exist")
-        existing = row[0]
-        if existing is None:
-            raise RuntimeError(f"Session {session_id} sandbox binding could not be resolved")
-        return existing, False
+        if owner_run_id is not None:
+            await _require_active_root(connection, session_id, owner_run_id)
+        if session.daytona_sandbox_id != expected:
+            return session.daytona_sandbox_id, False
+        if allocation_name is not None:
+            if session.pending_sandbox_name != allocation_name:
+                return session.daytona_sandbox_id, False
+            session.pending_sandbox_name = None
+        session.daytona_sandbox_id = sandbox_id
+        session.sandbox_needs_cleanup = False
+        return sandbox_id, True
+
+
+async def _require_active_root(connection: AsyncSession, session_id: UUID, run_id: UUID) -> None:
+    owner = await connection.get(Run, run_id)
+    if (
+        owner is None
+        or owner.session_id != session_id
+        or owner.parent_run_id is not None
+        or owner.status != "running"
+    ):
+        raise TurnConflictError("Workspace allocation no longer belongs to an active turn")
+
+
+async def reserve_session_sandbox(
+    db: SessionFactory, session_id: UUID, owner_run_id: UUID, *, expected: str | None
+) -> tuple[str, bool]:
+    """Commit the create identity before sending the provider request."""
+    async with db.begin() as connection:
+        session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+        if session is None or session.deleting:
+            raise SessionNotFoundError(session_id)
+        await _require_active_root(connection, session_id, owner_run_id)
+        if session.daytona_sandbox_id != expected:
+            raise TurnConflictError("Workspace allocation changed while reserving a sandbox")
+        if session.pending_sandbox_name is not None:
+            return session.pending_sandbox_name, True
+        name = f"fleet-{owner_run_id.hex}"
+        session.pending_sandbox_name = name
+        return name, False
 
 
 async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) -> Run:
@@ -233,6 +307,13 @@ async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) ->
     )
     try:
         async with db.begin() as connection:
+            session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+            if session is None or session.deleting:
+                raise SessionNotFoundError(session_id)
+            if upload_is_active(session):
+                raise UploadConflictError(f"Session {session_id} already has an upload in progress")
+            if session.upload_key is not None:
+                session.upload_key = session.upload_started_at = None
             return (await connection.scalars(statement)).one()
     except IntegrityError as exc:
         if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) == _ROOT_LOCK_INDEX:
@@ -286,12 +367,20 @@ async def finish_run(
     ui_parts: list[JsonObject] | None = None,
     error: str | None = None,
     history_json: JsonObject | None = None,
+    files: list[StagedFile] | None = None,
+    retire_sandbox_id: str | None = None,
 ) -> bool:
     """Commit the terminal result and any root history together. Return false on a late retry."""
     if status not in ("completed", "failed", "cancelled"):
         raise ValueError("finish_run requires a terminal status")
 
     async with db.begin() as connection:
+        await connection.scalar(
+            select(Session.id)
+            .join(Run, Run.session_id == Session.id)
+            .where(Run.id == run_id, Run.parent_run_id.is_(None), Run.status == "running")
+            .with_for_update(of=Session, key_share=True)
+        )
         result = await connection.execute(
             update(Run)
             .where(Run.id == run_id, Run.status == "running")
@@ -313,6 +402,16 @@ async def finish_run(
                 .where(Session.id == row.session_id)
                 .values(history_json=history_json)
             )
+        if row.parent_run_id is None and retire_sandbox_id is not None:
+            await connection.execute(
+                update(Session)
+                .where(
+                    Session.id == row.session_id, Session.daytona_sandbox_id == retire_sandbox_id
+                )
+                .values(sandbox_needs_cleanup=True)
+            )
+        if files:
+            await _publish_files(connection, row.session_id, files)
     return True
 
 
@@ -332,16 +431,36 @@ async def reap_stale_runs(
     if session_id is not None:
         expired = expired.where(Run.session_id == session_id)
     async with db.begin() as connection:
-        roots = (
+        root_is_stale = (
+            Run.parent_run_id.is_(None),
+            Run.status == "running",
+            Run.created_at < cutoff,
+        )
+        candidates = select(Run.session_id).where(*root_is_stale)
+        if session_id is not None:
+            candidates = candidates.where(Run.session_id == session_id)
+        sessions = (
             await connection.scalars(
-                expired.where(Run.parent_run_id.is_(None), Run.created_at < cutoff).returning(
-                    Run.id
-                )
+                select(Session)
+                .where(Session.id.in_(candidates))
+                .order_by(Session.id)
+                .with_for_update(key_share=True)
             )
         ).all()
+        roots = (
+            await connection.execute(
+                expired.where(
+                    *root_is_stale, Run.session_id.in_([session.id for session in sessions])
+                ).returning(Run.id, Run.session_id)
+            )
+        ).all()
+        expired_sessions = {root.session_id for root in roots}
+        for session in sessions:
+            if session.id in expired_sessions and session.daytona_sandbox_id is not None:
+                session.sandbox_needs_cleanup = True
         child_condition = Run.created_at < cutoff
         if roots:
-            child_condition = child_condition | Run.root_run_id.in_(roots)
+            child_condition = child_condition | Run.root_run_id.in_([root.id for root in roots])
         children = await connection.execute(
             expired.where(
                 Run.parent_run_id.is_not(None),
@@ -419,16 +538,146 @@ async def upsert_file_record(
     sha256: str,
     size_bytes: int,
     kind: Literal["input", "artifact"],
+    object_key: str,
+    expected_upload: str | None = None,
 ) -> File:
-    values = {"sha256": sha256, "size_bytes": size_bytes, "kind": kind}
-    statement = (
+    async with db.begin() as connection:
+        if expected_upload is not None:
+            session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+            if session is None or session.deleting or session.upload_key != expected_upload:
+                raise SessionNotFoundError(session_id)
+            session.upload_key = session.upload_started_at = None
+        return (
+            await _publish_files(
+                connection,
+                session_id,
+                [
+                    dict(
+                        path=path,
+                        sha256=sha256,
+                        size_bytes=size_bytes,
+                        kind=kind,
+                        object_key=object_key,
+                    )
+                ],
+            )
+        )[0]
+
+
+def _file_upsert(session_id: UUID, *, path: str, **values: Any):
+    return (
         insert(File)
         .values(session_id=session_id, path=path, **values)
         .on_conflict_do_update(constraint="uq_files_session_path", set_=values)
         .returning(File)
     )
+
+
+def replaced_file_paths(existing: Iterable[str], new: Iterable[str]) -> list[str]:
+    replacements = {PurePosixPath(name) for name in new}
+    ancestors = {parent for path in replacements for parent in path.parents}
+    if replacements & ancestors:
+        raise ValueError("Artifact paths cannot be both files and directories")
+
+    shadowed = []
+    for name in existing:
+        path = PurePosixPath(name)
+        if path in ancestors or any(parent in replacements for parent in path.parents):
+            shadowed.append(name)
+    return shadowed
+
+
+async def _publish_files(
+    connection: AsyncSession, session_id: UUID, files: list[StagedFile]
+) -> list[File]:
+    existing = dict(
+        (
+            await connection.execute(
+                select(File.path, File.object_key).where(File.session_id == session_id)
+            )
+        ).all()
+    )
+    incoming = {file["path"]: file["object_key"] for file in files}
+    shadowed = replaced_file_paths(existing, incoming)
+    obsolete = {existing[path] for path in shadowed} | {
+        existing[path]
+        for path, key in incoming.items()
+        if path in existing and existing[path] != key
+    }
+    if obsolete:
+        await connection.execute(
+            insert(ObjectCleanup)
+            .values([{"session_id": session_id, "object_key": key} for key in obsolete])
+            .on_conflict_do_nothing(index_elements=[ObjectCleanup.object_key])
+        )
+    if shadowed:
+        await connection.execute(
+            delete(File).where(File.session_id == session_id, File.path.in_(shadowed))
+        )
+    published = [
+        (await connection.scalars(_file_upsert(session_id, **file))).one() for file in files
+    ]
+    await connection.execute(
+        delete(ObjectCleanup).where(
+            ObjectCleanup.session_id == session_id, ObjectCleanup.object_key.in_(incoming.values())
+        )
+    )
+    return published
+
+
+async def register_object_write(
+    db: SessionFactory,
+    session_id: UUID,
+    key: str,
+    upload_id: str,
+    *,
+    run_id: UUID | None = None,
+) -> None:
     async with db.begin() as connection:
-        return (await connection.scalars(statement)).one()
+        session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+        if session is None or session.deleting or (run_id is None and session.upload_key != key):
+            raise SessionNotFoundError(session_id)
+        if run_id is not None:
+            await _require_active_root(connection, session_id, run_id)
+        connection.add(
+            ObjectCleanup(session_id=session_id, object_key=key, upload_id=upload_id, run_id=run_id)
+        )
+
+
+async def list_discarded_objects(db: SessionFactory, session_id: UUID) -> list[ObjectCleanup]:
+    active_root = select(Run.id).where(Run.id == ObjectCleanup.run_id, Run.status == "running")
+    referenced = select(File.id).where(
+        File.session_id == ObjectCleanup.session_id, File.object_key == ObjectCleanup.object_key
+    )
+    async with db() as connection:
+        rows = await connection.scalars(
+            select(ObjectCleanup)
+            .join(Session, Session.id == ObjectCleanup.session_id)
+            .where(
+                ObjectCleanup.session_id == session_id,
+                ~referenced.exists(),
+                (
+                    ObjectCleanup.run_id.is_(None)
+                    & Session.upload_key.is_distinct_from(ObjectCleanup.object_key)
+                )
+                | (ObjectCleanup.run_id.is_not(None) & ~active_root.exists()),
+            )
+        )
+        return list(rows)
+
+
+async def forget_discarded_objects(db: SessionFactory, keys: list[str]) -> None:
+    async with db.begin() as connection:
+        await connection.execute(delete(ObjectCleanup).where(ObjectCleanup.object_key.in_(keys)))
+
+
+async def release_upload(db: SessionFactory, session_id: UUID, key: str) -> None:
+    async with db.begin() as connection:
+        await connection.execute(
+            update(Session)
+            .where(Session.id == session_id, Session.upload_key == key)
+            .values(upload_key=None, upload_started_at=None)
+        )
 
 
 async def list_session_files(db: SessionFactory, session_id: UUID) -> list[File]:

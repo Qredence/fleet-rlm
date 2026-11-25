@@ -27,11 +27,20 @@ class Settings(BaseSettings):
     stale_run_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
 
     daytona_api_key: SecretStr
-    daytona_target: str | None = None
-    daytona_volume_id: str
-    daytona_snapshot: str = "fleet-rlm-py313-dspy35-v1"
-    daytona_auto_stop_minutes: int = Field(default=15, ge=1, le=1440)
+    daytona_image: str = "fleet-rlm-py313-dspy35-v2"
+    daytona_region: str | None = None
+    daytona_idle_timeout_minutes: int = Field(default=15, ge=1, le=1440)
+    daytona_max_lifetime_minutes: int = Field(default=480, ge=1, le=1440)
+    daytona_network_allow_domains: list[str] = Field(default_factory=list)
+    daytona_optimize_spot: bool = False
+    daytona_otel_enabled: bool = False
     daytona_exec_timeout_seconds: int = Field(default=120, ge=5, le=600)
+
+    s3_bucket: str = "fleet-workspaces"
+    s3_endpoint_url: str | None = None
+    s3_region: str = "eu-central-1"
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
 
     llm_model: str
     sub_llm_model: str

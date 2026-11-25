@@ -7,7 +7,6 @@ export type NumericFieldKey =
   | 'rlm_max_output_chars'
   | 'history_max_turns'
   | 'history_max_chars'
-  | 'daytona_auto_stop_minutes'
   | 'daytona_exec_timeout_seconds'
 
 export interface SettingsDraft {
@@ -20,8 +19,6 @@ export interface SettingsDraft {
   rlm_max_output_chars: string
   history_max_turns: string
   history_max_chars: string
-  daytona_target: string
-  daytona_auto_stop_minutes: string
   daytona_exec_timeout_seconds: string
 }
 
@@ -39,12 +36,10 @@ export const NUMERIC_FIELDS: readonly NumericFieldSpec[] = [
   { key: 'rlm_max_output_chars', label: 'Max output chars', min: 500, max: 200_000 },
   { key: 'history_max_turns', label: 'History max turns', min: 0, max: 100 },
   { key: 'history_max_chars', label: 'History max chars', min: 1_000, max: 200_000 },
-  { key: 'daytona_auto_stop_minutes', label: 'Sandbox auto-stop (minutes)', min: 1, max: 1440 },
   { key: 'daytona_exec_timeout_seconds', label: 'Execution timeout (seconds)', min: 5, max: 600 },
 ]
 
 const NON_EMPTY_STRING_KEYS = ['llm_model', 'sub_llm_model', 'decision_model'] as const
-const NULLABLE_STRING_KEYS = ['daytona_target'] as const
 
 export function toDraft(fields: WorkspaceSettingsFields): SettingsDraft {
   return {
@@ -57,8 +52,6 @@ export function toDraft(fields: WorkspaceSettingsFields): SettingsDraft {
     rlm_max_output_chars: String(fields.rlm_max_output_chars),
     history_max_turns: String(fields.history_max_turns),
     history_max_chars: String(fields.history_max_chars),
-    daytona_target: fields.daytona_target ?? '',
-    daytona_auto_stop_minutes: String(fields.daytona_auto_stop_minutes),
     daytona_exec_timeout_seconds: String(fields.daytona_exec_timeout_seconds),
   }
 }
@@ -78,12 +71,6 @@ export function buildSettingsPatch(
     const value = draft[key].trim()
     if (!value) return { patch: {}, validationError: `${key} cannot be empty.` }
     if (value !== effective[key]) patch[key] = value
-  }
-
-  for (const key of NULLABLE_STRING_KEYS) {
-    const trimmed = draft[key].trim()
-    const next = trimmed ? trimmed : null
-    if (next !== effective[key]) patch[key] = next
   }
 
   for (const { key, label, min, max } of NUMERIC_FIELDS) {

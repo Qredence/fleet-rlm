@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router'
 import { AppSidebar } from '@/components/AppSidebar'
 import { Deferred, DeferredOverlay } from '@/components/Deferred'
@@ -47,11 +47,16 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
   const [skills, setSkills] = useState<Skill[] | null>(null)
   const [skillsError, setSkillsError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string }>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [filesDocked, setFilesDocked] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(() => !document.cookie.split('; ').includes('sidebar_state=false'))
   const skillsRequest = useRef<AbortController | null>(null)
   const recentStops = useRef(new Map<string, number>())
+  const currentRouteSessionId = useRef(routeSessionId)
+  useLayoutEffect(() => {
+    currentRouteSessionId.current = routeSessionId
+  }, [routeSessionId])
 
   const refreshSkills = useCallback(() => {
     skillsRequest.current?.abort()
@@ -96,7 +101,16 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
   async function deleteSession(id: string) {
     await sessions.remove(id)
     recentStops.current.delete(id)
-    if (routeSessionId === id) void navigate('/', { replace: true })
+    if (currentRouteSessionId.current === id) void navigate('/', { replace: true })
+  }
+
+  async function retryDeletion(id: string) {
+    setDeleteError(undefined)
+    try {
+      await deleteSession(id)
+    } catch (failure) {
+      setDeleteError({ id, message: errorMessage(failure) })
+    }
   }
 
   async function updateSessionSettings(id: string, changes: SessionUpdate) {
@@ -142,7 +156,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
         'min-h-0 min-w-0 overflow-hidden',
         chatRoute && session && filesDocked && 'xl:bg-transparent xl:shadow-none xl:peer-data-[variant=inset]:my-0 xl:peer-data-[variant=inset]:rounded-none',
       )}>
-        {session && (chatRoute || hasOpenedChat) && (
+        {session && !session.deleting && (chatRoute || hasOpenedChat) && (
           <Deferred key={session.id} fallback={chatRoute ? <PageLoading title={session.title} /> : null}>
             <SessionWorkspace
               api={api} token={token} session={session} skills={skills ?? []}
@@ -166,7 +180,14 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
               onAction={sessions.error ? sessions.retry : () => void createSession()}
             />
           )} />
-          <Route path="/sessions/:id" element={session ? null : (
+          <Route path="/sessions/:id" element={session?.deleting ? (
+            <ChatPlaceholder
+              title={session.title}
+              error={deleteError?.id === session.id ? deleteError.message : 'Deletion is pending. Retry to finish clearing this workspace.'}
+              actionLabel="Retry deletion" disabled={sessions.changing}
+              onAction={() => void retryDeletion(session.id)}
+            />
+          ) : session ? null : (
             <ChatPlaceholder
               loading={sessions.loading} error={sessions.error}
               actionLabel={sessions.missing ? 'Back to chat' : 'Retry'}
@@ -201,7 +222,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
           open={settingsOpen} onOpenChange={setSettingsOpen}
           api={api} token={token} onTokenChange={onTokenChange}
           theme={theme} systemTheme={systemTheme} onThemeChange={setTheme}
-          session={session} onUpdateSession={updateSessionSettings}
+          session={session?.deleting ? undefined : session} onUpdateSession={updateSessionSettings}
         />
       </DeferredOverlay>
     </SidebarProvider>

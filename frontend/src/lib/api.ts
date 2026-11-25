@@ -5,6 +5,7 @@ export interface Session {
   title: string
   model_override: string | null
   daytona_sandbox_id: string | null
+  deleting: boolean
   created_at: string
   updated_at: string
 }
@@ -61,16 +62,17 @@ export interface WorkspaceSettingsFields {
   rlm_max_output_chars: number
   history_max_turns: number
   history_max_chars: number
-  daytona_target: string | null
-  daytona_auto_stop_minutes: number
   daytona_exec_timeout_seconds: number
 }
 
 export interface WorkspaceSettingsStatus {
   database_configured: boolean
   daytona_configured: boolean
-  daytona_volume_id: string
-  daytona_snapshot: string
+  daytona_image: string
+  daytona_region: string | null
+  daytona_idle_timeout_minutes: number
+  daytona_max_lifetime_minutes: number
+  storage_bucket: string
   llm_api_key_configured: boolean
   llm_base_url: string | null
   bearer_auth_enabled: boolean

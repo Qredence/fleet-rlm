@@ -17,8 +17,6 @@ const BASE_EFFECTIVE: WorkspaceSettingsFields = {
   rlm_max_output_chars: 10_000,
   history_max_turns: 8,
   history_max_chars: 16_000,
-  daytona_target: 'us',
-  daytona_auto_stop_minutes: 15,
   daytona_exec_timeout_seconds: 120,
 }
 
@@ -34,19 +32,17 @@ describe('settings-draft', () => {
       rlm_max_output_chars: { min: 500, max: 200_000 },
       history_max_turns: { min: 0, max: 100 },
       history_max_chars: { min: 1_000, max: 200_000 },
-      daytona_auto_stop_minutes: { min: 1, max: 1440 },
       daytona_exec_timeout_seconds: { min: 5, max: 600 },
     })
   })
 
   it('converts effective settings into a string draft and detects changes', () => {
-    const draft = toDraft({ ...BASE_EFFECTIVE, daytona_target: null })
-    expect(draft.daytona_target).toBe('')
+    const draft = toDraft(BASE_EFFECTIVE)
     expect(draft.rlm_max_depth).toBe('4')
-    expect(hasDraftChanges({ ...BASE_EFFECTIVE, daytona_target: null }, draft)).toBe(false)
+    expect(hasDraftChanges(BASE_EFFECTIVE, draft)).toBe(false)
     expect(
       hasDraftChanges(
-        { ...BASE_EFFECTIVE, daytona_target: null },
+        BASE_EFFECTIVE,
         { ...draft, rlm_max_depth: '7' },
       ),
     ).toBe(true)
@@ -128,24 +124,5 @@ describe('settings-draft', () => {
       expect(result.validationError).toBe(`${key} cannot be empty.`)
       expect(result.patch).toEqual({})
     }
-  })
-
-  it('handles nullable daytona_target clearing and assignment', () => {
-    const draft = toDraft(BASE_EFFECTIVE)
-    expect(buildSettingsPatch(BASE_EFFECTIVE, { ...draft, daytona_target: '' })).toEqual({
-      patch: { daytona_target: null },
-    })
-    expect(buildSettingsPatch(BASE_EFFECTIVE, { ...draft, daytona_target: '   ' })).toEqual({
-      patch: { daytona_target: null },
-    })
-
-    const nullEffective: WorkspaceSettingsFields = { ...BASE_EFFECTIVE, daytona_target: null }
-    const nullDraft = toDraft(nullEffective)
-    expect(buildSettingsPatch(nullEffective, { ...nullDraft, daytona_target: '   ' })).toEqual({
-      patch: {},
-    })
-    expect(buildSettingsPatch(nullEffective, { ...nullDraft, daytona_target: '  eu  ' })).toEqual({
-      patch: { daytona_target: 'eu' },
-    })
   })
 })

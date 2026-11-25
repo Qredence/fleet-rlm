@@ -423,7 +423,7 @@ export function SettingsDialogBody({
                   <StatusTile
                     label="Daytona Sandbox"
                     value={status.daytona_configured ? 'Configured' : 'Not configured'}
-                    detail={status.daytona_volume_id ? `Volume: ${status.daytona_volume_id}` : undefined}
+                    detail={status.daytona_region ?? 'Provider default region'}
                   />
                   <StatusTile
                     label="LLM API Key"
@@ -600,19 +600,11 @@ export function SettingsDialogBody({
                 <div>
                   <h3 className="text-sm font-medium">Daytona Sandbox &amp; MLflow Tracing</h3>
                   <p className="text-xs text-muted-foreground">
-                    Controls newly spawned Daytona sandboxes. Snapshot and MLflow experiment are read-only and
-                    managed via <code className="font-mono">.env</code>.
+                    Set the Python execution timeout. Sandbox, storage, and tracing infrastructure are managed
+                    via <code className="font-mono">.env</code>.
                   </p>
                 </div>
                 <FieldGroup className="gap-3.5">
-                  <SettingField
-                    label="Daytona Target Region"
-                    hint={`Default: ${defaults.daytona_target ?? 'None (provider default)'}`}
-                    overridden={'daytona_target' in overrides}
-                    value={draft.daytona_target}
-                    placeholder="us (optional)"
-                    onChange={(event) => updateField('daytona_target', event.target.value)}
-                  />
                   <FieldGroup className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                     {NUMERIC_FIELDS.slice(6).map(({ key, label, min, max }) => (
                       <SettingField
@@ -632,9 +624,13 @@ export function SettingsDialogBody({
                   {status && (
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <StatusTile
-                        label="Daytona Snapshot (.env-managed · read-only)"
-                        value={status.daytona_snapshot}
-                        detail="Configured via FLEET_DAYTONA_SNAPSHOT in .env"
+                        label="Daytona Image"
+                        value={status.daytona_image}
+                        detail={`${status.daytona_region ?? 'Default region'} · ${status.daytona_idle_timeout_minutes} min idle · ${status.daytona_max_lifetime_minutes} min lifetime`}
+                      />
+                      <StatusTile
+                        label="Neon Object Storage"
+                        value={status.storage_bucket}
                       />
                       <StatusTile
                         label="MLflow Experiment (.env-managed · read-only)"

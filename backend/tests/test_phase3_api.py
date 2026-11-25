@@ -1,29 +1,38 @@
 """Offline Phase 3 checks against FastAPI's real ASGI routes and SSE transport."""
 
 import asyncio
+import base64
 import hashlib
 import json
-import logging
 import subprocess
 import sys
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import dspy
 import httpx
 import pytest
 import pytest_asyncio
+from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 
 from fleet_rlm import api, db, interpreter
 from fleet_rlm.config import Settings
-from fleet_rlm.interpreter import DaytonaError
+from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
+from fleet_rlm.storage import (
+    ObjectStorage,
+    StorageError,
+    StorageIntegrityError,
+    StorageObjectMissing,
+)
 
 _AUTH = {"Authorization": "Bearer offline-token"}
 _PAYLOAD = {
@@ -48,6 +57,7 @@ class OfflineStore:
             title="Test session",
             history_json={"messages": []},
             daytona_sandbox_id="test-sandbox",
+            deleting=False,
             model_override=None,
             created_at=now,
             updated_at=now,
@@ -56,6 +66,7 @@ class OfflineStore:
         self.active_by_session: dict[UUID, UUID] = {}
         self.checkouts = 0
         self.files: dict[tuple[UUID, str], db.File] = {}
+        self.cleanup: dict[str, db.ObjectCleanup] = {}
         self.memories: dict[UUID, db.Memory] = {}
         self.ui_messages_by_session: dict[UUID, list[dict]] = {}
         self.statements = []
@@ -99,6 +110,8 @@ class OfflineStore:
                 self.files.pop(key, None)
             for mid in [mid for mid, mem in self.memories.items() if mem.session_id == record.id]:
                 self.memories.pop(mid, None)
+            for key in [key for key, item in self.cleanup.items() if item.session_id == record.id]:
+                self.cleanup.pop(key)
         elif isinstance(record, db.Memory):
             self.memories.pop(record.id, None)
 
@@ -146,7 +159,7 @@ class OfflineStore:
             params = query.compile().params
             if query.table.name == "sessions":
                 session = self.sessions.get(params.get("id_1"))
-                if session is None:
+                if session is None or session.deleting:
                     return None
                 if "title" in params:
                     session.title = params["title"]
@@ -181,6 +194,8 @@ class OfflineStore:
         if record.created_at is None:
             record.created_at = now
         if isinstance(record, db.Session):
+            if record.deleting is None:
+                record.deleting = False
             if record.history_json is None:
                 record.history_json = {"messages": []}
             if record.updated_at is None:
@@ -204,26 +219,54 @@ class OfflineStore:
     async def get_session(self, _sessionmaker, session_id):
         async with self() as connection:
             session = await connection.get(db.Session, session_id)
-            if session is None:
+            if session is None or session.deleting:
                 raise db.SessionNotFoundError(session_id)
             return session
 
-    async def bind_sandbox(self, _sessionmaker, session_id, sandbox_id):
+    async def bind_sandbox(
+        self,
+        _sessionmaker,
+        session_id,
+        sandbox_id,
+        *,
+        expected=None,
+        owner_run_id=None,
+        allocation_name=None,
+    ):
         async with self():
             session = self.sessions.get(session_id)
             if session is None:
                 raise db.SessionNotFoundError(session_id)
-            if session.daytona_sandbox_id is None:
+            if owner_run_id is not None and self.active_by_session.get(session_id) != owner_run_id:
+                raise db.TurnConflictError
+            if session.daytona_sandbox_id == expected:
+                if allocation_name is not None:
+                    if session.pending_sandbox_name != allocation_name:
+                        return session.daytona_sandbox_id, False
+                    session.pending_sandbox_name = None
                 session.daytona_sandbox_id = sandbox_id
+                session.sandbox_needs_cleanup = False
                 session.updated_at = datetime.now(UTC)
                 return sandbox_id, True
             return session.daytona_sandbox_id, False
+
+    async def reserve_sandbox(self, _sessionmaker, session_id, run_id, *, expected):
+        async with self():
+            session = self.sessions[session_id]
+            assert session.daytona_sandbox_id == expected
+            assert self.active_by_session[session_id] == run_id
+            if session.pending_sandbox_name is not None:
+                return session.pending_sandbox_name, True
+            session.pending_sandbox_name = f"fleet-{run_id.hex}"
+            return session.pending_sandbox_name, False
 
     async def acquire_root(self, _sessionmaker, session_id, _prompt):
         async with self():
             if session_id not in self.sessions:
                 raise db.SessionNotFoundError(session_id)
-            if session_id in self.active_by_session:
+            if session_id in self.active_by_session or db.upload_is_active(
+                self.sessions[session_id]
+            ):
                 raise db.TurnConflictError
             run_id = uuid4()
             self.active_by_session[session_id] = run_id
@@ -234,32 +277,86 @@ class OfflineStore:
             for session_id, active_id in list(self.active_by_session.items()):
                 if active_id == run_id:
                     self.active_by_session.pop(session_id, None)
+                    session = self.sessions[session_id]
+                    if (
+                        details.get("retire_sandbox_id") == session.daytona_sandbox_id
+                        and session.daytona_sandbox_id is not None
+                    ):
+                        session.sandbox_needs_cleanup = True
                     if status == "completed":
                         self.sessions[session_id].history_json = details["history_json"]
+                        paths = [path for owner, path in self.files if owner == session_id]
+                        for path in db.replaced_file_paths(
+                            paths, (file["path"] for file in details["files"])
+                        ):
+                            self.discard_file(self.files.pop((session_id, path)))
+                        for artifact in details["files"]:
+                            self.upsert_file_values(session_id, **artifact)
                     break
             return True
 
-    async def upsert_file(self, _sessionmaker, session_id, *, path, sha256, size_bytes, kind):
+    async def upsert_file(self, _sessionmaker, session_id, *, expected_upload=None, **values):
         async with self():
-            if session_id not in self.sessions:
+            session = self.sessions.get(session_id)
+            if session is None or session.deleting or session.upload_key != expected_upload:
                 raise db.SessionNotFoundError(session_id)
-            existing = self.files.get((session_id, path))
-            if existing is None:
-                existing = db.File(
-                    id=uuid4(),
-                    session_id=session_id,
-                    path=path,
-                    sha256=sha256,
-                    size_bytes=size_bytes,
-                    kind=kind,
-                    created_at=datetime.now(UTC),
-                )
-                self.files[(session_id, path)] = existing
-            else:
-                existing.sha256 = sha256
-                existing.size_bytes = size_bytes
-                existing.kind = kind
-            return existing
+            session.upload_key = session.upload_started_at = None
+            return self.upsert_file_values(session_id, **values)
+
+    def upsert_file_values(self, session_id, *, path, **values):
+        existing = self.files.get((session_id, path))
+        if existing is None:
+            existing = db.File(
+                id=uuid4(),
+                session_id=session_id,
+                path=path,
+                created_at=datetime.now(UTC),
+            )
+            self.files[(session_id, path)] = existing
+        elif existing.object_key != values.get("object_key"):
+            self.discard_file(existing)
+        for name, value in values.items():
+            setattr(existing, name, value)
+        self.cleanup.pop(existing.object_key, None)
+        return existing
+
+    def discard_file(self, file):
+        self.cleanup[file.object_key] = db.ObjectCleanup(
+            session_id=file.session_id, object_key=file.object_key
+        )
+
+    async def register_object(self, _sessionmaker, session_id, key, upload_id, *, run_id=None):
+        session = self.sessions.get(session_id)
+        if session is None or session.deleting or (run_id is None and session.upload_key != key):
+            raise db.SessionNotFoundError(session_id)
+        if run_id is not None and self.active_by_session.get(session_id) != run_id:
+            raise db.TurnConflictError
+        self.cleanup[key] = db.ObjectCleanup(
+            session_id=session_id, object_key=key, upload_id=upload_id, run_id=run_id
+        )
+
+    async def discarded_objects(self, _sessionmaker, session_id):
+        session = self.sessions.get(session_id)
+        active = self.active_by_session.get(session_id)
+        return [
+            item
+            for item in self.cleanup.values()
+            if item.session_id == session_id
+            and session
+            and (
+                item.run_id != active
+                if item.run_id is not None
+                else item.object_key != session.upload_key
+            )
+        ]
+
+    async def forget_objects(self, _sessionmaker, keys):
+        for key in keys:
+            self.cleanup.pop(key, None)
+
+    async def release_upload(self, _sessionmaker, session_id, key):
+        if (session := self.sessions.get(session_id)) and session.upload_key == key:
+            session.upload_key = session.upload_started_at = None
 
     async def list_files(self, _sessionmaker, session_id):
         async with self():
@@ -291,6 +388,57 @@ class OfflineStore:
             return {}
 
 
+class OfflineStorage:
+    prefix = staticmethod(ObjectStorage.prefix)
+    new_key = ObjectStorage.new_key
+
+    def __init__(self, _settings):
+        self.objects = {}
+        self.checkouts = lambda: 0
+
+    def close(self):
+        pass
+
+    def seed(self, store, path, content, *, kind="artifact"):
+        key = self.new_key(store.session_id)
+        self.objects[key] = content
+        return store.upsert_file_values(
+            store.session_id,
+            path=path,
+            kind=kind,
+            object_key=key,
+            sha256=hashlib.sha256(content).hexdigest(),
+            size_bytes=len(content),
+        )
+
+    async def put(self, key, path, *, register):
+        assert self.checkouts() == 0
+        await register("fixture-upload")
+        body = path.read_bytes()
+        self.objects[key] = body
+        return hashlib.sha256(body).hexdigest(), len(body)
+
+    async def download(self, key, path, *, sha256, size):
+        assert self.checkouts() == 0
+        if key not in self.objects:
+            raise StorageObjectMissing("Fixture object missing")
+        body = self.objects[key]
+        if len(body) != size or hashlib.sha256(body).hexdigest() != sha256:
+            raise StorageIntegrityError("Fixture object changed")
+        path.write_bytes(body)
+
+    async def reclaim(self, key, _upload_id):
+        assert self.checkouts() == 0
+        self.objects.pop(key, None)
+
+    async def delete_session(self, session_id):
+        assert self.checkouts() == 0
+        prefix = self.prefix(session_id)
+        for key in list(self.objects):
+            if key.startswith(prefix):
+                del self.objects[key]
+
+
 @pytest_asyncio.fixture
 async def offline(monkeypatch, tmp_path):
     skill = tmp_path / "table"
@@ -303,7 +451,7 @@ async def offline(monkeypatch, tmp_path):
         database_url="postgresql://localhost/unused",
         database_direct_url="postgresql://localhost/unused",
         daytona_api_key="offline",
-        daytona_volume_id="offline",
+        daytona_image="offline",
         llm_model="openai/gpt-4o-mini",
         sub_llm_model="openai/gpt-4o-mini",
         llm_api_key="offline",
@@ -317,32 +465,27 @@ async def offline(monkeypatch, tmp_path):
     reap = AsyncMock(return_value=0)
     finish = AsyncMock(side_effect=store.finish)
     create_child = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
-    artifact = {"path": "/workspace/artifacts/report.txt", "size_bytes": 1, "sha256": "a" * 64}
+    remote_files = {"artifacts/report.txt": b"report"}
+    artifact = {
+        "path": "/workspace/artifacts/report.txt",
+        "size_bytes": 6,
+        "sha256": hashlib.sha256(b"report").hexdigest(),
+    }
     upsert_artifact = AsyncMock(side_effect=store.upsert_file)
     list_files = AsyncMock(side_effect=store.list_files)
     bind_sandbox = AsyncMock(side_effect=store.bind_sandbox)
     ui_messages = AsyncMock(side_effect=store.ui_messages)
 
-    async def upload(chunks, _path, **_options):
+    async def pull_artifact(_sandbox, path, destination, *, timeout):
         assert store.checkouts == 0
-        async for _ in chunks:
-            pass
+        destination.write_bytes(remote_files[path])
 
     async def delete_sandbox(_sandbox, **_options):
         assert store.checkouts == 0
 
-    sandbox = SimpleNamespace(
-        id="test-sandbox",
-        state="started",
-        fs=SimpleNamespace(
-            upload_file_stream=AsyncMock(side_effect=upload),
-            move_files=AsyncMock(),
-            download_file=AsyncMock(return_value=b"report"),
-            delete_file=AsyncMock(),
-        ),
-    )
+    sandbox = SimpleNamespace(id="test-sandbox", state="started")
     daytona = SimpleNamespace(
-        v0=SimpleNamespace(
+        v2=SimpleNamespace(
             get=AsyncMock(return_value=sandbox),
             delete=AsyncMock(side_effect=delete_sandbox),
         )
@@ -355,11 +498,18 @@ async def offline(monkeypatch, tmp_path):
     model = DummyLM([{"plan": "Analyze the data", "code": "SUBMIT('Verified', [])"}])
     monkeypatch.setattr(api, "Settings", lambda: settings)
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
+    monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
+    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", reap)
     monkeypatch.setattr(db, "get_session_or_raise", store.get_session)
-    monkeypatch.setattr(db, "bind_session_sandbox_if_unset", bind_sandbox)
+    monkeypatch.setattr(db, "rebind_session_sandbox", bind_sandbox)
+    monkeypatch.setattr(db, "reserve_session_sandbox", store.reserve_sandbox)
+    monkeypatch.setattr(db, "register_object_write", store.register_object)
+    monkeypatch.setattr(db, "list_discarded_objects", store.discarded_objects)
+    monkeypatch.setattr(db, "forget_discarded_objects", store.forget_objects)
     monkeypatch.setattr(db, "acquire_root_run", store.acquire_root)
     monkeypatch.setattr(db, "create_child_run", create_child)
     monkeypatch.setattr(db, "finish_run", finish)
@@ -368,6 +518,9 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "get_session_prior_turns", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "upsert_file_record", upsert_artifact)
+    monkeypatch.setattr(db, "release_upload", store.release_upload)
+    pull = AsyncMock(side_effect=pull_artifact)
+    monkeypatch.setattr(api, "download_workspace_file", pull)
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
     monkeypatch.setattr(db, "update_workspace_settings_overrides", store.update_workspace_overrides)
     monkeypatch.setattr(db, "reset_workspace_settings_overrides", store.reset_workspace_overrides)
@@ -376,6 +529,11 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(api.agent, "consolidate_memory", memory)
 
     async with api.lifespan(api.app):
+        storage = api.app.state.runtime.storage
+        storage.checkouts = lambda: store.checkouts
+        storage.put = AsyncMock(wraps=storage.put)
+        storage.download = AsyncMock(wraps=storage.download)
+        storage.reclaim = AsyncMock(wraps=storage.reclaim)
         reap.assert_awaited_once_with(store, settings.stale_run_timeout_seconds)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app),
@@ -392,7 +550,9 @@ async def offline(monkeypatch, tmp_path):
                 reap=reap,
                 finish=finish,
                 create_child=create_child,
-                upsert_artifact=upsert_artifact,
+                storage=storage,
+                remote_files=remote_files,
+                pull=pull,
                 list_files=list_files,
                 bind_sandbox=bind_sandbox,
                 ui_messages=ui_messages,
@@ -524,7 +684,7 @@ async def test_active_root_is_http_409(offline):
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 409
     assert response.headers["content-type"] == "application/json"
-    offline.daytona.v0.get.assert_not_awaited()
+    offline.daytona.v2.get.assert_not_awaited()
     offline.finish.assert_not_awaited()
 
 
@@ -572,7 +732,7 @@ async def test_body_size_limits(offline):
         f"{offline.base}/files", content=multipart(payload_size + 1), headers=headers
     )
     assert response.status_code == 413
-    offline.sandbox.fs.upload_file_stream.assert_awaited_once()
+    offline.storage.put.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -586,7 +746,8 @@ async def test_form_limits(offline):
         files={"file": ("a", b"x"), "note": (None, "y" * (64 * 1024 + 1))},
     )
     assert response.status_code == 400
-    offline.daytona.v0.get.assert_not_awaited()
+    offline.daytona.v2.get.assert_not_awaited()
+    offline.storage.put.assert_not_awaited()
 
 
 @pytest.mark.parametrize("name", ["../outside.csv", r"..\outside.csv", "/absolute.csv", "C:one"])
@@ -594,7 +755,8 @@ async def test_form_limits(offline):
 async def test_upload_rejects_unsafe_names(offline, name):
     response = await offline.client.post(f"{offline.base}/files", files={"file": (name, b"x")})
     assert response.status_code == 400
-    offline.daytona.v0.get.assert_not_awaited()
+    offline.daytona.v2.get.assert_not_awaited()
+    offline.storage.put.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -604,28 +766,132 @@ async def test_download_requires_a_safe_registered_path(offline):
     assert response.status_code == 400
     response = await offline.client.get(f"{path}/artifacts/report.txt")
     assert response.status_code == 404
-    offline.daytona.v0.get.assert_not_awaited()
+    offline.daytona.v2.get.assert_not_awaited()
 
     file_path = "artifacts/report 1.txt"
-    offline.store.add(db.File(path=file_path))
+    record = offline.storage.seed(offline.store, file_path, b"report")
     response = await offline.client.get(f"{path}/artifacts/report%201.txt")
     assert response.content == b"report"
     assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''report%201.txt"
-    offline.sandbox.fs.download_file.assert_awaited_once_with(
-        f"/workspace/{file_path}", offline.settings.daytona_exec_timeout_seconds
+    assert offline.storage.download.await_args.args[0] == record.object_key
+    response = await offline.client.get(
+        f"{path}/artifacts/report%201.txt", headers={"Range": "bytes=100-199"}
     )
+    assert response.status_code == 416
+    assert not offline.storage.download.await_args.args[1].exists()
+    offline.daytona.v2.get.assert_not_awaited()
 
 
-@pytest.mark.parametrize(("status", "expected"), [(404, 404), (502, 503)])
 @pytest.mark.asyncio
-async def test_download_handles_sandbox_lookup_errors(offline, status, expected):
-    offline.store.add(db.File(path="artifacts/report.txt"))
-    offline.daytona.v0.get.side_effect = DaytonaError("Sandbox lookup failed", status_code=status)
-    response = await offline.client.get(f"{offline.base}/files/artifacts/report.txt")
-    assert response.status_code == expected
-    assert response.json()["detail"] == (
-        "File not found" if expected == 404 else api._WORKSPACE_STARTUP_HELP
+async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monkeypatch, tmp_path):
+    content = b"verified workspace file"
+    digest = hashlib.sha256(content).hexdigest()
+    source = tmp_path / "source.txt"
+    source.write_bytes(content)
+    target = tmp_path / "target.txt"
+    raw = BytesIO(content)
+    body = StreamingBody(raw, len(content))
+    sdk = Mock(
+        create_multipart_upload=Mock(return_value={"UploadId": "fixture-upload"}),
+        upload_part=Mock(return_value={"ETag": "fixture-etag"}),
+        get_object=Mock(return_value={"Body": body, "ContentLength": len(content)}),
     )
+    monkeypatch.setattr("fleet_rlm.storage.boto3.client", Mock(return_value=sdk))
+    storage = ObjectStorage(
+        Settings(
+            _env_file=None,
+            database_url="postgresql://localhost/unused",
+            database_direct_url="postgresql://localhost/unused",
+            daytona_api_key="offline",
+            llm_model="openai/gpt-4o-mini",
+            sub_llm_model="openai/gpt-4o-mini",
+            llm_api_key="offline",
+            s3_endpoint_url="https://storage.example.test",
+            s3_access_key_id="fixture-key",
+            s3_secret_access_key="fixture-secret",
+        )
+    )
+
+    async def register(upload_id):
+        assert upload_id == "fixture-upload"
+        sdk.upload_part.assert_not_called()
+
+    saved = await storage.put("object", source, register=register)
+    assert saved == (digest, len(content))
+    sdk.complete_multipart_upload.assert_called_once()
+    assert raw.closed
+    sdk.get_object.assert_called_once_with(Bucket=storage.bucket, Key="object")
+    sdk.get_object.return_value["Body"] = StreamingBody(BytesIO(content), len(content))
+    await storage.download("object", target, sha256=digest, size=len(content))
+    assert target.read_bytes() == content
+
+    changed = BytesIO(b"x" * len(content))
+    sdk.get_object.return_value["Body"] = StreamingBody(changed, len(content))
+    sdk.upload_part.reset_mock()
+    with pytest.raises(StorageIntegrityError, match="hash"):
+        await storage.put("object", source, register=register)
+    assert changed.closed
+
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def slow_initiation(**_kwargs):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(timeout=5)
+        return {"UploadId": "cancelled-upload"}
+
+    sdk.create_multipart_upload.side_effect = slow_initiation
+    sdk.upload_part.reset_mock()
+    register_cancelled = AsyncMock()
+    upload = asyncio.create_task(storage.put("object", source, register=register_cancelled))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        upload.cancel()
+        await asyncio.sleep(0)
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await upload
+    register_cancelled.assert_not_awaited()
+    sdk.upload_part.assert_not_called()
+    sdk.abort_multipart_upload.assert_called_once_with(
+        Bucket=storage.bucket, Key="object", UploadId="cancelled-upload"
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected", "detail"),
+    [
+        (StorageObjectMissing("missing"), 404, "File not found"),
+        (StorageError("unavailable"), 503, "Workspace storage unavailable"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_download_handles_object_storage_errors(offline, error, expected, detail):
+    offline.storage.seed(offline.store, "artifacts/report.txt", b"report")
+    offline.storage.download.side_effect = error
+    response = await offline.client.get(f"{offline.base}/files/artifacts/report.txt")
+    assert response.status_code == expected and response.json()["detail"] == detail
+    offline.daytona.v2.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_download_reloads_metadata_if_replacement_reclaims_selected_object(offline):
+    path = "artifacts/report.txt"
+    old = offline.storage.seed(offline.store, path, b"old")
+
+    async def race(key, local, **metadata):
+        if key == old.object_key:
+            offline.store.files.pop((offline.store.session_id, path))
+            offline.storage.seed(offline.store, path, b"new")
+            offline.storage.objects.pop(key)
+        await OfflineStorage.download(offline.storage, key, local, **metadata)
+
+    offline.storage.download.side_effect = race
+    result = await offline.client.get(f"{offline.base}/files/{path}")
+    assert result.status_code == 200 and result.content == b"new"
+    assert offline.storage.download.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -643,13 +909,13 @@ async def test_workspace_browses_checkout_and_skips_symlinks(offline, monkeypatc
     (checkout / "alias.txt").symlink_to(outside / "private.txt")
     monkeypatch.setattr(interpreter, "WORKSPACE", str(workspace))
 
-    async def code_run(code, *, timeout):
+    async def run(*, argv, timeout, execution_timeout):
         result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=timeout
+            [sys.executable, *argv[1:]], capture_output=True, text=True, timeout=timeout
         )
-        return SimpleNamespace(exit_code=result.returncode, result=result.stdout)
+        return SimpleNamespace(exit_code=result.returncode, stdout=result.stdout)
 
-    offline.sandbox.process = SimpleNamespace(code_run=code_run)
+    offline.sandbox.process = SimpleNamespace(run=run)
     route = f"{offline.base}/workspace"
     response = await offline.client.get(route)
     assert response.status_code == 200
@@ -665,8 +931,7 @@ async def test_install_skill_artifact_is_immediately_available_to_new_turns(offl
     artifact_path = "artifacts/receipt-check/SKILL.md"
     content = b"---\nname: receipt-check\ndescription: Check receipts\n---\nUse code RC-29.\n"
     digest = hashlib.sha256(content).hexdigest()
-    offline.store.add(db.File(path=artifact_path, sha256=digest, size_bytes=len(content)))
-    offline.sandbox.fs.download_file.return_value = content
+    artifact = offline.storage.seed(offline.store, artifact_path, content)
 
     created = await offline.client.post("/api/sessions", json={"title": "Fresh"})
     assert created.status_code == 201
@@ -706,8 +971,8 @@ async def test_install_skill_artifact_is_immediately_available_to_new_turns(offl
 
     different = content.replace(b"RC-29", b"RC-30")
     digest = hashlib.sha256(different).hexdigest()
-    offline.store.files[(offline.store.session_id, artifact_path)].sha256 = digest
-    offline.sandbox.fs.download_file.return_value = different
+    artifact.sha256 = digest
+    offline.storage.objects[artifact.object_key] = different
     assert (
         await offline.client.post(endpoint, json={"path": artifact_path, "sha256": digest})
     ).status_code == 409
@@ -730,8 +995,9 @@ async def test_install_skill_rejects_invalid_or_changed_artifacts(
 ):
     content = f"---\nname: {name}\ndescription: Test\n---\nDo the thing.\n".encode()
     digest = hashlib.sha256(content).hexdigest()
-    offline.store.add(db.File(path=path, sha256=digest, size_bytes=len(content), kind=kind))
-    offline.sandbox.fs.download_file.return_value = content + b"Changed" if changed else content
+    record = offline.storage.seed(offline.store, path, content, kind=kind)
+    if changed:
+        offline.storage.objects[record.object_key] += b"Changed"
     response = await offline.client.post(
         f"{offline.base}/skills", json={"path": path, "sha256": digest}
     )
@@ -1070,7 +1336,8 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     assert child_parts[2]["preliminary"] is False
     assert root_finish.kwargs["ui_parts"][-2]["output"] == progress[-1]["output"]
     assert root_finish.kwargs["ui_parts"][1] == frames[-5]
-    offline.upsert_artifact.assert_awaited_once()
+    assert [item["path"] for item in root_finish.kwargs["files"]] == ["artifacts/report.txt"]
+    assert offline.store.files[(offline.store.session_id, "artifacts/report.txt")].size_bytes == 6
     assert offline.create_child.await_count == 2
     assert [call.kwargs["status"] for call in offline.finish.await_args_list] == [
         "completed",
@@ -1127,20 +1394,31 @@ async def test_incomplete_child_snapshot_survives_root_teardown(offline, monkeyp
 async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
     executing = asyncio.Event()
     disconnected = asyncio.Event()
-    context = object()
+    frames = asyncio.Queue()
+    cursor = 0
 
-    async def execute(code, **_options):
-        if "Verified" not in code:
-            return SimpleNamespace(error=None)
-        executing.set()
-        await asyncio.Future()
+    async def write_stdin(message):
+        request = json.loads(message)
+        if "Verified" in request.get("code", ""):
+            executing.set()
+        else:
+            frame = f"\x1e{request['token']} " + json.dumps({"kind": "done"}) + "\n"
+            frames.put_nowait(base64.b64encode(frame.encode()))
+
+    async def logs(**_options):
+        nonlocal cursor
+        while True:
+            data = await frames.get()
+            cursor += 1
+            yield SimpleNamespace(
+                type="log", cursor=str(cursor), frame=SimpleNamespace(channel="stdout", data=data)
+            )
 
     sandbox = offline.sandbox
-    sandbox.code_interpreter = SimpleNamespace(
-        create_context=AsyncMock(return_value=context),
-        delete_context=AsyncMock(),
-        run_code=execute,
+    worker = SimpleNamespace(
+        id="worker-1", write_stdin=write_stdin, stream_logs=logs, delete=AsyncMock()
     )
+    sandbox.process = SimpleNamespace(start=AsyncMock(return_value=worker), kill_all=AsyncMock())
     request_sent = False
 
     async def receive():
@@ -1185,12 +1463,10 @@ async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
         disconnected.set()
         await asyncio.wait_for(request, timeout=2)
 
-    sandbox.code_interpreter.delete_context.assert_awaited_once_with(
-        context, request_timeout=offline.settings.daytona_exec_timeout_seconds
+    worker.delete.assert_awaited_once()
+    sandbox.process.kill_all.assert_awaited_once_with(
+        tag=sandbox.process.start.await_args.kwargs["tag"], timeout=10
     )
-    mailbox = sandbox.fs.delete_file.await_args.args[0]
-    assert mailbox.startswith("/tmp/fleet-rpc-")
-    assert sandbox.fs.delete_file.await_args.kwargs["recursive"] is True
     assert offline.finish.await_args.args == (offline.store, root_id)
     assert offline.finish.await_args.kwargs["status"] == "cancelled"
     part = offline.finish.await_args.kwargs["ui_parts"][-1]
@@ -1227,6 +1503,7 @@ async def test_patch_session_edits_title_and_model_override(offline):
         "title",
         "model_override",
         "daytona_sandbox_id",
+        "deleting",
         "created_at",
         "updated_at",
     }
@@ -1277,8 +1554,11 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
     assert data["status"] == {
         "database_configured": True,
         "daytona_configured": True,
-        "daytona_volume_id": "offline",
-        "daytona_snapshot": "fleet-rlm-py313-dspy35-v1",
+        "daytona_image": "offline",
+        "daytona_region": None,
+        "daytona_idle_timeout_minutes": 15,
+        "daytona_max_lifetime_minutes": 480,
+        "storage_bucket": "fleet-workspaces",
         "llm_api_key_configured": True,
         "llm_base_url": None,
         "bearer_auth_enabled": True,
@@ -1300,8 +1580,6 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         "rlm_max_output_chars",
         "history_max_turns",
         "history_max_chars",
-        "daytona_target",
-        "daytona_auto_stop_minutes",
         "daytona_exec_timeout_seconds",
     }
 
@@ -1311,7 +1589,7 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         {"database_url": "postgresql://attacker/db"},
         {"api_bearer_token": "override"},
         {"llm_base_url": "https://attacker.example/v1"},
-        {"daytona_snapshot": "custom-snapshot"},
+        {"daytona_image": "custom-image"},
         {"mlflow_experiment": "other-experiment"},
         {"max_concurrent_turns_per_worker": 4},
         {"rlm_max_iters": 0},
@@ -1326,8 +1604,8 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         {"history_max_turns": 101},
         {"history_max_chars": 999},
         {"history_max_chars": 200_001},
-        {"daytona_auto_stop_minutes": 0},
-        {"daytona_auto_stop_minutes": 1441},
+        {"daytona_idle_timeout_minutes": 60},
+        {"s3_secret_access_key": "injected"},
         {"daytona_exec_timeout_seconds": 4},
         {"daytona_exec_timeout_seconds": 601},
         {"llm_model": "   "},
@@ -1341,7 +1619,7 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
     offline.store.workspace_overrides.update(
         {
             "llm_base_url": "https://legacy.example/v1",
-            "daytona_snapshot": "legacy-snapshot",
+            "daytona_image": "injected-image",
             "mlflow_experiment": "legacy-experiment",
         }
     )
@@ -1349,7 +1627,7 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
     assert sanitized.status_code == 200
     assert sanitized.json()["overrides"] == {}
     assert sanitized.json()["status"]["llm_base_url"] is None
-    assert sanitized.json()["status"]["daytona_snapshot"] == "fleet-rlm-py313-dspy35-v1"
+    assert sanitized.json()["status"]["daytona_image"] == "offline"
     assert sanitized.json()["status"]["mlflow_experiment"] == "fleet-rlm"
 
     patched = await offline.client.patch(
@@ -1359,7 +1637,6 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
             "rlm_max_iters": 12,
             "rlm_max_depth": 7,
             "history_max_turns": 0,
-            "daytona_target": "eu",
             "daytona_exec_timeout_seconds": 45,
         },
     )
@@ -1370,14 +1647,12 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         "rlm_max_iters": 12,
         "rlm_max_depth": 7,
         "history_max_turns": 0,
-        "daytona_target": "eu",
         "daytona_exec_timeout_seconds": 45,
     }
     assert body["effective"]["llm_model"] == "openai/gpt-4.1"
     assert body["effective"]["rlm_max_iters"] == 12
     assert body["effective"]["rlm_max_depth"] == 7
     assert body["effective"]["history_max_turns"] == 0
-    assert body["effective"]["daytona_target"] == "eu"
     assert body["effective"]["daytona_exec_timeout_seconds"] == 45
     assert body["defaults"]["llm_model"] == "openai/gpt-4o-mini"
     assert body["defaults"]["rlm_max_iters"] == 20
@@ -1385,7 +1660,7 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
 
     cleared = await offline.client.patch(
         "/api/settings",
-        json={"rlm_max_iters": None, "daytona_target": "   "},
+        json={"rlm_max_iters": None},
     )
     assert cleared.status_code == 200
     cleared_body = cleared.json()
@@ -1396,7 +1671,6 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         "daytona_exec_timeout_seconds": 45,
     }
     assert cleared_body["effective"]["rlm_max_iters"] == 20
-    assert cleared_body["effective"]["daytona_target"] is None
 
     reset = await offline.client.delete("/api/settings")
     assert reset.status_code == 200
@@ -1487,14 +1761,14 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(
     assert runtime.decision_lm is startup_decision_lm
 
     file_path = "artifacts/report.txt"
-    offline.store.add(db.File(path=file_path))
     download = await offline.client.get(f"{offline.base}/files/{file_path}")
     assert download.status_code == 200
-    offline.sandbox.fs.download_file.assert_awaited_once_with(f"/workspace/{file_path}", 33)
+    assert download.content == b"report"
+    assert offline.pull.await_args.kwargs["timeout"] == 33
 
 
 @pytest.mark.asyncio
-async def test_sessions_crud_messages_files_and_limit(offline, caplog):
+async def test_sessions_crud_messages_files_and_limit(offline):
     assert (
         await offline.client.post("/api/sessions", headers={"Authorization": ""})
     ).status_code == 401
@@ -1572,24 +1846,34 @@ async def test_sessions_crud_messages_files_and_limit(offline, caplog):
     deleted_resp = await offline.client.delete(offline.base)
     assert deleted_resp.status_code == 204
     assert offline.store.session_id not in offline.store.sessions
-    offline.daytona.v0.get.assert_awaited_once_with("test-sandbox")
-    offline.daytona.v0.delete.assert_awaited_once_with(offline.sandbox, wait=True)
+    offline.daytona.v2.get.assert_not_awaited()
+    offline.daytona.v2.delete.assert_awaited_once_with("test-sandbox", timeout=30)
     assert offline.store.checkouts == 0
 
-    # Deleting a session whose remote sandbox cleanup returns 404 or 500 still returns 204.
+    # A missing VM permits cleanup. A provider failure leaves a retryable tombstone.
     custom_uuid = UUID(custom_id)
     offline.store.sessions[custom_uuid].daytona_sandbox_id = "remote-missing"
-    offline.daytona.v0.get.side_effect = DaytonaError("Not found", status_code=404)
+    offline.daytona.v2.delete.side_effect = NotFoundError("VM already deleted")
     assert (await offline.client.delete(f"/api/sessions/{custom_id}")).status_code == 204
     assert custom_uuid not in offline.store.sessions
 
     default_uuid = UUID(default_body["id"])
     offline.store.sessions[default_uuid].daytona_sandbox_id = "remote-error"
-    offline.daytona.v0.get.side_effect = DaytonaError("Gateway down", status_code=503)
-    with caplog.at_level(logging.WARNING, logger=api.__name__):
-        assert (await offline.client.delete(f"/api/sessions/{default_uuid}")).status_code == 204
+    offline.daytona.v2.delete.side_effect = DaytonaError("Gateway down", status_code=503)
+    incomplete = await offline.client.delete(f"/api/sessions/{default_uuid}")
+    assert incomplete.status_code == 503
+    assert offline.store.sessions[default_uuid].deleting
+    session_path = f"/api/sessions/{default_uuid}"
+    listed = await offline.client.get("/api/sessions")
+    assert any(item["id"] == str(default_uuid) and item["deleting"] for item in listed.json())
+    detail = await offline.client.get(session_path)
+    assert detail.status_code == 200 and detail.json()["deleting"]
+    files = await offline.client.get(session_path + "/files")
+    assert files.status_code == 404
+    offline.daytona.v2.delete.side_effect = None
+    retried = await offline.client.delete(session_path)
+    assert retried.status_code == 204
     assert default_uuid not in offline.store.sessions
-    assert "Could not delete Daytona sandbox remote-error" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1679,138 +1963,75 @@ async def test_memories_crud_filters_and_limit(offline):
 
 
 @pytest.mark.asyncio
-async def test_zero_db_checkouts_across_daytona_io_and_sandbox_bind_races(offline, monkeypatch):
-    observed_checkouts: dict[str, int] = {}
-
-    async def checked_upload(chunks, _path, **_options):
-        observed_checkouts["upload_file_stream"] = offline.store.checkouts
-        async for _ in chunks:
-            pass
-
-    async def checked_move(*_args, **_kwargs):
-        observed_checkouts["move_files"] = offline.store.checkouts
-
-    async def checked_download(*_args, **_kwargs):
-        observed_checkouts["download_file"] = offline.store.checkouts
-        return b"hello"
-
-    async def checked_delete(_sandbox, **_kwargs):
-        observed_checkouts["daytona_delete"] = offline.store.checkouts
-
-    offline.sandbox.fs.upload_file_stream = AsyncMock(side_effect=checked_upload)
-    offline.sandbox.fs.move_files = AsyncMock(side_effect=checked_move)
-    offline.sandbox.fs.download_file = AsyncMock(side_effect=checked_download)
-    offline.daytona.v0.delete = AsyncMock(side_effect=checked_delete)
-
-    # 1. Normal upload + download + delete never hold DB checkouts during Daytona calls.
-    upload_resp = await offline.client.post(
-        f"{offline.base}/files", files={"file": ("sales.csv", b"a,b\n1,2\n")}
+async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, monkeypatch):
+    session = (await offline.client.post("/api/sessions", json={"title": "Race"})).json()
+    sid = UUID(session["id"])
+    base = f"/api/sessions/{sid}"
+    response = await offline.client.post(
+        base + "/files", files={"file": ("sales.csv", b"a,b\n1,2\n")}
     )
-    assert upload_resp.status_code == 201
-    assert observed_checkouts["upload_file_stream"] == 0
-    assert observed_checkouts["move_files"] == 0
-    assert offline.store.checkouts == 0
+    assert response.status_code == 201
+    lean_download = await offline.client.get(base + "/files/files/sales.csv")
+    assert lean_download.content == b"a,b\n1,2\n"
+    assert offline.store.sessions[sid].daytona_sandbox_id is None
+    offline.daytona.v2.get.assert_not_awaited()
+    offline.storage.put.assert_awaited_once()
+    offline.storage.download.assert_awaited_once()
 
-    dl_resp = await offline.client.get(f"{offline.base}/files/files/sales.csv")
-    assert dl_resp.status_code == 200
-    assert observed_checkouts["download_file"] == 0
-    assert offline.store.checkouts == 0
+    # A later owner uses the same create identity after an uncertain reply.
+    recovered = SimpleNamespace(id="recovered-sandbox", state="started")
+    session = offline.store.sessions[sid]
 
-    del_resp = await offline.client.delete(offline.base)
-    assert del_resp.status_code == 204
-    assert observed_checkouts["daytona_delete"] == 0
-    assert offline.store.checkouts == 0
-
-    # 2. Concurrent sandbox bind race during upload: loser deletes duplicate & adopts winner.
-    race_session = (await offline.client.post("/api/sessions", json={"title": "Race"})).json()
-    race_id = UUID(race_session["id"])
-    dup_sandbox = SimpleNamespace(
-        id="dup-sandbox",
-        state="started",
-        fs=SimpleNamespace(
-            upload_file_stream=AsyncMock(),
-            move_files=AsyncMock(),
-            delete_file=AsyncMock(),
-        ),
-    )
-    winner_uploads: list[str] = []
-
-    async def winner_upload(chunks, path, **_options):
+    async def allocate(_daytona, _settings, name, *, recovering):
         assert offline.store.checkouts == 0
-        winner_uploads.append(path)
-        async for _ in chunks:
-            pass
+        assert name == session.pending_sandbox_name
+        if not recovering:
+            raise api.SandboxStartupError("create response unavailable")
+        return recovered
 
-    winner_sandbox = SimpleNamespace(
-        id="winner-sandbox",
-        state="started",
-        fs=SimpleNamespace(
-            upload_file_stream=AsyncMock(side_effect=winner_upload),
-            move_files=AsyncMock(),
-            delete_file=AsyncMock(),
-        ),
+    monkeypatch.setattr(api, "allocate_session_sandbox", AsyncMock(side_effect=allocate))
+    monkeypatch.setattr(api, "prepare_sandbox", AsyncMock())
+    first_id = offline.store.active_by_session[sid] = uuid4()
+    with pytest.raises(api.SandboxStartupError, match="create response"):
+        await api._chat_sandbox(
+            api.app.state.runtime, session, offline.settings, owner_run_id=first_id
+        )
+    pending = session.pending_sandbox_name
+    replacement_id = offline.store.active_by_session[sid] = uuid4()
+    sandbox = await api._chat_sandbox(
+        api.app.state.runtime, session, offline.settings, owner_run_id=replacement_id
     )
-
-    async def fake_ensure(_daytona, _settings, _sid, existing_id):
-        assert offline.store.checkouts == 0
-        if existing_id is None:
-            return dup_sandbox, "dup-sandbox", True
-        assert existing_id == "winner-sandbox"
-        return winner_sandbox, "winner-sandbox", False
-
-    async def lose_race(_sessionmaker, sid, _sandbox_id):
-        offline.store.sessions[sid].daytona_sandbox_id = "winner-sandbox"
-        return "winner-sandbox", False
-
-    monkeypatch.setattr(api, "ensure_session_sandbox", fake_ensure)
-    monkeypatch.setattr(db, "bind_session_sandbox_if_unset", AsyncMock(side_effect=lose_race))
-    offline.daytona.v0.delete.reset_mock()
-
-    race_resp = await offline.client.post(
-        f"/api/sessions/{race_id}/files", files={"file": ("race.csv", b"x\n1\n")}
-    )
-    assert race_resp.status_code == 201
-    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
-    assert len(winner_uploads) == 1
+    assert sandbox is recovered and pending == f"fleet-{first_id.hex}"
+    assert session.pending_sandbox_name is None and session.daytona_sandbox_id == recovered.id
+    offline.store.active_by_session.pop(sid)
     assert offline.store.checkouts == 0
 
-    # 3. Session deleted mid-upload cleans up uploaded file in Daytona and returns 404.
-    async def delete_mid_upload(*_args, **_kwargs):
-        offline.store.sessions.pop(race_id, None)
+    # An upload lease fences a concurrent delete and turn, then releases on completion.
+    putting = asyncio.Event()
+    proceed = asyncio.Event()
+    put = offline.storage.put
 
-    winner_sandbox.fs.move_files = AsyncMock(side_effect=delete_mid_upload)
-    mid_resp = await offline.client.post(
-        f"/api/sessions/{race_id}/files", files={"file": ("orphan.csv", b"y\n2\n")}
+    async def hold_put(key, local, *, register):
+        putting.set()
+        await proceed.wait()
+        return await put(key, local, register=register)
+
+    monkeypatch.setattr(offline.storage, "put", hold_put)
+    uploading = asyncio.create_task(
+        offline.client.post(base + "/files", files={"file": ("next.csv", b"b\n2\n")})
     )
-    assert mid_resp.status_code == 404
-    winner_sandbox.fs.delete_file.assert_awaited_once_with(
-        "/workspace/files/orphan.csv",
-        request_timeout=offline.settings.daytona_exec_timeout_seconds,
-    )
-
-    # 4. _chat_sandbox also deletes duplicate and adopts winner on concurrent race.
-    chat_session = db.Session(id=uuid4(), title="Chat race", daytona_sandbox_id=None)
-    offline.store.add(chat_session)
-    offline.daytona.v0.delete.reset_mock()
-    adopted = await api._chat_sandbox(api.app.state.runtime, chat_session, offline.settings)
-    assert adopted is winner_sandbox
-    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
-
-    # 5. Session deleted while sandbox is being created deletes orphan sandbox and returns 404.
-    vanishing_session = db.Session(id=uuid4(), title="Vanishing", daytona_sandbox_id=None)
-    offline.store.add(vanishing_session)
-
-    async def vanish_on_bind(_sessionmaker, sid, _sandbox_id):
-        offline.store.sessions.pop(sid, None)
-        raise db.SessionNotFoundError(sid)
-
-    monkeypatch.setattr(db, "bind_session_sandbox_if_unset", AsyncMock(side_effect=vanish_on_bind))
-    offline.daytona.v0.delete.reset_mock()
-    vanish_resp = await offline.client.post(
-        f"/api/sessions/{vanishing_session.id}/files", files={"file": ("gone.csv", b"z\n3\n")}
-    )
-    assert vanish_resp.status_code == 404
-    offline.daytona.v0.delete.assert_awaited_once_with(dup_sandbox, wait=True)
+    try:
+        await asyncio.wait_for(putting.wait(), 2)
+        blocked = await offline.client.delete(base)
+        assert blocked.status_code == 409
+        assert (await offline.client.post(base + "/chat", json=_PAYLOAD)).status_code == 409
+        assert offline.store.checkouts == 0
+    finally:
+        proceed.set()
+    assert (await uploading).status_code == 201
+    deleted = await offline.client.delete(base)
+    assert deleted.status_code == 204
+    assert not any(key.startswith(offline.storage.prefix(sid)) for key in offline.storage.objects)
 
 
 @pytest.mark.asyncio
@@ -1935,25 +2156,14 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
         ),
     )
 
-    # Pre-populate existing input file and existing artifact to test overwrite detection.
-    offline.store.add(
-        db.File(
-            session_id=offline.store.session_id,
-            path="files/input.csv",
-            sha256="1" * 64,
-            size_bytes=42,
-            kind="input",
-        )
-    )
-    offline.store.add(
-        db.File(
-            session_id=offline.store.session_id,
-            path="artifacts/report.txt",
-            sha256="0" * 64,
-            size_bytes=5,
-            kind="artifact",
-        )
-    )
+    # Pre-populate existing files to test hydration and overwrite detection.
+    prior_input = offline.storage.seed(offline.store, "files/input.csv", b"old input", kind="input")
+    prior_artifact = offline.storage.seed(offline.store, "artifacts/report.txt", b"old report")
+    before = {
+        record.path: (record.sha256, record.size_bytes) for record in (prior_input, prior_artifact)
+    }
+    new_files = {"artifacts/report.txt": b"new report", "artifacts/summary.json": b'{"rows":2}'}
+    offline.remote_files.update(new_files)
 
     observed: dict[str, object] = {}
     real_select_skills = api.select_skills
@@ -1967,15 +2177,11 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
         observed["known_files"] = dict(known)
         return [
             {
-                "path": "/workspace/artifacts/report.txt",
-                "sha256": "b" * 64,
-                "size_bytes": 12,
-            },
-            {
-                "path": "/workspace/artifacts/summary.json",
-                "sha256": "c" * 64,
-                "size_bytes": 24,
-            },
+                "path": "/workspace/" + path,
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "size_bytes": len(body),
+            }
+            for path, body in new_files.items()
         ]
 
     async def fake_turn(_settings, *, selection, run_id, emit, **_):
@@ -2010,10 +2216,7 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
     assert offline.memory.await_args.kwargs["decision_lm"] is runtime.decision_lm
 
     # list_new_artifacts received {path: (sha256, size_bytes)} for overwrite detection.
-    assert observed["known_files"] == {
-        "files/input.csv": ("1" * 64, 42),
-        "artifacts/report.txt": ("0" * 64, 5),
-    }
+    assert observed["known_files"] == before
 
     # Final data-file-tree replaces existing artifacts/report.txt without duplicating it.
     chunks = response.text.strip().split("\n\n")
@@ -2029,14 +2232,12 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
         "artifacts/summary.json",
         "files/input.csv",
     ]
-    assert final_files[0]["sha256"] == "b" * 64
-    assert final_files[0]["size_bytes"] == 12
-
-    # Both overwritten and newly created artifacts were upserted into Neon.
-    upserted_paths = [call.kwargs["path"] for call in offline.upsert_artifact.await_args_list]
-    assert upserted_paths == ["artifacts/report.txt", "artifacts/summary.json"]
+    assert final_files[0]["sha256"] == hashlib.sha256(new_files["artifacts/report.txt"]).hexdigest()
+    assert final_files[0]["size_bytes"] == len(new_files["artifacts/report.txt"])
+    assert [item["path"] for item in offline.finish.await_args.kwargs["files"]] == list(new_files)
     assert (
-        offline.store.files[(offline.store.session_id, "artifacts/report.txt")].sha256 == "b" * 64
+        offline.store.files[(offline.store.session_id, "artifacts/report.txt")].sha256
+        == final_files[0]["sha256"]
     )
 
 
@@ -2053,7 +2254,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
         database_url="postgresql://localhost/unused",
         database_direct_url="postgresql://localhost/unused",
         daytona_api_key="offline",
-        daytona_volume_id="offline",
+        daytona_image="offline",
         llm_model="openai/gpt-4o-mini",
         sub_llm_model="openai/gpt-4o-mini",
         llm_api_key="offline",
@@ -2069,7 +2270,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     engine = SimpleNamespace(dispose=AsyncMock())
     sandbox = SimpleNamespace(id="test-sandbox", state="started", fs=SimpleNamespace())
     daytona = SimpleNamespace(
-        v0=SimpleNamespace(get=AsyncMock(return_value=sandbox), delete=AsyncMock())
+        v2=SimpleNamespace(get=AsyncMock(return_value=sandbox), delete=AsyncMock())
     )
 
     @asynccontextmanager
@@ -2077,6 +2278,9 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
         yield daytona
 
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
+    monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
+    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
     monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", AsyncMock(return_value=0))

@@ -3,7 +3,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -25,7 +25,6 @@ from fleet_rlm.db import (
     TurnConflictError,
     WorkspaceSettings,
     acquire_root_run,
-    bind_session_sandbox_if_unset,
     create_child_run,
     create_db,
     create_session,
@@ -34,8 +33,12 @@ from fleet_rlm.db import (
     get_session_ui_messages,
     get_workspace_settings_overrides,
     list_approved_session_memories,
+    list_discarded_objects,
     list_session_files,
     reap_stale_runs,
+    rebind_session_sandbox,
+    register_object_write,
+    reserve_session_sandbox,
     reset_workspace_settings_overrides,
     save_or_update_memory,
     search_memories,
@@ -50,7 +53,7 @@ def _base_settings_kwargs() -> dict[str, object]:
         "database_url": "postgresql://localhost/unused",
         "database_direct_url": "postgresql://localhost/unused",
         "daytona_api_key": "offline",
-        "daytona_volume_id": "offline",
+        "daytona_image": "offline",
         "llm_model": "openai/gpt-4o-mini",
         "sub_llm_model": "openai/gpt-4o-mini",
         "llm_api_key": "offline",
@@ -64,8 +67,8 @@ def _base_settings_kwargs() -> dict[str, object]:
         {"max_concurrent_turns_per_worker": 257},
         {"stale_run_timeout_seconds": 29},
         {"stale_run_timeout_seconds": 86_401},
-        {"daytona_auto_stop_minutes": 0},
-        {"daytona_auto_stop_minutes": 1441},
+        {"daytona_idle_timeout_minutes": 0},
+        {"daytona_idle_timeout_minutes": 1441},
         {"daytona_exec_timeout_seconds": 4},
         {"daytona_exec_timeout_seconds": 601},
         {"rlm_max_iters": 0},
@@ -95,7 +98,7 @@ def test_settings_accepts_boundary_values() -> None:
         {
             "max_concurrent_turns_per_worker": 1,
             "stale_run_timeout_seconds": 30,
-            "daytona_auto_stop_minutes": 1,
+            "daytona_idle_timeout_minutes": 1,
             "daytona_exec_timeout_seconds": 5,
             "rlm_max_iters": 1,
             "rlm_max_llm_calls": 1,
@@ -133,6 +136,16 @@ async def db() -> AsyncIterator[SessionFactory]:
 async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None:
     session = await create_session(db, title="Phase 1 locking test")
     try:
+        async with db.begin() as connection:
+            uploading = await connection.get_one(Session, session.id)
+            uploading.upload_key = "sessions/abandoned-upload"
+            uploading.upload_started_at = datetime.now(UTC)
+        with pytest.raises(TurnConflictError, match="upload in progress"):
+            await acquire_root_run(db, session.id, "During upload")
+        async with db.begin() as connection:
+            uploading = await connection.get_one(Session, session.id)
+            uploading.upload_started_at = datetime.now(UTC) - timedelta(minutes=10)
+
         contenders = await asyncio.gather(
             acquire_root_run(db, session.id, "First contender"),
             acquire_root_run(db, session.id, "Second contender"),
@@ -149,6 +162,7 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
         )
 
         root = winners[0]
+        assert (await get_session_or_raise(db, session.id)).upload_key is None
         assert root.id.version == 7
         assert root.root_run_id == root.id
         assert root.status == "running"
@@ -196,6 +210,8 @@ async def test_reap_stale_runs_session_scoped_and_global(db: SessionFactory) -> 
     session_b = await create_session(db, title="Reap test B")
     try:
         root_a = await acquire_root_run(db, session_a.id, "Stale root A")
+        vm_a = f"vm-{uuid4().hex}"
+        await rebind_session_sandbox(db, session_a.id, vm_a, owner_run_id=root_a.id)
         child_a = await create_child_run(db, root_a.id, kind="subagent", prompt="Fresh child A")
         grandchild_a = await create_child_run(
             db, child_a.id, kind="llm_query", prompt="Fresh grandchild A"
@@ -214,6 +230,12 @@ async def test_reap_stale_runs_session_scoped_and_global(db: SessionFactory) -> 
 
         reaped_a = await reap_stale_runs(db, 300, session_id=session_a.id)
         assert reaped_a == 3
+        retiring = await get_session_or_raise(db, session_a.id)
+        assert retiring.daytona_sandbox_id == vm_a and retiring.sandbox_needs_cleanup
+        with pytest.raises(TurnConflictError, match="active turn"):
+            await rebind_session_sandbox(
+                db, session_a.id, f"vm-{uuid4().hex}", expected=vm_a, owner_run_id=root_a.id
+            )
 
         async with db() as connection:
             runs = {
@@ -239,6 +261,11 @@ async def test_reap_stale_runs_session_scoped_and_global(db: SessionFactory) -> 
 
         # Session A's lock is now free; verify a fresh root survives while its stale child reaps.
         fresh_root_a = await acquire_root_run(db, session_a.id, "Fresh root A")
+        new_vm = f"vm-{uuid4().hex}"
+        assert await rebind_session_sandbox(
+            db, session_a.id, new_vm, expected=vm_a, owner_run_id=fresh_root_a.id
+        ) == (new_vm, True)
+        assert not (await get_session_or_raise(db, session_a.id)).sandbox_needs_cleanup
         stale_child_a = await create_child_run(
             db, fresh_root_a.id, kind="llm_query", prompt="Stale child under fresh root"
         )
@@ -279,23 +306,47 @@ async def test_reap_stale_runs_session_scoped_and_global(db: SessionFactory) -> 
 
 
 @pytest.mark.asyncio
-async def test_bind_session_sandbox_if_unset(db: SessionFactory) -> None:
+async def test_rebind_session_sandbox(db: SessionFactory) -> None:
     session_single = await create_session(db, title="Sandbox single bind")
     session_race = await create_session(db, title="Sandbox race bind")
     try:
         with pytest.raises(SessionNotFoundError):
-            await bind_session_sandbox_if_unset(db, uuid4(), f"sb-missing-{uuid4().hex}")
+            await rebind_session_sandbox(db, uuid4(), f"sb-missing-{uuid4().hex}")
 
         single_id = f"sb-single-{uuid4().hex}"
-        bound_id, won = await bind_session_sandbox_if_unset(db, session_single.id, single_id)
+        bound_id, won = await rebind_session_sandbox(db, session_single.id, single_id)
         assert (bound_id, won) == (single_id, True)
         assert (await get_session_or_raise(db, session_single.id)).daytona_sandbox_id == single_id
+
+        original = await acquire_root_run(db, session_single.id, "Reserve replacement")
+        name, recovering = await reserve_session_sandbox(
+            db, session_single.id, original.id, expected=single_id
+        )
+        assert not recovering
+        finished = await finish_run(db, original.id, status="failed", retire_sandbox_id=single_id)
+        assert finished
+        fenced = await get_session_or_raise(db, session_single.id)
+        assert fenced.sandbox_needs_cleanup and fenced.pending_sandbox_name == name
+        retry = await acquire_root_run(db, session_single.id, "Recover replacement")
+        resumed = await reserve_session_sandbox(db, session_single.id, retry.id, expected=single_id)
+        assert resumed == (name, True)
+        rebound = await rebind_session_sandbox(
+            db,
+            session_single.id,
+            "test-recovered-" + retry.id.hex,
+            expected=single_id,
+            owner_run_id=retry.id,
+            allocation_name=name,
+        )
+        assert rebound[1]
+        active = await get_session_or_raise(db, session_single.id)
+        assert not active.sandbox_needs_cleanup and active.pending_sandbox_name is None
 
         sb_a = f"sb-race-a-{uuid4().hex}"
         sb_b = f"sb-race-b-{uuid4().hex}"
         results = await asyncio.gather(
-            bind_session_sandbox_if_unset(db, session_race.id, sb_a),
-            bind_session_sandbox_if_unset(db, session_race.id, sb_b),
+            rebind_session_sandbox(db, session_race.id, sb_a),
+            rebind_session_sandbox(db, session_race.id, sb_b),
         )
         winners = [item for item in results if item[1]]
         losers = [item for item in results if not item[1]]
@@ -305,10 +356,18 @@ async def test_bind_session_sandbox_if_unset(db: SessionFactory) -> None:
         assert losers[0] == (winning_id, False)
         assert (await get_session_or_raise(db, session_race.id)).daytona_sandbox_id == winning_id
 
-        follow_up_id, follow_up_won = await bind_session_sandbox_if_unset(
+        follow_up_id, follow_up_won = await rebind_session_sandbox(
             db, session_race.id, f"sb-race-c-{uuid4().hex}"
         )
         assert (follow_up_id, follow_up_won) == (winning_id, False)
+        replacement_id = f"sb-replacement-{uuid4().hex}"
+        assert await rebind_session_sandbox(
+            db, session_race.id, replacement_id, expected=winning_id
+        ) == (replacement_id, True)
+        assert await rebind_session_sandbox(db, session_race.id, None, expected=winning_id) == (
+            replacement_id,
+            False,
+        )
     finally:
         async with db.begin() as connection:
             await connection.execute(
@@ -327,6 +386,7 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
             sha256="1" * 64,
             size_bytes=128,
             kind="input",
+            object_key="inputs/v1",
         )
         artifact_v1 = await upsert_file_record(
             db,
@@ -335,6 +395,7 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
             sha256="2" * 64,
             size_bytes=256,
             kind="artifact",
+            object_key="artifacts/v1",
         )
 
         initial = await list_session_files(db, session.id)
@@ -353,6 +414,7 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
             sha256="3" * 64,
             size_bytes=512,
             kind="artifact",
+            object_key="artifacts/v2",
         )
         assert artifact_v2.id == artifact_v1.id
         assert artifact_v2.sha256 == "3" * 64
@@ -363,6 +425,42 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
         assert updated[0].path == "/workspace/artifacts/report.md"
         assert updated[0].sha256 == "3" * 64
         assert updated[0].size_bytes == 512
+        assert updated[0].object_key == "artifacts/v2"
+        garbage = await list_discarded_objects(db, session.id)
+        assert [entry.object_key for entry in garbage] == ["artifacts/v1"]
+
+        for path in (
+            "/workspace/artifacts/report.md/appendix.md",
+            "/workspace/artifacts/report.md",
+        ):
+            run = await acquire_root_run(db, session.id, "Replace the artifact path")
+            key = f"artifacts/{run.id}"
+            await register_object_write(db, session.id, key, "multipart-fixture", run_id=run.id)
+            assert key not in {
+                row.object_key for row in await list_discarded_objects(db, session.id)
+            }
+            finished = await finish_run(
+                db,
+                run.id,
+                status="completed",
+                files=[
+                    {
+                        "path": path,
+                        "kind": "artifact",
+                        "sha256": "4" * 64,
+                        "size_bytes": 32,
+                        "object_key": key,
+                    },
+                ],
+            )
+            assert finished
+            assert key not in {
+                row.object_key for row in await list_discarded_objects(db, session.id)
+            }
+            assert [f.path for f in await list_session_files(db, session.id)] == [
+                path,
+                input_file.path,
+            ]
     finally:
         async with db.begin() as connection:
             await connection.execute(delete(Session).where(Session.id == session.id))

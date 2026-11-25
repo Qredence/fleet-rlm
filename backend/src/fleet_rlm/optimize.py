@@ -521,6 +521,11 @@ def _ephemeral_daytona_interpreter(
         finally:
             ready.set()
             try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 with suppress(Exception):
                     loop.run_until_complete(loop.shutdown_asyncgens())
                 with suppress(Exception):
