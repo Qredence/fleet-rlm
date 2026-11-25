@@ -4,18 +4,30 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.10.x  | Current maintenance line |
-| < 0.10  | Upgrade to the current line |
+| 0.14.x  | Current maintenance line |
+| < 0.14  | Upgrade to the current line |
 
-The source version is defined in `pyproject.toml`. This table identifies the
-maintenance line, not a claim that a particular checkout has passed a security
-audit. See [CONTRIBUTING.md](CONTRIBUTING.md) for the validation lanes.
+The source version is defined in `backend/pyproject.toml`. This table identifies
+the maintenance line, not a claim that a particular checkout has passed a
+security audit. See [AGENTS.md](AGENTS.md) and the `check` targets in the
+[`Makefile`](Makefile) for the validation lanes.
 
-Fleet's API has deterministic local scope and no caller authentication. Use
-the default loopback binding unless deployment access controls are configured.
-The settings API remains loopback-only. Report sanitized reproduction steps;
-never include credentials, `.env` values, private trace content, or raw provider
-errors in a public report.
+Fleet's API authenticates callers only when you set `FLEET_API_BEARER_TOKEN`.
+When you set it, the session, file, chat, memory, skill, model, and settings
+routes under `/api` require an `Authorization: Bearer <token>` header. When you
+do not set it, these routes accept all callers. The `/healthz` and `/readyz`
+probes never require a token. Set a token before you expose the API outside a
+trusted network.
+
+The backend does not limit the settings API to loopback callers. Browser access
+is controlled by the `FLEET_CORS_ORIGINS` allowlist, which defaults to
+`http://localhost:5173`. Add only the origins that serve your frontend.
+
+The Daytona, S3, LLM, and Tavily credentials stay on the Fleet host. The backend
+does not send them to the Daytona sandbox.
+
+Report sanitized reproduction steps. Never include credentials, `.env` values,
+private trace content, or raw provider errors in a public report.
 
 ## Reporting a Vulnerability
 
