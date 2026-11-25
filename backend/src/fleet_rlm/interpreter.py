@@ -18,18 +18,19 @@ from collections.abc import (
 from contextlib import aclosing, asynccontextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import mlflow
 from daytona import AsyncDaytona, DaytonaConfig
 from daytona.v2 import AsyncSandbox
-from daytona.v2.errors import ConnectionError as DaytonaConnectionError
 from daytona.v2.errors import (
+    ClientTimeoutError,
     DaytonaError,
     NotFoundError,
     SandboxCreateConnectionError,
     SandboxCreateRequestTimeoutError,
 )
+from daytona.v2.errors import ConnectionError as DaytonaConnectionError
 from daytona.v2.process import AsyncProcessHandle
 from daytona.v2.types import StreamLogEvent
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
@@ -47,14 +48,16 @@ ExecutionObserver = Callable[[str, Execution], Awaitable[str | FinalOutput]]
 ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitable[Any]]
 
 
-def make_daytona_client(settings: Settings) -> AsyncDaytona:
-    return AsyncDaytona(
+@asynccontextmanager
+async def make_daytona_client(settings: Settings) -> AsyncGenerator[AsyncDaytona]:
+    async with AsyncDaytona(
         DaytonaConfig(
             api_key=settings.daytona_api_key.get_secret_value(),
             request_timeout=30,
             otel_enabled=settings.daytona_otel_enabled,
         )
-    )
+    ) as daytona:
+        yield daytona
 
 
 class SandboxStartupError(RuntimeError):
@@ -80,34 +83,8 @@ async def _provision_sandbox(
     sandbox = None
     try:
         async with asyncio.timeout(120):
-            sandbox = await daytona.v2.create(
-                settings.daytona_image,
-                name=name,
-                region=settings.daytona_region,
-                spot=spot,
-                create_timeout_seconds=110,
-                wait_seconds=0,
-                lifecycle_policy={
-                    "idle_expiry_seconds": settings.daytona_idle_timeout_minutes * 60,
-                    "on_idle_timeout": "delete",
-                    "timeout_seconds": settings.daytona_max_lifetime_minutes * 60,
-                    "on_timeout": "delete",
-                },
-                network_policy={
-                    "block_all": True,
-                    "allow_domains": settings.daytona_network_allow_domains,
-                },
-                labels={"fleet-runtime": "v2"},
-            )
-            if sandbox.state != "started":
-                await sandbox.wait(until="started", timeout=110)
-            result = await sandbox.process.run(
-                argv=["mkdir", "-p", f"{WORKSPACE}/files", ARTIFACTS],
-                timeout=10,
-                execution_timeout=10,
-            )
-            if result.exit_code != 0:
-                raise SandboxStartupError("Could not initialize the Daytona workspace")
+            sandbox = await _create_sandbox(daytona, settings, name, spot=spot)
+            await prepare_sandbox(sandbox)
             return sandbox
     except (Exception, asyncio.CancelledError) as error:
         # A timed-out create may have allocated a sandbox before the response arrived.
@@ -143,6 +120,57 @@ async def _provision_sandbox(
         raise
 
 
+async def _create_sandbox(
+    daytona: AsyncDaytona, settings: Settings, name: str, *, spot: bool = False
+) -> AsyncSandbox:
+    return await daytona.v2.create(
+        settings.daytona_image,
+        name=name,
+        region=settings.daytona_region,
+        spot=spot,
+        create_timeout_seconds=110,
+        wait_seconds=0,
+        lifecycle_policy={
+            "idle_expiry_seconds": settings.daytona_idle_timeout_minutes * 60,
+            "on_idle_timeout": "delete",
+            "timeout_seconds": settings.daytona_max_lifetime_minutes * 60,
+            "on_timeout": "delete",
+        },
+        network_policy={"block_all": True, "allow_domains": settings.daytona_network_allow_domains},
+        labels={"fleet-runtime": "v2"},
+    )
+
+
+async def prepare_sandbox(sandbox: AsyncSandbox) -> None:
+    try:
+        async with asyncio.timeout(120):
+            if sandbox.state != "started":
+                await sandbox.wait(until="started", timeout=110)
+            result = await sandbox.process.run(
+                argv=["mkdir", "-p", f"{WORKSPACE}/files", ARTIFACTS],
+                timeout=10,
+                execution_timeout=10,
+            )
+            if result.exit_code != 0:
+                raise SandboxStartupError("Could not initialize the Daytona workspace")
+    except (DaytonaError, TimeoutError) as error:
+        raise SandboxStartupError("Daytona workspace startup failed") from error
+
+
+async def allocate_session_sandbox(
+    daytona: AsyncDaytona, settings: Settings, name: str, *, recovering: bool = False
+) -> AsyncSandbox:
+    """Resume a persisted allocation using the same name-derived idempotency key."""
+    try:
+        if recovering:
+            matches = await daytona.v2.find_by_name(name, region=settings.daytona_region)
+            if matches:
+                return matches[0]
+        return await _create_sandbox(daytona, settings, name)
+    except DaytonaError as error:
+        raise SandboxStartupError("Daytona workspace allocation failed") from error
+
+
 @asynccontextmanager
 async def ephemeral_sandbox(
     daytona: AsyncDaytona, settings: Settings
@@ -162,32 +190,19 @@ async def get_running_sandbox(daytona: AsyncDaytona, sandbox_id: str) -> AsyncSa
     return sandbox if sandbox.state == "started" else None
 
 
-async def ensure_session_sandbox(
-    daytona: AsyncDaytona,
-    settings: Settings,
-    session_id: UUID,
-    existing_sandbox_id: str | None,
-) -> tuple[AsyncSandbox, str, bool]:
+async def reusable_session_sandbox(daytona: AsyncDaytona, sandbox_id: str) -> AsyncSandbox | None:
     try:
-        if existing_sandbox_id:
-            try:
-                sandbox = await daytona.v2.get(existing_sandbox_id)
-            except NotFoundError:
-                sandbox = None
-            if sandbox is not None:
-                if sandbox.state == "started":
-                    return sandbox, sandbox.id, False
-                if sandbox.state in {"queued", "creating", "starting"}:
-                    await sandbox.wait(until="started", timeout=90)
-                    return sandbox, sandbox.id, False
-                if sandbox.state not in {"destroyed", "destroying", "error"}:
-                    raise SandboxStartupError("Daytona workspace is in an unexpected state")
-                if sandbox.state == "error":
-                    await delete_sandbox(daytona, sandbox)
-        sandbox = await _provision_sandbox(daytona, settings)
+        sandbox = await daytona.v2.get(sandbox_id)
+        if sandbox.state in {"started", "queued", "creating", "starting"}:
+            return sandbox
+        if sandbox.state not in {"destroyed", "destroying", "error"}:
+            raise SandboxStartupError("Daytona workspace is in an unexpected state")
+        await delete_sandbox(daytona, sandbox)
+    except NotFoundError:
+        return None  # Daytona confirmed the binding is gone.
     except DaytonaError as error:
         raise SandboxStartupError("Daytona workspace startup failed") from error
-    return sandbox, sandbox.id, True
+    return None
 
 
 async def delete_sandbox(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
@@ -245,11 +260,15 @@ async def upload_workspace_file(
             argv=[
                 "python",
                 "-c",
-                "import hashlib, sys\n"
-                "with open(sys.argv[1], 'rb') as file:\n"
-                "    digest = hashlib.file_digest(file, 'sha256').hexdigest()\n"
-                "    if (digest, file.tell()) != (sys.argv[2], int(sys.argv[3])):\n"
-                "        raise SystemExit(1)",
+                """\
+import hashlib
+import sys
+
+with open(sys.argv[1], 'rb') as file:
+    digest = hashlib.file_digest(file, 'sha256').hexdigest()
+    if (digest, file.tell()) != (sys.argv[2], int(sys.argv[3])):
+        raise SystemExit(1)
+""",
                 destination,
                 sha256,
                 str(size),
@@ -272,9 +291,9 @@ class WorkspaceBrowseLimit(RuntimeError):
     pass
 
 
-async def _workspace_query(sandbox: AsyncSandbox, code: str, timeout: int):
+async def _workspace_query(sandbox: AsyncSandbox, code: str, timeout: int, *args: str):
     result = await sandbox.process.run(
-        argv=["python", "-c", code], timeout=timeout, execution_timeout=timeout
+        argv=["python", "-c", code, *args], timeout=timeout, execution_timeout=timeout
     )
     if result.exit_code != 0:
         raise RuntimeError("Could not read the Daytona workspace")
@@ -682,7 +701,7 @@ class DaytonaCodeInterpreter:
                 try:
                     await asyncio.shield(operation)
                 except asyncio.CancelledError:
-                    pass
+                    pass  # The execution was cancelled so the worker can be stopped below.
                 except Exception as error:
                     if sandbox_cleanup_failed(error):
                         cleanup_error = error
@@ -694,9 +713,8 @@ class DaytonaCodeInterpreter:
         if self._tag is None:
             return
         try:
-            await self._sandbox.process.kill_all(tag=self._tag, timeout=10)
-        except NotFoundError:
-            pass
+            with suppress(NotFoundError):
+                await self._sandbox.process.kill_all(tag=self._tag, timeout=10)
         except Exception as error:
             self._closed = True
             raise SandboxCleanupError("Daytona worker cleanup could not be verified") from error
@@ -725,7 +743,7 @@ class DaytonaCodeInterpreter:
         for attempt in range(3):
             try:
                 log_stream = cast(
-                    "AsyncGenerator[StreamLogEvent]",
+                    AsyncGenerator[StreamLogEvent],
                     handle.stream_logs(cursor=self._cursor, encoding="base64"),
                 )
                 async with aclosing(log_stream) as logs:
@@ -749,7 +767,7 @@ class DaytonaCodeInterpreter:
                         if done.done():
                             return done.result()
                 raise ConnectionError("Daytona log stream ended before the cell completed")
-            except (ConnectionError, DaytonaConnectionError):
+            except (ConnectionError, DaytonaConnectionError, ClientTimeoutError):
                 if attempt == 2:
                     raise
         raise AssertionError("Unreachable Daytona stream retry state")
@@ -951,32 +969,41 @@ async def list_new_artifacts(
     known_paths: Collection[str] | Mapping[str, tuple[str, int]],
 ) -> list[dict]:
     """Hash new or modified regular files within the artifact tree without downloading contents."""
-    if isinstance(known_paths, Mapping):
-        known_hashes: dict[str, tuple[str, int]] = {}
-        for path, metadata in known_paths.items():
-            if not isinstance(metadata, tuple) or len(metadata) != 2:
-                raise TypeError("Expected (sha256, size_bytes) tuple for known artifact metadata")
-            sha256, size_bytes = metadata
-            known_hashes[str(PurePosixPath(WORKSPACE) / path)] = (str(sha256), int(size_bytes))
-        header = f"root = {ARTIFACTS!r}\nknown_paths = set()\nknown_hashes = {known_hashes!r}\n"
-    else:
-        known = sorted({str(PurePosixPath(WORKSPACE) / path) for path in known_paths})
-        header = f"root = {ARTIFACTS!r}\nknown_paths = set({known!r})\nknown_hashes = None\n"
-    return await _workspace_query(
-        sandbox,
-        header
-        + """
+    known = {
+        str(PurePosixPath(WORKSPACE) / path): (
+            known_paths[path] if isinstance(known_paths, Mapping) else None
+        )
+        for path in known_paths
+    }
+    manifest = f"/tmp/fleet-manifest-{uuid4().hex}.json"
+    try:
+        async with asyncio.timeout(60):
+            await sandbox.fs.write_bytes(manifest, json.dumps(known).encode(), atomic=True)
+            return await _workspace_query(sandbox, _SCAN_ARTIFACTS, 60, ARTIFACTS, manifest)
+    except (Exception, asyncio.CancelledError):
+        with suppress(DaytonaError):
+            await sandbox.fs.remove(manifest)
+        raise
+
+
+_SCAN_ARTIFACTS = """\
 import hashlib
 import json
 import os
 import stat
+import sys
+
+root, manifest = sys.argv[1:]
+with open(manifest, encoding='utf-8') as file:
+    known = json.load(file)
+os.unlink(manifest)
 
 files = []
 if os.path.isdir(root) and not os.path.islink(root):
     for directory, _, names, dir_fd in os.fwalk(root, follow_symlinks=False):
         for name in names:
             path = os.path.join(directory, name)
-            if path in known_paths or not stat.S_ISREG(
+            if (path in known and known[path] is None) or not stat.S_ISREG(
                 os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
             ):
                 continue
@@ -985,10 +1012,7 @@ if os.path.isdir(root) and not os.path.islink(root):
                 info = os.fstat(data.fileno())
                 if stat.S_ISREG(info.st_mode):
                     digest = hashlib.file_digest(data, "sha256").hexdigest()
-                    if known_hashes is not None and known_hashes.get(path) == (
-                        digest,
-                        info.st_size,
-                    ):
+                    if known.get(path) == [digest, info.st_size]:
                         continue
                     files.append({
                         "path": path,
@@ -996,6 +1020,4 @@ if os.path.isdir(root) and not os.path.islink(root):
                         "size_bytes": info.st_size,
                     })
 print(json.dumps(sorted(files, key=lambda item: item["path"])))
-""",
-        60,
-    )
+"""

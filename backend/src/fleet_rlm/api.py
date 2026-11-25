@@ -49,17 +49,19 @@ from .interpreter import (
     DaytonaError,
     SandboxStartupError,
     WorkspaceBrowseLimit,
+    allocate_session_sandbox,
     delete_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
-    ensure_session_sandbox,
     get_running_sandbox,
     list_new_artifacts,
     list_workspace_files,
     make_daytona_client,
     make_interpreter_factory,
+    prepare_sandbox,
     read_browsable_workspace_file,
     reset_managed_workspace,
+    reusable_session_sandbox,
     sandbox_cleanup_failed,
     upload_workspace_file,
 )
@@ -229,6 +231,7 @@ class SessionView(BaseModel):
     title: str
     model_override: str | None = None
     daytona_sandbox_id: str | None = None
+    deleting: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -482,7 +485,6 @@ async def list_sessions(
 ) -> list[SessionView]:
     sessions = await db.scalars(
         select(store.Session)
-        .where(store.Session.deleting.is_(False))
         .order_by(store.Session.updated_at.desc(), store.Session.id.desc())
         .limit(limit)
     )
@@ -491,7 +493,10 @@ async def list_sessions(
 
 @app.get("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
 async def get_session(session_id: UUID, db: DbDep) -> SessionView:
-    return SessionView.model_validate(await _session(db, session_id))
+    session = await db.get(store.Session, session_id)
+    if session is None:
+        raise store.SessionNotFoundError(session_id)
+    return SessionView.model_validate(session)
 
 
 @app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
@@ -512,7 +517,7 @@ async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> Ses
     async with db.begin():
         session = await db.scalar(
             update(store.Session)
-            .where(store.Session.id == session_id)
+            .where(store.Session.id == session_id, store.Session.deleting.is_(False))
             .values(**changes, updated_at=func.now())
             .returning(store.Session)
         )
@@ -699,13 +704,21 @@ async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
             if store.upload_is_active(session):
                 raise HTTPException(409, "Session already has an upload in progress")
             session.deleting = True
+            session.upload_key = session.upload_started_at = None
         sandbox_id = session.daytona_sandbox_id
-    if sandbox_id:
-        try:
+        pending_name = session.pending_sandbox_name
+    try:
+        if sandbox_id:
             await delete_sandbox_by_id(runtime.daytona, sandbox_id)
-        except DaytonaError as error:
-            raise HTTPException(503, "Workspace deletion can be retried") from error
-    await runtime.storage.delete_session(session_id)
+        if pending_name:
+            pending = await allocate_session_sandbox(
+                runtime.daytona, runtime.settings, pending_name, recovering=True
+            )
+            await delete_sandbox(runtime.daytona, pending)
+        await _reclaim_discarded_objects(runtime, session_id)
+        await runtime.storage.delete_session(session_id)
+    except (DaytonaError, SandboxStartupError, StorageError) as error:
+        raise HTTPException(503, "Workspace deletion can be retried") from error
     async with runtime.sessionmaker() as db, db.begin():
         session = await db.get(store.Session, session_id, with_for_update=True)
         if session is not None:
@@ -740,40 +753,60 @@ async def _ensure_bound_sandbox(
     session_id: UUID,
     existing_sandbox_id: str | None,
     *,
-    owner_run_id: UUID | None = None,
+    owner_run_id: UUID,
     needs_cleanup: bool = False,
-) -> tuple[AsyncSandbox, str]:
-    reusable_id = existing_sandbox_id
-    if needs_cleanup and existing_sandbox_id:
-        try:
-            await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
-        except DaytonaError as error:
-            raise SandboxStartupError("Could not retire the previous Daytona workspace") from error
-        reusable_id = None
-    sandbox, sandbox_id, created = await ensure_session_sandbox(
-        runtime.daytona, effective, session_id, reusable_id
+) -> AsyncSandbox:
+    if existing_sandbox_id:
+        if needs_cleanup:
+            try:
+                await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
+            except DaytonaError as error:
+                raise SandboxStartupError(
+                    "Could not retire the previous Daytona workspace"
+                ) from error
+        elif sandbox := await reusable_session_sandbox(runtime.daytona, existing_sandbox_id):
+            if sandbox.state != "started":
+                await prepare_sandbox(sandbox)
+            return sandbox
+    name, recovering = await store.reserve_session_sandbox(
+        runtime.sessionmaker, session_id, owner_run_id, expected=existing_sandbox_id
     )
-    if not created:
-        return sandbox, sandbox_id
+    sandbox = await allocate_session_sandbox(
+        runtime.daytona, effective, name, recovering=recovering
+    )
+    # A stale worker leaves the reservation for the next owner to reconcile.
+    _, won = await store.rebind_session_sandbox(
+        runtime.sessionmaker,
+        session_id,
+        sandbox.id,
+        expected=existing_sandbox_id,
+        owner_run_id=owner_run_id,
+        allocation_name=name,
+    )
+    if not won:
+        raise SandboxStartupError("The Daytona workspace binding changed during startup")
+    await prepare_sandbox(sandbox)
+    return sandbox
+
+
+async def _reclaim_discarded_objects(runtime: Runtime, session_id: UUID) -> None:
+    reclaimed = []
     try:
-        winning_id, won = await store.rebind_session_sandbox(
-            runtime.sessionmaker,
-            session_id,
-            sandbox_id,
-            expected=existing_sandbox_id,
-            owner_run_id=owner_run_id,
+        for entry in await store.list_discarded_objects(runtime.sessionmaker, session_id):
+            await runtime.storage.reclaim(entry.object_key, entry.upload_id)
+            reclaimed.append(entry.object_key)
+    finally:
+        if reclaimed:
+            await store.forget_discarded_objects(runtime.sessionmaker, reclaimed)
+
+
+async def _try_object_cleanup(runtime: Runtime, session_id: UUID) -> None:
+    try:
+        await _reclaim_discarded_objects(runtime, session_id)
+    except (StorageError, SQLAlchemyError) as error:
+        _LOG.warning(
+            "Workspace object cleanup will retry for %s (%s)", session_id, type(error).__name__
         )
-    except (Exception, asyncio.CancelledError):
-        with suppress(DaytonaError):
-            await delete_sandbox(runtime.daytona, sandbox)
-        raise
-    if won or winning_id == sandbox_id:
-        return sandbox, sandbox_id
-    with suppress(DaytonaError):
-        await delete_sandbox(runtime.daytona, sandbox)
-    if winning_id and (winner := await get_running_sandbox(runtime.daytona, winning_id)):
-        return winner, winning_id
-    raise SandboxStartupError("The Daytona workspace binding changed during startup")
 
 
 @app.post(
@@ -798,15 +831,17 @@ async def upload_file(
         session.upload_key = key
         session.upload_started_at = datetime.now(UTC)
     path = f"files/{name}"
-    saving_manifest = False
+
+    async def register(upload_id: str) -> None:
+        await store.register_object_write(runtime.sessionmaker, session_id, key, upload_id)
+
     try:
         with TemporaryDirectory(prefix="fleet-upload-") as temporary:
             local = Path(temporary) / "upload"
             with local.open("wb") as destination:
                 while chunk := await file.read(1024 * 1024):
                     destination.write(chunk)
-            digest, size = await runtime.storage.put(key, local)
-        saving_manifest = True
+            digest, size = await runtime.storage.put(key, local, register=register)
         record = await store.upsert_file_record(
             runtime.sessionmaker,
             session_id,
@@ -817,12 +852,12 @@ async def upload_file(
             object_key=key,
             expected_upload=key,
         )
-    except (Exception, asyncio.CancelledError) as error:
-        if not saving_manifest or isinstance(error, store.SessionNotFoundError):
-            with suppress(StorageError):
-                await runtime.storage.delete(key)
-        await store.release_upload(runtime.sessionmaker, session_id, key)
+    except (Exception, asyncio.CancelledError):
+        with suppress(SQLAlchemyError):
+            await store.release_upload(runtime.sessionmaker, session_id, key)
         raise
+    finally:
+        await _try_object_cleanup(runtime, session_id)
     return FileView.model_validate(record)
 
 
@@ -900,7 +935,8 @@ async def download_workspace_entry(
         else:
             if stored.size_bytes > 1024 * 1024:
                 raise HTTPException(413, "Workspace file preview supports files up to 1 MiB")
-            return _workspace_response(file_path, await _read_workspace_file(runtime, stored))
+            content = await _read_workspace_file(runtime, stored, max_bytes=1024 * 1024)
+            return _workspace_response(file_path, content)
     sandbox, timeout = await _browse_sandbox(runtime, session_id)
     if sandbox is None:
         raise HTTPException(404, "File not found")
@@ -928,11 +964,41 @@ async def _workspace_file(runtime: Runtime, session_id: UUID, file_path: str) ->
     return file
 
 
-async def _read_workspace_file(runtime: Runtime, record: store.File) -> bytes:
+async def _copy_committed_file(
+    runtime: Runtime,
+    record: store.File,
+    path: Path,
+    *,
+    max_bytes: int | None = None,
+    expected_sha: str | None = None,
+) -> None:
+    for attempt in range(2):
+        if expected_sha is not None and record.sha256 != expected_sha:
+            raise StorageIntegrityError("The artifact changed")
+        if max_bytes is not None and record.size_bytes > max_bytes:
+            raise HTTPException(413, "Workspace file exceeds the preview size limit")
+        try:
+            await runtime.storage.download(
+                record.object_key, path, sha256=record.sha256, size=record.size_bytes
+            )
+            return
+        except StorageObjectMissing:
+            if attempt:
+                raise
+            # A detached manifest snapshot can lose its object to a concurrent replacement.
+            current = await _workspace_file(runtime, record.session_id, record.path)
+            if current.object_key == record.object_key:
+                raise
+            record = current
+
+
+async def _read_workspace_file(
+    runtime: Runtime, record: store.File, *, max_bytes: int, expected_sha: str | None = None
+) -> bytes:
     with TemporaryDirectory(prefix="fleet-read-") as temporary:
         path = Path(temporary) / "file"
-        await runtime.storage.download(
-            record.object_key, path, sha256=record.sha256, size=record.size_bytes
+        await _copy_committed_file(
+            runtime, record, path, max_bytes=max_bytes, expected_sha=expected_sha
         )
         return path.read_bytes()
 
@@ -956,9 +1022,7 @@ async def download_file(session_id: UUID, file_path: str, runtime: RuntimeDep) -
     with NamedTemporaryFile(prefix="fleet-download-", delete=False) as temporary:
         path = Path(temporary.name)
     try:
-        await runtime.storage.download(
-            record.object_key, path, sha256=record.sha256, size=record.size_bytes
-        )
+        await _copy_committed_file(runtime, record, path)
     except (Exception, asyncio.CancelledError):
         path.unlink(missing_ok=True)
         raise
@@ -1051,7 +1115,9 @@ async def install_skill(session_id: UUID, payload: SkillInstall, runtime: Runtim
     if file.sha256 != payload.sha256:
         raise HTTPException(409, "The artifact changed. Reopen its preview and try again.")
     try:
-        content = await _read_workspace_file(runtime, file)
+        content = await _read_workspace_file(
+            runtime, file, max_bytes=MAX_SKILL_BYTES, expected_sha=payload.sha256
+        )
     except StorageIntegrityError as error:
         raise HTTPException(
             409, "The artifact changed. Reopen its preview and try again."
@@ -1081,6 +1147,7 @@ class Turn:
     worker: asyncio.Task[list[dict]] | None = None
     finalizing: bool = False
     finalized: bool = False
+    sandbox_for_cleanup: str | None = None
 
 
 async def _finish_root(
@@ -1108,7 +1175,13 @@ async def _finish_root(
                 )
             # A child-start transaction can commit before its interrupted callback returns.
             await db.execute(running_children)
-    committed = await store.finish_run(sessionmaker, turn.run_id, status=status, **result)
+    committed = await store.finish_run(
+        sessionmaker,
+        turn.run_id,
+        status=status,
+        retire_sandbox_id=turn.sandbox_for_cleanup,
+        **result,
+    )
     turn.finalized = True
     return committed
 
@@ -1176,10 +1249,10 @@ async def _chat_sandbox(
     session: store.Session,
     settings: Settings | None = None,
     *,
-    owner_run_id: UUID | None = None,
+    owner_run_id: UUID,
 ) -> AsyncSandbox:
     effective = settings if settings is not None else await _effective_settings(runtime)
-    sandbox, _ = await _ensure_bound_sandbox(
+    return await _ensure_bound_sandbox(
         runtime,
         effective,
         session.id,
@@ -1187,7 +1260,6 @@ async def _chat_sandbox(
         owner_run_id=owner_run_id,
         needs_cleanup=session.sandbox_needs_cleanup,
     )
-    return sandbox
 
 
 def _file_manifest(file: store.File) -> dict:
@@ -1216,17 +1288,11 @@ async def _hydrate_workspace(
             )
 
 
-async def _retire_workspace(runtime: Runtime, session_id: UUID, sandbox_id: str) -> None:
-    await store.mark_sandbox_for_cleanup(runtime.sessionmaker, session_id, sandbox_id)
+async def _retire_workspace(runtime: Runtime, sandbox_id: str) -> None:
     try:
         await delete_sandbox_by_id(runtime.daytona, sandbox_id)
     except DaytonaError as error:
         _LOG.warning("Could not retire Daytona VM %s (%s)", sandbox_id, type(error).__name__)
-        return
-    with suppress(store.SessionNotFoundError):
-        await store.rebind_session_sandbox(
-            runtime.sessionmaker, session_id, None, expected=sandbox_id
-        )
 
 
 async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list[dict]) -> None:
@@ -1290,14 +1356,12 @@ async def _run_turn(
     error_text = None
     result = None
     terminal_frames: list[dict] = []
-    artifacts: list[dict] = []
-    staged_keys: list[str] = []
+    artifacts: list[store.StagedFile] = []
     sandbox: AsyncSandbox | None = None
     hydrated = False
     buffering_terminal = False
     failure_parts = None
     committed = False
-    commit_uncertain = False
 
     async def send_frame(frame: dict) -> None:
         if buffering_terminal:
@@ -1305,6 +1369,14 @@ async def _run_turn(
             terminal_frames.append(frame)
         else:
             await queue.put(frame)
+
+    async def stage_artifact(key: str, local: Path) -> tuple[str, int]:
+        async def register(upload_id: str) -> None:
+            await store.register_object_write(
+                sessionmaker, turn.session_id, key, upload_id, run_id=turn.run_id
+            )
+
+        return await runtime.storage.put(key, local, register=register)
 
     stream = ui_stream.UiStream(root_id, send_frame)
 
@@ -1424,16 +1496,16 @@ async def _run_turn(
                         sandbox, path, local, timeout=effective.daytona_exec_timeout_seconds
                     )
                     key = ObjectStorage.new_key(turn.session_id)
-                    staged_keys.append(key)
-                    digest, size = await runtime.storage.put(key, local)
+                    digest, size = await stage_artifact(key, local)
                     if (digest, size) != (artifact["sha256"], artifact["size_bytes"]):
                         raise StorageError("Artifact changed during publication")
                     artifacts.append(
                         {
-                            **artifact,
                             "path": path,
                             "kind": "artifact",
                             "object_key": key,
+                            "sha256": digest,
+                            "size_bytes": size,
                         }
                     )
             if await request.is_disconnected():
@@ -1459,13 +1531,13 @@ async def _run_turn(
         status = "cancelled"
         turn.finalizing = True
         if sandbox is not None and not hydrated:
-            await _retire_workspace(runtime, turn.session_id, sandbox.id)
+            turn.sandbox_for_cleanup = sandbox.id
         raise
     except Exception as error:
         turn.finalizing = True
         timed_out = isinstance(error, TimeoutError)
-        if sandbox is not None and (timed_out or sandbox_cleanup_failed(error)):
-            await _retire_workspace(runtime, turn.session_id, sandbox.id)
+        if sandbox is not None and (not hydrated or timed_out or sandbox_cleanup_failed(error)):
+            turn.sandbox_for_cleanup = sandbox.id
         current_task = asyncio.current_task()
         if current_task is not None and current_task.cancelling():
             status = "cancelled"
@@ -1479,8 +1551,9 @@ async def _run_turn(
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
+        fence_committed = False
         try:
-            persisted = {}
+            persisted: dict[str, Any] = {}
             if status == "completed" and result is not None:
                 persisted = {
                     "answer": result.answer,
@@ -1496,11 +1569,11 @@ async def _run_turn(
                 error=error_text,
                 **persisted,
             )
+            fence_committed = committed
         except Exception as error:
-            commit_uncertain = status == "completed"
             _LOG.warning("Could not finalize turn %s (%s)", turn.run_id, type(error).__name__)
             if not turn.finalized:
-                await _finish_root(
+                fence_committed = await _finish_root(
                     sessionmaker,
                     turn,
                     "cancelled" if status == "cancelled" else "failed",
@@ -1509,10 +1582,9 @@ async def _run_turn(
                 )
             status = "failed"
             committed = False
-        if not commit_uncertain and (not committed or status != "completed"):
-            for key in staged_keys:
-                with suppress(StorageError):
-                    await runtime.storage.delete(key)
+        if fence_committed and turn.sandbox_for_cleanup is not None:
+            await _retire_workspace(runtime, turn.sandbox_for_cleanup)
+        await _try_object_cleanup(runtime, turn.session_id)
 
     if status == "completed" and committed and result is not None:
         background.add_task(_consolidate, runtime, turn, result.answer, memories)

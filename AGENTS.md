@@ -6,7 +6,7 @@ Fleet-RLM is a stateless, recursive agentic system built on DSPy 3.5.0 `dspy.RLM
 
 - `backend/` — FastAPI 0.165+ and DSPy 3.5.0 (`uv`, Python `>=3.13,<3.14`) under `backend/src/fleet_rlm/`
   1. `config.py` — Flat `pydantic-settings` (`FLEET_*`) configuration
-  2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models (5 tables: `sessions`, `runs`, `files`, `memories`, `workspace_settings`), PgBouncer pool, `uuidv7()`, and root-turn partial unique index lock
+  2. `db.py` — Neon Postgres 18 SQLAlchemy 2.1 async models for sessions, runs, files, memories, workspace settings, and object cleanup. Uses PgBouncer, `uuidv7()`, and a root-turn partial unique index lock.
   3. `interpreter.py` — Daytona SDK 2.1.0 `.v2` client, filesystem operations, and streamed `DaytonaCodeInterpreter` adapter
   4. `skills.py` — Read-only `SKILL.md` registry and TypeSafe Jev (`Noul` + `Choice`) selector
   5. `agent.py` — DSPy 3.5 `dspy.RLM` runner, recursive `spawn_agent` / `llm_query`, bounded history, and `MemoryGate` consolidation

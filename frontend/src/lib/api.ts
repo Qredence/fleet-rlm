@@ -5,6 +5,7 @@ export interface Session {
   title: string
   model_override: string | null
   daytona_sandbox_id: string | null
+  deleting: boolean
   created_at: string
   updated_at: string
 }

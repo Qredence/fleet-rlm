@@ -99,6 +99,15 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
     if (routeSessionId === id) void navigate('/', { replace: true })
   }
 
+  async function retryDeletion(id: string) {
+    setActionError('')
+    try {
+      await deleteSession(id)
+    } catch (failure) {
+      setActionError(errorMessage(failure))
+    }
+  }
+
   async function updateSessionSettings(id: string, changes: SessionUpdate) {
     try {
       await sessions.update(id, changes)
@@ -142,7 +151,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
         'min-h-0 min-w-0 overflow-hidden',
         chatRoute && session && filesDocked && 'xl:bg-transparent xl:shadow-none xl:peer-data-[variant=inset]:my-0 xl:peer-data-[variant=inset]:rounded-none',
       )}>
-        {session && (chatRoute || hasOpenedChat) && (
+        {session && !session.deleting && (chatRoute || hasOpenedChat) && (
           <Deferred key={session.id} fallback={chatRoute ? <PageLoading title={session.title} /> : null}>
             <SessionWorkspace
               api={api} token={token} session={session} skills={skills ?? []}
@@ -166,7 +175,13 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
               onAction={sessions.error ? sessions.retry : () => void createSession()}
             />
           )} />
-          <Route path="/sessions/:id" element={session ? null : (
+          <Route path="/sessions/:id" element={session?.deleting ? (
+            <ChatPlaceholder
+              title={session.title} error="Deletion is pending. Retry to finish clearing this workspace."
+              actionLabel="Retry deletion" disabled={sessions.changing}
+              onAction={() => void retryDeletion(session.id)}
+            />
+          ) : session ? null : (
             <ChatPlaceholder
               loading={sessions.loading} error={sessions.error}
               actionLabel={sessions.missing ? 'Back to chat' : 'Retry'}

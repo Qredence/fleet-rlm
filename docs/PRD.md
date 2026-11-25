@@ -67,7 +67,7 @@ fleet-rlm/
 │   ├── skills/                        # Agent Skills (SKILL.md folders)
 │   ├── src/fleet_rlm/
 │   │   ├── config.py                  # Flat pydantic-settings (env / .env)
-│   │   ├── db.py                      # Neon Postgres 18 ORM (5 tables), pooling, run lock, memories, workspace_settings
+│   │   ├── db.py                      # Neon Postgres 18 ORM, pooling, run lock and workspace recovery
 │   │   ├── interpreter.py             # 100% of Daytona SDK + DSPy CodeInterpreter adapter
 │   │   ├── storage.py                 # Host-side S3 I/O and workspace file integrity
 │   │   ├── skills.py                  # SKILL.md loader + TypeSafe Jev selector + tool scoping

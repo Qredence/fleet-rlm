@@ -2,8 +2,8 @@
 
 import asyncio
 import hashlib
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Awaitable, Callable
+from contextlib import closing, suppress
 from pathlib import Path
 from typing import BinaryIO
 from uuid import UUID, uuid4
@@ -81,23 +81,47 @@ class ObjectStorage:
     def new_key(cls, session_id: UUID) -> str:
         return f"{cls.prefix(session_id)}{uuid4().hex}"
 
-    async def put(self, key: str, path: Path) -> tuple[str, int]:
-        def write() -> tuple[str, int]:
+    async def put(
+        self, key: str, path: Path, *, register: Callable[[str], Awaitable[None]]
+    ) -> tuple[str, int]:
+        def begin_upload() -> tuple[str, str, int]:
             with path.open("rb") as body:
                 digest = hashlib.file_digest(body, "sha256").hexdigest()
                 size = body.tell()
-                body.seek(0)
-                self._client.put_object(
+            upload = self._client.create_multipart_upload(
+                Bucket=self.bucket, Key=key, Metadata={"sha256": digest}
+            )
+            return upload["UploadId"], digest, size
+
+        upload_id, digest, size = await _transfer(begin_upload)
+        try:
+            # A lease holder cannot write data until its abortable upload ID is durable.
+            await register(upload_id)
+        except (Exception, asyncio.CancelledError):
+            with suppress(StorageError):
+                await _transfer(lambda: self._abort_upload(key, upload_id))
+            raise
+
+        def write() -> None:
+            with path.open("rb") as body:
+                part = self._client.upload_part(
                     Bucket=self.bucket,
                     Key=key,
+                    UploadId=upload_id,
+                    PartNumber=1,
                     Body=body,
                     ContentLength=size,
-                    Metadata={"sha256": digest},
                 )
+            self._client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": [{"ETag": part["ETag"], "PartNumber": 1}]},
+            )
             self._read_verified(key, sha256=digest, size=size)
-            return digest, size
 
-        return await _transfer(write)
+        await _transfer(write)
+        return digest, size
 
     async def download(self, key: str, path: Path, *, sha256: str, size: int) -> None:
         def read() -> None:
@@ -123,12 +147,29 @@ class ObjectStorage:
             if length != size or digest.hexdigest() != sha256:
                 raise StorageIntegrityError("Workspace object hash does not match its record")
 
-    async def delete(self, key: str) -> None:
-        await _transfer(lambda: self._client.delete_object(Bucket=self.bucket, Key=key))
+    def _abort_upload(self, key: str, upload_id: str) -> None:
+        try:
+            self._client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=upload_id)
+        except ClientError as error:
+            if error.response["Error"]["Code"] not in {"NoSuchUpload", "404", "NotFound"}:
+                raise
+
+    async def reclaim(self, key: str, upload_id: str | None) -> None:
+        def delete() -> None:
+            if upload_id is not None:
+                self._abort_upload(key, upload_id)
+            self._client.delete_object(Bucket=self.bucket, Key=key)
+
+        await _transfer(delete)
 
     async def delete_session(self, session_id: UUID) -> None:
         def delete() -> None:
             prefix = self.prefix(session_id)
+            while uploads := self._client.list_multipart_uploads(
+                Bucket=self.bucket, Prefix=prefix, MaxUploads=1000
+            ).get("Uploads"):
+                for upload in uploads:
+                    self._abort_upload(upload["Key"], upload["UploadId"])
             while True:
                 page = self._client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=1000)
                 keys = [{"Key": item["Key"]} for item in page.get("Contents", ())]

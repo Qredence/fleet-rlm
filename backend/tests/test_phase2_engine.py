@@ -10,7 +10,7 @@ from contextlib import aclosing
 from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -44,18 +44,21 @@ from fleet_rlm.agent import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
+    ClientTimeoutError,
     DaytonaConnectionError,
     DaytonaError,
     SandboxCleanupError,
     SandboxStartupError,
+    allocate_session_sandbox,
     delete_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
-    ensure_session_sandbox,
     ephemeral_sandbox,
     list_new_artifacts,
     make_daytona_client,
     make_interpreter_factory,
+    prepare_sandbox,
+    reusable_session_sandbox,
     upload_workspace_file,
 )
 from fleet_rlm.skills import SkillRegistry, build_skill_selector, select_skills
@@ -386,6 +389,7 @@ class _LocalSandbox:
     def __init__(self, cwd):
         self.cwd = cwd
         self.process = self
+        self.fs = self
         self.contexts = []
         self.deleted = []
         self.replies = []
@@ -393,6 +397,13 @@ class _LocalSandbox:
         self.state = "started"
         self.id = "test-sandbox"
         self.wait = AsyncMock()
+
+    async def write_bytes(self, path, data, *, atomic):
+        assert atomic
+        Path(path).write_bytes(data)
+
+    async def remove(self, path):
+        Path(path).unlink(missing_ok=True)
 
     async def start(self, *, argv, cwd, stdin, tag):
         assert cwd == "/workspace" and stdin == "open"
@@ -430,37 +441,29 @@ async def test_provisioning_and_reuse(settings, tmp_path):
     sandbox.process = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
     daytona = SimpleNamespace(
         v2=SimpleNamespace(
-            create=AsyncMock(return_value=sandbox), get=AsyncMock(return_value=sandbox)
+            create=AsyncMock(return_value=sandbox),
+            get=AsyncMock(return_value=sandbox),
+            find_by_name=AsyncMock(return_value=[sandbox]),
+            delete=AsyncMock(),
         )
     )
-    session_id = uuid4()
-    assert await ensure_session_sandbox(daytona, settings, session_id, None) == (
-        sandbox,
-        sandbox.id,
-        True,
-    )
+    name = f"fleet-{uuid4().hex}"
+    assert await allocate_session_sandbox(daytona, settings, name) is sandbox
+    await prepare_sandbox(sandbox)
     create = daytona.v2.create
     assert create.call_args.args == (settings.daytona_image,)
     args = create.call_args.kwargs
     assert "env" not in args and "volumes" not in args
     assert args["network_policy"] == {"block_all": True, "allow_domains": []}
     assert args["lifecycle_policy"]["on_idle_timeout"] == "delete"
-    assert await ensure_session_sandbox(daytona, settings, session_id, sandbox.id) == (
-        sandbox,
-        sandbox.id,
-        False,
-    )
+    assert await reusable_session_sandbox(daytona, sandbox.id) is sandbox
+    assert await allocate_session_sandbox(daytona, settings, name, recovering=True) is sandbox
+    create.assert_awaited_once()
+    daytona.v2.find_by_name.assert_awaited_once_with(name, region=settings.daytona_region)
     sandbox.wait.assert_not_awaited()
     sandbox.state = "destroyed"
-    replacement = _LocalSandbox(tmp_path)
-    replacement.id = "replacement"
-    replacement.process = sandbox.process
-    create.return_value = replacement
-    assert await ensure_session_sandbox(daytona, settings, session_id, sandbox.id) == (
-        replacement,
-        replacement.id,
-        True,
-    )
+    assert await reusable_session_sandbox(daytona, sandbox.id) is None
+    daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
 
 @pytest.mark.asyncio
@@ -479,7 +482,8 @@ async def test_failed_workspace_startup_deletes_new_sandbox(settings, tmp_path, 
         )
     )
     with pytest.raises(SandboxStartupError):
-        await ensure_session_sandbox(daytona, settings, uuid4(), None)
+        async with ephemeral_sandbox(daytona, settings):
+            pytest.fail("failed allocation must not yield")
     if during_create:
         name = daytona.v2.create.call_args.kwargs["name"]
         daytona.v2.find_by_name.assert_awaited_once_with(name, region=settings.daytona_region)
@@ -783,8 +787,9 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", [DaytonaConnectionError, ClientTimeoutError])
 async def test_stream_resumes_at_cursor_without_repeating_host_calls(
-    settings, tmp_path, monkeypatch
+    settings, tmp_path, monkeypatch, interruption
 ):
     sandbox = _LocalSandbox(tmp_path)
     interpreter = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())()
@@ -803,7 +808,7 @@ async def test_stream_resumes_at_cursor_without_repeating_host_calls(
             yield event
             if len(cursors) == 1:
                 # Model the provider retaining unread frames after disconnect.
-                raise DaytonaConnectionError("log stream disconnected")
+                raise interruption("log stream interrupted")
 
     # Retain a single generator behind the simulated reconnect, including the
     # second half of a JSON frame that was split by the local provider.
@@ -981,6 +986,10 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
         str(same_size): (hashlib.sha256(b"aaaa").hexdigest(), 4),
     }
 
+    # The same size of manifest previously exceeded Linux's per-argument limit.
+    known_mapping.update(
+        {f"files/{index:04d}-{'x' * 246}.csv": ("a" * 64, 1) for index in range(410)}
+    )
     assert await list_new_artifacts(sandbox, known_mapping) == []
 
     # Mutate two existing artifacts and create one brand-new artifact.
@@ -1048,9 +1057,10 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
     daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
     daytona.v2.delete.reset_mock()
+    crash = Mock(side_effect=RuntimeError("eval crashed"))
     with pytest.raises(RuntimeError, match="eval crashed"):
         async with ephemeral_sandbox(daytona, configured):
-            raise RuntimeError("eval crashed")
+            crash()
     daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
 
     daytona.v2.delete.reset_mock()
@@ -1063,9 +1073,8 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
 
 @pytest.mark.asyncio
 async def test_daytona_v2_and_workspace_file_helpers(settings, tmp_path):
-    client = make_daytona_client(settings)
-    assert hasattr(client, "v2")
-    await client.close()
+    async with make_daytona_client(settings) as client:
+        assert hasattr(client, "v2")
 
     sandbox = SimpleNamespace(
         id="sb-1",
@@ -1252,7 +1261,7 @@ async def test_live_streamed_worker_failure_recovery(monkeypatch):
                         async for event in logs:
                             yield event
                             if len(cursors) == 1:
-                                raise DaytonaConnectionError("Simulated stream disconnect")
+                                raise ClientTimeoutError("Simulated stream timeout")
 
                 called = AsyncMock(return_value="cursor resumed")
                 probe.tools["probe_resume"] = called
@@ -1376,11 +1385,11 @@ async def test_live_two_turn_csv(tmp_path):
     mlflow.dspy.autolog()
     try:
         async with make_daytona_client(settings) as daytona:
-            sandbox, _, created = await ensure_session_sandbox(daytona, settings, uuid4(), None)
+            sandbox = await allocate_session_sandbox(daytona, settings, f"fleet-{uuid4().hex}")
             path = "/workspace/files/sales.csv"
             uploaded = False
             try:
-                assert created
+                await prepare_sandbox(sandbox)
                 await sandbox.fs.write_bytes(path, b"value\n2\n5\n11\n", atomic=True)
                 uploaded = True
                 factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())

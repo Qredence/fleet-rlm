@@ -33,7 +33,7 @@
    cd backend && uv sync --python 3.13 && uv run alembic upgrade head
    cd ../frontend && pnpm install
    ```
-   For an existing v0 deployment, rehearse the Alembic upgrade through `0005_sandbox_cleanup` on an isolated branch. Revision `0004_daytona_v2_cutover` clears old sandbox bindings and file manifests. Conversations and memories are retained. Users re-upload any files they want in the new workspace. Keep the old Volume and the pre-cutover database restore point for the migration window. [Migration plan](./docs/daytona-v2-migration-plan.md)
+   For an existing v0 deployment, rehearse the Alembic upgrade through `0006_workspace_recovery` on an isolated branch. Revision `0004_daytona_v2_cutover` clears old sandbox bindings and file manifests. Conversations and memories are retained. Users re-upload any files they want in the new workspace. Keep the old Volume and the pre-cutover database restore point for the migration window. [Migration plan](./docs/daytona-v2-migration-plan.md)
 
 3. **Start external MLflow *(optional — port `5001` avoids macOS AirPlay on `5000`)*:**
    ```bash

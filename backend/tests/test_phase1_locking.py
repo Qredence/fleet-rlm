@@ -33,9 +33,12 @@ from fleet_rlm.db import (
     get_session_ui_messages,
     get_workspace_settings_overrides,
     list_approved_session_memories,
+    list_discarded_objects,
     list_session_files,
     reap_stale_runs,
     rebind_session_sandbox,
+    register_object_write,
+    reserve_session_sandbox,
     reset_workspace_settings_overrides,
     save_or_update_memory,
     search_memories,
@@ -315,6 +318,30 @@ async def test_rebind_session_sandbox(db: SessionFactory) -> None:
         assert (bound_id, won) == (single_id, True)
         assert (await get_session_or_raise(db, session_single.id)).daytona_sandbox_id == single_id
 
+        original = await acquire_root_run(db, session_single.id, "Reserve replacement")
+        name, recovering = await reserve_session_sandbox(
+            db, session_single.id, original.id, expected=single_id
+        )
+        assert not recovering
+        finished = await finish_run(db, original.id, status="failed", retire_sandbox_id=single_id)
+        assert finished
+        fenced = await get_session_or_raise(db, session_single.id)
+        assert fenced.sandbox_needs_cleanup and fenced.pending_sandbox_name == name
+        retry = await acquire_root_run(db, session_single.id, "Recover replacement")
+        resumed = await reserve_session_sandbox(db, session_single.id, retry.id, expected=single_id)
+        assert resumed == (name, True)
+        rebound = await rebind_session_sandbox(
+            db,
+            session_single.id,
+            "test-recovered-" + retry.id.hex,
+            expected=single_id,
+            owner_run_id=retry.id,
+            allocation_name=name,
+        )
+        assert rebound[1]
+        active = await get_session_or_raise(db, session_single.id)
+        assert not active.sandbox_needs_cleanup and active.pending_sandbox_name is None
+
         sb_a = f"sb-race-a-{uuid4().hex}"
         sb_b = f"sb-race-b-{uuid4().hex}"
         results = await asyncio.gather(
@@ -399,13 +426,20 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
         assert updated[0].sha256 == "3" * 64
         assert updated[0].size_bytes == 512
         assert updated[0].object_key == "artifacts/v2"
+        garbage = await list_discarded_objects(db, session.id)
+        assert [entry.object_key for entry in garbage] == ["artifacts/v1"]
 
         for path in (
             "/workspace/artifacts/report.md/appendix.md",
             "/workspace/artifacts/report.md",
         ):
             run = await acquire_root_run(db, session.id, "Replace the artifact path")
-            assert await finish_run(
+            key = f"artifacts/{run.id}"
+            await register_object_write(db, session.id, key, "multipart-fixture", run_id=run.id)
+            assert key not in {
+                row.object_key for row in await list_discarded_objects(db, session.id)
+            }
+            finished = await finish_run(
                 db,
                 run.id,
                 status="completed",
@@ -415,10 +449,14 @@ async def test_upsert_file_record_and_list_session_files(db: SessionFactory) -> 
                         "kind": "artifact",
                         "sha256": "4" * 64,
                         "size_bytes": 32,
-                        "object_key": f"artifacts/{run.id}",
+                        "object_key": key,
                     },
                 ],
             )
+            assert finished
+            assert key not in {
+                row.object_key for row in await list_discarded_objects(db, session.id)
+            }
             assert [f.path for f in await list_session_files(db, session.id)] == [
                 path,
                 input_file.path,

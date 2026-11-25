@@ -95,11 +95,14 @@ export function useSessions(api: FleetApi, routeId: string | undefined) {
   }
 
   async function remove(id: string) {
-    await mutate(() => api.deleteSession(id))
-    setSessions((items) => items?.filter((item) => item.id !== id) ?? null)
-    setLookup((current) => current?.id === id ? undefined : current)
-    setRemembered((current) => current === id ? '' : current)
-    refresh()
+    try {
+      await mutate(() => api.deleteSession(id))
+      setSessions((items) => items?.filter((item) => item.id !== id) ?? null)
+      setLookup((current) => current?.id === id ? undefined : current)
+      setRemembered((current) => current === id ? '' : current)
+    } finally {
+      refresh()
+    }
   }
 
   return {
