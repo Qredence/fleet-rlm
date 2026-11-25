@@ -1124,7 +1124,7 @@ async def refine_turn(session_id: UUID, run_id: UUID, runtime: RuntimeDep) -> Re
     except TimeoutError as error:
         raise HTTPException(504, "Refinement timed out. Try again.") from error
     except Exception as error:
-        _LOG.warning("Refinement failed for %s (%s)", run_id, type(error).__name__)
+        _LOG.warning("Refinement failed for %s (%s)", run.id, type(error).__name__)
         raise HTTPException(502, "Fleet could not refine this turn. Try again.") from error
     if lesson is None:
         return RefineTurnView(memory=None)
