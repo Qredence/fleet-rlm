@@ -2230,6 +2230,25 @@ def test_persistent_install_directory_retains_bundled_skills(tmp_path, monkeypat
     ]
 
 
+def test_malformed_installed_skill_is_skipped(tmp_path, monkeypatch, caplog):
+    bundled = tmp_path / "bundled_skills"
+    bundled.mkdir()
+    _skill(bundled, "web-research")
+    monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: bundled)
+    configured = tmp_path / "persistent"
+    registry = SkillRegistry.load(configured, fallback_to_bundled=True)
+    registry.install(configured, b"---\nname: custom\ndescription: Custom skill\n---\nRead it.")
+    (configured / ".installed" / "broken.md").write_text("no frontmatter")
+    (configured / ".installed" / "binary.md").write_bytes(b"\xff\xfe")
+
+    with caplog.at_level("WARNING", logger="fleet_rlm.skills"):
+        catalog = registry.with_installed(configured)
+
+    assert [skill.name for skill in catalog.skills] == ["custom", "web-research"]
+    assert "broken.md" in caplog.text
+    assert "binary.md" in caplog.text
+
+
 def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(settings, monkeypatch):
     from pydantic import SecretStr
 

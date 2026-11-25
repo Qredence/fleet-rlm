@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import logging
 import os
 import re
 from collections.abc import Callable, Sequence
@@ -19,6 +20,7 @@ from .config import Settings
 _MAX_CANDIDATES = 40
 MAX_SKILL_BYTES = 64 * 1024
 _INSTALL_DIR = ".installed"
+_LOG = logging.getLogger(__name__)
 
 
 def _bundled_skills_dir() -> Path:
@@ -71,7 +73,11 @@ class SkillRegistry:
         # Installs are published as complete files on disk so every worker sees them.
         skills = {skill.name: skill for skill in self.skills}
         for path in (skills_dir / _INSTALL_DIR).glob("*.md"):
-            skill = _load_skill(path)
+            try:
+                skill = _load_skill(path)
+            except (ValueError, OSError) as error:
+                _LOG.warning("Skipping installed Skill %s: %s", path, error)
+                continue
             skills.setdefault(skill.name, skill)
         return SkillRegistry(tuple(sorted(skills.values(), key=lambda skill: skill.name)))
 
