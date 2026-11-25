@@ -45,23 +45,62 @@ If the web allowance runs out, conclude the research with the opened evidence an
 """
 
 
+def _split_dynamic_tool_docs(instructions: str) -> tuple[str, str]:
+    """Separate DSPy's dynamic tool-doc block(s) from surrounding RLM action instructions."""
+    tool_blocks: list[str] = []
+    remaining = instructions
+    while _TOOL_DOCS_HEADER in remaining:
+        head, _, tail = remaining.partition(_TOOL_DOCS_HEADER)
+        header_newline = ""
+        if tail.startswith("\r\n"):
+            header_newline = "\r\n"
+            tail = tail[2:]
+        elif tail.startswith("\n"):
+            header_newline = "\n"
+            tail = tail[1:]
+        lines = tail.splitlines(keepends=True)
+        index = 0
+        while index < len(lines) and lines[index].startswith("- "):
+            index += 1
+        bullet_text = "".join(lines[:index]).rstrip("\r\n")
+        block = (
+            f"{_TOOL_DOCS_HEADER}{header_newline}{bullet_text}"
+            if bullet_text
+            else _TOOL_DOCS_HEADER
+        )
+        tool_blocks.append(block)
+        remainder = "".join(lines[index:])
+        if not remainder.strip():
+            remaining = head
+        elif not head:
+            remaining = remainder.lstrip("\r\n")
+        elif head.endswith(("\n", "\r")):
+            remaining = f"{head}{remainder}"
+        else:
+            remaining = f"{head}\n{remainder}"
+    return remaining, "".join(tool_blocks)
+
+
 def strip_dynamic_tool_docs(instructions: str) -> str:
-    """Strip DSPy's generated user-tool documentation suffix if present."""
-    if _TOOL_DOCS_HEADER not in instructions:
-        return instructions
-    head, _, _ = instructions.partition(_TOOL_DOCS_HEADER)
-    return head
+    """Strip DSPy's generated user-tool documentation block while preserving trailing text."""
+    base_instructions, _ = _split_dynamic_tool_docs(instructions)
+    return base_instructions
 
 
 def apply_submission_guidance(program: dspy.RLM) -> None:
-    """Append submission budget guidance once to the RLM action signature."""
+    """Append submission budget guidance once in canonical order before dynamic tool docs."""
     action_signature = program.generate_action.signature
     assert action_signature is not None
     instructions = action_signature.instructions or ""
-    if _SUBMISSION_GUIDANCE.strip() not in instructions:
-        program.generate_action.signature = action_signature.append_instructions(
-            _SUBMISSION_GUIDANCE
-        )
+    if _SUBMISSION_GUIDANCE.strip() in instructions:
+        return
+    base_instructions, tool_docs = _split_dynamic_tool_docs(instructions)
+    updated = action_signature.with_instructions(base_instructions).append_instructions(
+        _SUBMISSION_GUIDANCE
+    )
+    if tool_docs:
+        updated = updated.with_instructions((updated.instructions or "") + tool_docs)
+    program.generate_action.signature = updated
 
 
 class WorkspaceTask(dspy.Signature):

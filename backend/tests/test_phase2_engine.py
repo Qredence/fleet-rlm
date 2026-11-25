@@ -2360,10 +2360,19 @@ def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings,
         """Legacy compiled-only tool."""
         return value
 
-    # strip_dynamic_tool_docs keeps plain instructions intact and strips the tool docs suffix.
+    # strip_dynamic_tool_docs keeps plain instructions intact, strips tool docs at EOF
+    # byte-for-byte, and preserves trailing guidance/GEPA text after the tool-doc block.
     assert strip_dynamic_tool_docs("Plain optimized prompt") == "Plain optimized prompt"
     with_docs = f"Plain optimized prompt{_TOOL_DOCS_HEADER}\n- `stale_tool(value: string)` - Old."
     assert strip_dynamic_tool_docs(with_docs) == "Plain optimized prompt"
+    trailing_gepa = "GEPA instruction: verify units.\n- keep trailing markdown bullets"
+    with_trailing = f"{with_docs}\n\n{_SUBMISSION_GUIDANCE}\n\n{trailing_gepa}"
+    stripped_with_trailing = strip_dynamic_tool_docs(with_trailing)
+    assert stripped_with_trailing == (
+        f"Plain optimized prompt\n\n{_SUBMISSION_GUIDANCE}\n\n{trailing_gepa}"
+    )
+    assert _TOOL_DOCS_HEADER not in stripped_with_trailing
+    assert "stale_tool" not in stripped_with_trailing
 
     # Artifact compiled with tools=[] preserves exact instructions when loaded with tools=[]
     # and appends current-turn tool docs when loaded with active tools.
@@ -2401,6 +2410,23 @@ def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings,
     assert "web_search" not in refreshed_instructions
     assert strip_dynamic_tool_docs(refreshed_instructions) == stale_base
 
+    # Saved state with stale tool docs followed by GEPA trailing text preserves the trailing text
+    # and replaces stale tool docs with current runtime tools in canonical order.
+    mid_block_program = build_program(settings, [stale_tool])
+    mid_block_program.generate_action.signature = (
+        mid_block_program.generate_action.signature.append_instructions(
+            f"{_SUBMISSION_GUIDANCE}\n\n{trailing_gepa}"
+        )
+    )
+    mid_block_state = mid_block_program.dump_state()
+    mid_restored = build_program(settings, [spawn_agent], optimized_state=mid_block_state)
+    mid_instructions = mid_restored.generate_action.signature.instructions
+    assert "stale_tool" not in mid_instructions
+    assert _SUBMISSION_GUIDANCE.strip() in mid_instructions
+    assert trailing_gepa in mid_instructions
+    assert "spawn_agent(task: string)" in mid_instructions
+    assert mid_instructions.index(trailing_gepa) < mid_instructions.index(_TOOL_DOCS_HEADER)
+
     # Disk-loaded artifact with tools=[] strips stale tool docs completely.
     disk_stripped = build_program(
         settings.model_copy(update={"optimized_program_path": stale_path}), []
@@ -2411,6 +2437,10 @@ def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings,
 
 @pytest.mark.asyncio
 async def test_apply_submission_guidance_is_idempotent(settings, tmp_path):
+    def spawn_agent(task: str) -> dict:
+        """Delegate a workspace subtask."""
+        return {"answer": task, "artifact_paths": []}
+
     program = build_program(settings, [])
     apply_submission_guidance(program)
     once = program.generate_action.signature.instructions
@@ -2419,6 +2449,31 @@ async def test_apply_submission_guidance_is_idempotent(settings, tmp_path):
     apply_submission_guidance(program)
     assert program.generate_action.signature.instructions == once
     assert program.generate_action.signature.instructions.count(_SUBMISSION_GUIDANCE.strip()) == 1
+
+    # Canonical ordering when tools are present: _SUBMISSION_GUIDANCE comes before tool docs,
+    # survives strip_dynamic_tool_docs(), and round-trips identically to unoptimized runtime.
+    with_tools = build_program(settings, [spawn_agent])
+    apply_submission_guidance(with_tools)
+    with_tools_instructions = with_tools.generate_action.signature.instructions
+    assert with_tools_instructions.index(_SUBMISSION_GUIDANCE.strip()) < (
+        with_tools_instructions.index(_TOOL_DOCS_HEADER)
+    )
+    apply_submission_guidance(with_tools)
+    assert with_tools.generate_action.signature.instructions == with_tools_instructions
+
+    stripped_for_save = strip_dynamic_tool_docs(with_tools_instructions)
+    assert _SUBMISSION_GUIDANCE.strip() in stripped_for_save
+    assert _TOOL_DOCS_HEADER not in stripped_for_save
+
+    saved_for_runtime = build_program(settings, [spawn_agent])
+    saved_for_runtime.generate_action.signature = (
+        saved_for_runtime.generate_action.signature.with_instructions(stripped_for_save)
+    )
+    reloaded_with_tools = build_program(
+        settings, [spawn_agent], optimized_state=saved_for_runtime.dump_state()
+    )
+    apply_submission_guidance(reloaded_with_tools)
+    assert reloaded_with_tools.generate_action.signature.instructions == with_tools_instructions
 
     # Saved state that already includes _SUBMISSION_GUIDANCE is not duplicated in run_workspace_task
     # and still receives runtime spawn_agent tool docs.
