@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { FleetApi, Skill } from '@/lib/api'
 import { FilePreview } from './FilePreview'
 
@@ -19,14 +19,10 @@ function renderPreview(path: string, response: Response | Error, overrides: Part
   const view = render(
     <FilePreview api={api} sessionId="s1" path={path} onDownload={onDownload} onSkillInstalled={onSkillInstalled} />,
   )
-  return { ...view, api, getFile, installSkill, onDownload, onSkillInstalled }
+  return { ...view, getFile, installSkill, onDownload, onSkillInstalled }
 }
 
 describe('FilePreview', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('shows a loading state, then the text contents', async () => {
     renderPreview('files/notes.txt', new Response('line one\nline two'))
 
@@ -78,14 +74,14 @@ describe('FilePreview', () => {
   it('renders markdown files as formatted text', async () => {
     renderPreview('files/readme.md', new Response('# Title'))
 
-    expect((await screen.findByRole('heading', { name: 'Title' })).tagName).toBe('H1')
+    expect(await screen.findByRole('heading', { name: 'Title', level: 1 })).toBeTruthy()
   })
 
   it('installs a SKILL.md artifact with the SHA-256 of the previewed bytes', async () => {
     const user = userEvent.setup()
     const { installSkill, onSkillInstalled } = renderPreview('artifacts/demo/SKILL.md', new Response(skillSource))
 
-    expect((await screen.findByLabelText('File contents')).tagName).toBe('PRE')
+    expect((await screen.findByLabelText('File contents')).textContent).toBe(skillSource)
     await user.click(await screen.findByRole('button', { name: 'Install skill' }))
 
     expect(installSkill).toHaveBeenCalledWith('s1', 'artifacts/demo/SKILL.md', skillDigest)

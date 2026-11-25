@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { STOP_RETRY_WINDOW_MS } from '@/lib/chat-fetch'
 import type { createStreamingChat } from '@/lib/chat-stream'
 import type { FleetMessage } from '@/lib/messages'
@@ -36,14 +36,8 @@ const history: FleetMessage[] = [{ id: 'm1', role: 'user', parts: [{ type: 'text
 
 function renderChat(initialMessages: FleetMessage[] | null = history) {
   const recentStops = { current: new Map<string, number>() }
-  const onComplete = vi.fn()
-  const view = renderHook(
-    (props: { initialMessages: FleetMessage[] | null }) => useSessionChat({
-      id: 's1', token: 'secret', initialMessages: props.initialMessages, recentStops, onComplete,
-    }),
-    { initialProps: { initialMessages } },
-  )
-  return { ...view, recentStops, onComplete }
+  const view = renderHook(() => useSessionChat({ id: 's1', token: 'secret', initialMessages, recentStops, onComplete: vi.fn() }))
+  return { ...view, recentStops }
 }
 
 describe('useSessionChat', () => {
@@ -54,9 +48,12 @@ describe('useSessionChat', () => {
     stream.createStreamingChat.mockImplementation(() => current.chat)
   })
 
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
+  async function startTurn(result: ReturnType<typeof renderChat>['result']) {
+    act(() => {
+      void result.current.send('Hello', [], vi.fn())
+    })
+    await waitFor(() => expect(current.chat.sendMessage).toHaveBeenCalled())
+  }
 
   it('returns the saved transcript before the first send', () => {
     const { result } = renderChat()
@@ -141,10 +138,7 @@ describe('useSessionChat', () => {
   it('stops a streaming turn and records the stop for retry', async () => {
     const { result, recentStops } = renderChat()
 
-    act(() => {
-      void result.current.send('Hello', [], vi.fn())
-    })
-    await waitFor(() => expect(current.chat.sendMessage).toHaveBeenCalled())
+    await startTurn(result)
     act(() => result.current.stop())
 
     expect(current.chat.stop).toHaveBeenCalledOnce()
@@ -159,10 +153,7 @@ describe('useSessionChat', () => {
   it('ignores a recorded stop that is older than the retry window', async () => {
     const { result, recentStops } = renderChat()
 
-    act(() => {
-      void result.current.send('Hello', [], vi.fn())
-    })
-    await waitFor(() => expect(current.chat.sendMessage).toHaveBeenCalled())
+    await startTurn(result)
     recentStops.current.set('s1', Date.now() - STOP_RETRY_WINDOW_MS - 1)
 
     const { consumeRecentStop } = stream.createStreamingChat.mock.calls[0][0] as ChatOptions
@@ -172,10 +163,7 @@ describe('useSessionChat', () => {
   it('stops the pending turn on unmount', async () => {
     const { result, unmount, recentStops } = renderChat()
 
-    act(() => {
-      void result.current.send('Hello', [], vi.fn())
-    })
-    await waitFor(() => expect(current.chat.sendMessage).toHaveBeenCalled())
+    await startTurn(result)
     unmount()
 
     expect(current.chat.stop).toHaveBeenCalledOnce()

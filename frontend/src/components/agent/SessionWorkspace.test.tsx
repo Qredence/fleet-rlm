@@ -1,14 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { FleetApi, Session, Skill, WorkspaceFile } from '@/lib/api'
 import type { ChatSnapshot, createStreamingChat } from '@/lib/chat-stream'
 import type { FleetMessage } from '@/lib/messages'
 import { SessionWorkspace } from './SessionWorkspace'
 
-type ChatOptions = Parameters<typeof createStreamingChat>[0]
 type FakeChat = ChatSnapshot & {
   subscribe: (listener: (snapshot: ChatSnapshot) => void) => () => void
   emit: (changes: Partial<ChatSnapshot>) => void
@@ -83,7 +82,7 @@ function fakeApi(overrides: Partial<FleetApi> = {}) {
     downloadFile: vi.fn(async () => {}),
     refineTurn: vi.fn(async () => null),
     ...overrides,
-  } as unknown as FleetApi & Record<'getMessages' | 'uploadFile', ReturnType<typeof vi.fn>>
+  } as unknown as FleetApi
 }
 
 function renderWorkspace(api = fakeApi()) {
@@ -112,24 +111,18 @@ describe('SessionWorkspace', () => {
   let chat: FakeChat
 
   beforeEach(() => {
-    stream.createStreamingChat.mockImplementation((options: ChatOptions) => {
+    stream.createStreamingChat.mockImplementation((options: Parameters<typeof createStreamingChat>[0]) => {
       chat = fakeChat(options.messages)
       return chat
     })
   })
 
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('renders the saved transcript', async () => {
     renderWorkspace()
 
-    const conversation = await screen.findByLabelText('Conversation')
-    const [prompt, answer] = await within(conversation).findAllByRole('article')
-    expect(prompt.getAttribute('aria-label')).toBe('You')
-    expect(within(prompt).getByText('Summarize the report')).toBeTruthy()
-    expect(answer.getAttribute('aria-label')).toBe('Fleet')
+    const prompt = await screen.findByRole('article', { name: 'You' })
+    const answer = screen.getByRole('article', { name: 'Fleet' })
+    expect(await within(prompt).findByText('Summarize the report')).toBeTruthy()
     expect(await within(answer).findByText('The report covers Q3.')).toBeTruthy()
   })
 

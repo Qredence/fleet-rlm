@@ -11,15 +11,14 @@ const skills: Skill[] = [
   { name: 'web_search', description: 'Search the web' },
 ]
 
-function Harness({ onSubmit, onStop = vi.fn(), onUpload, loading = false, initialPinned = [] }: {
+function Harness({ onSubmit, onStop = vi.fn(), onUpload, loading = false }: {
   onSubmit: (value: string) => Promise<void>
   onStop?: () => void
   onUpload?: (files: File[]) => void
   loading?: boolean
-  initialPinned?: string[]
 }) {
   const [value, setValue] = useState('')
-  const [pinned, setPinned] = useState<string[]>(initialPinned)
+  const [pinned, setPinned] = useState<string[]>([])
   return (
     <>
       <ChatComposer

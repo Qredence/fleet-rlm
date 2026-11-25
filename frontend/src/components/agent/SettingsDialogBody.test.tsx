@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Dialog } from '@/components/ui/dialog'
 import { createApi, type Session, type WorkspaceSettingsFields, type WorkspaceSettingsView } from '@/lib/api'
 import { SettingsDialogBody } from './SettingsDialogBody'
@@ -49,9 +49,12 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-type Route = (body: unknown) => Response
-
-function mockBackend(routes: Record<string, Route>) {
+function mockBackend(overrides: Record<string, (body: unknown) => Response> = {}) {
+  const routes: typeof overrides = {
+    'GET /api/settings': () => json(settingsView()),
+    'GET /readyz': () => json({ status: 'ok' }),
+    ...overrides,
+  }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? 'GET'} ${String(input)}`
     const route = routes[key]
@@ -94,15 +97,8 @@ const saveButton = () => screen.getByRole('button', { name: 'Save changes' }) as
 const resetButton = () => screen.getByRole('button', { name: 'Reset defaults' }) as HTMLButtonElement
 
 describe('SettingsDialogBody', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('loads settings and readiness with the bearer token', async () => {
-    const { fetchMock } = mockBackend({
-      'GET /api/settings': () => json(settingsView()),
-      'GET /readyz': () => json({ status: 'ok' }),
-    })
+    const { fetchMock } = mockBackend()
     renderSettings()
 
     expect(await screen.findByText('Ready (/readyz)')).toBeTruthy()
@@ -115,7 +111,6 @@ describe('SettingsDialogBody', () => {
 
   it('shows a readiness failure', async () => {
     mockBackend({
-      'GET /api/settings': () => json(settingsView()),
       'GET /readyz': () => json({ detail: 'Database unavailable' }, 503),
     })
     renderSettings()
@@ -126,8 +121,6 @@ describe('SettingsDialogBody', () => {
 
   it('sends only the changed fields in PATCH /api/settings', async () => {
     const { requests } = mockBackend({
-      'GET /api/settings': () => json(settingsView()),
-      'GET /readyz': () => json({ status: 'ok' }),
       'PATCH /api/settings': (body) => json(settingsView(body as Partial<WorkspaceSettingsFields>)),
     })
     const { user } = renderSettings()
@@ -135,7 +128,7 @@ describe('SettingsDialogBody', () => {
     await user.click(await screen.findByRole('tab', { name: 'Models' }))
     const model = await screen.findByLabelText('Primary LLM Model')
     await user.clear(model)
-    await user.type(model, '  anthropic/claude-sonnet-4  ')
+    await user.type(model, ' a/b ')
     await user.click(screen.getByRole('tab', { name: 'RLM Limits' }))
     const depth = screen.getByLabelText('Max recursion depth')
     await user.clear(depth)
@@ -146,17 +139,14 @@ describe('SettingsDialogBody', () => {
     expect((await screen.findByRole('status')).textContent).toBe('Settings saved.')
     expect(requests('PATCH')).toEqual([{
       url: '/api/settings',
-      body: { llm_model: 'anthropic/claude-sonnet-4', rlm_max_depth: 6 },
+      body: { llm_model: 'a/b', rlm_max_depth: 6 },
     }])
     expect(saveButton().disabled).toBe(true)
     expect(resetButton().disabled).toBe(false)
   })
 
   it('blocks a blank numeric value without a request', async () => {
-    const { requests } = mockBackend({
-      'GET /api/settings': () => json(settingsView()),
-      'GET /readyz': () => json({ status: 'ok' }),
-    })
+    const { requests } = mockBackend()
     const { user } = renderSettings()
 
     await user.click(await screen.findByRole('tab', { name: 'RLM Limits' }))
@@ -170,8 +160,6 @@ describe('SettingsDialogBody', () => {
 
   it('shows the backend error when PATCH fails and keeps the draft', async () => {
     mockBackend({
-      'GET /api/settings': () => json(settingsView()),
-      'GET /readyz': () => json({ status: 'ok' }),
       'PATCH /api/settings': () => json({ detail: [{ msg: 'Unknown model' }] }, 422),
     })
     const { user } = renderSettings()
@@ -190,7 +178,6 @@ describe('SettingsDialogBody', () => {
   it('resets overrides with DELETE /api/settings', async () => {
     const { requests } = mockBackend({
       'GET /api/settings': () => json(settingsView({ rlm_max_depth: 6 })),
-      'GET /readyz': () => json({ status: 'ok' }),
       'DELETE /api/settings': () => json(settingsView()),
     })
     const { user } = renderSettings()
@@ -210,10 +197,7 @@ describe('SettingsDialogBody', () => {
   })
 
   it('saves only the session model override when workspace settings did not change', async () => {
-    const { requests } = mockBackend({
-      'GET /api/settings': () => json(settingsView()),
-      'GET /readyz': () => json({ status: 'ok' }),
-    })
+    const { requests } = mockBackend()
     const { user, onUpdateSession } = renderSettings({ withSession: true })
 
     await user.click(await screen.findByRole('tab', { name: 'Models' }))

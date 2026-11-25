@@ -25,8 +25,7 @@ function webCall(id: string, changes: Partial<WebCall> = {}): FleetPart {
 function renderParts(parts: FleetPart[], props: { live?: boolean; refine?: () => Promise<null> } = {}) {
   const preview = vi.fn()
   const download = vi.fn()
-  render(<MessageParts parts={parts} preview={preview} download={download} {...props} />)
-  return { preview, download }
+  return { ...render(<MessageParts parts={parts} preview={preview} download={download} {...props} />), preview, download }
 }
 
 describe('MessageParts', () => {
@@ -83,7 +82,7 @@ describe('MessageParts', () => {
     const refine = vi.fn(async () => null)
     const parts: FleetPart[] = [{ type: 'data-turn-details', id: 'details', data: turnDetails }]
 
-    const { unmount } = render(<MessageParts parts={parts} live preview={vi.fn()} download={vi.fn()} refine={refine} />)
+    const { unmount } = renderParts(parts, { live: true, refine })
     await user.click(screen.getByText('Turn details'))
     expect(screen.queryByRole('button', { name: 'Refine this turn' })).toBeNull()
     unmount()
@@ -117,16 +116,12 @@ describe('MessageParts', () => {
   })
 
   it('hides a file tree that has no artifacts and empty skill lists', () => {
-    const { container } = render(
-      <MessageParts
-        parts={[
-          { type: 'data-file-tree', id: 'tree', data: { files: [{ path: 'files/a.txt', kind: 'input', size_bytes: 1 }] } },
-          { type: 'data-skills', id: 'skills', data: { skills: [] } },
-        ]}
-        preview={vi.fn()} download={vi.fn()}
-      />,
-    )
+    renderParts([
+      { type: 'data-file-tree', id: 'tree', data: { files: [{ path: 'files/a.txt', kind: 'input', size_bytes: 1 }] } },
+      { type: 'data-skills', id: 'skills', data: { skills: [] } },
+    ])
 
-    expect(container.firstElementChild?.childElementCount).toBe(0)
+    expect(screen.queryByText('Artifacts')).toBeNull()
+    expect(screen.queryByLabelText('Activated skills')).toBeNull()
   })
 })
