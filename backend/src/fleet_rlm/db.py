@@ -477,6 +477,62 @@ async def reap_stale_runs(
         return len(roots) + reaped_children
 
 
+def _has_running_root(session_id: Any) -> ColumnElement[bool]:
+    return (
+        select(Run.id)
+        .where(Run.session_id == session_id, Run.parent_run_id.is_(None), Run.status == "running")
+        .exists()
+    )
+
+
+async def list_retired_sandboxes(
+    db: SessionFactory, *, after: UUID | None, limit: int
+) -> list[tuple[UUID, str]]:
+    """Page idle sessions whose bound sandbox is flagged for deletion."""
+    statement = (
+        select(Session.id, Session.daytona_sandbox_id)
+        .where(
+            Session.sandbox_needs_cleanup.is_(True),
+            Session.daytona_sandbox_id.is_not(None),
+            Session.deleting.is_(False),
+            ~_has_running_root(Session.id),
+        )
+        .order_by(Session.id)
+        .limit(limit)
+    )
+    if after is not None:
+        statement = statement.where(Session.id > after)
+    async with db() as connection:
+        return [(row.id, row.daytona_sandbox_id) for row in await connection.execute(statement)]
+
+
+async def clear_retired_sandbox(db: SessionFactory, session_id: UUID, sandbox_id: str) -> bool:
+    """Unbind a deleted sandbox unless a turn or a rebind claimed the session first."""
+    async with db.begin() as connection:
+        session = await connection.get(Session, session_id, with_for_update=SESSION_WRITE_LOCK)
+        if (
+            session is None
+            or session.deleting
+            or not session.sandbox_needs_cleanup
+            or session.daytona_sandbox_id != sandbox_id
+            or await connection.scalar(select(_has_running_root(session_id)))
+        ):
+            return False
+        session.daytona_sandbox_id = None
+        session.sandbox_needs_cleanup = False
+        return True
+
+
+async def list_deleting_sessions(
+    db: SessionFactory, *, after: UUID | None, limit: int
+) -> list[Session]:
+    statement = select(Session).where(Session.deleting.is_(True)).order_by(Session.id).limit(limit)
+    if after is not None:
+        statement = statement.where(Session.id > after)
+    async with db() as connection:
+        return list(await connection.scalars(statement))
+
+
 async def get_session_ui_messages(db: SessionFactory, session_id: UUID) -> list[JsonObject]:
     async with db() as connection:
         runs = await connection.scalars(
@@ -718,26 +774,42 @@ async def register_object_write(
         )
 
 
-async def list_discarded_objects(db: SessionFactory, session_id: UUID) -> list[ObjectCleanup]:
+def _discarded_objects():
     active_root = select(Run.id).where(Run.id == ObjectCleanup.run_id, Run.status == "running")
     referenced = select(File.id).where(
         File.session_id == ObjectCleanup.session_id, File.object_key == ObjectCleanup.object_key
     )
+    return (
+        select(ObjectCleanup)
+        .join(Session, Session.id == ObjectCleanup.session_id)
+        .where(
+            ~referenced.exists(),
+            (
+                ObjectCleanup.run_id.is_(None)
+                & Session.upload_key.is_distinct_from(ObjectCleanup.object_key)
+            )
+            | (ObjectCleanup.run_id.is_not(None) & ~active_root.exists()),
+        )
+    )
+
+
+async def list_discarded_objects(db: SessionFactory, session_id: UUID) -> list[ObjectCleanup]:
     async with db() as connection:
         rows = await connection.scalars(
-            select(ObjectCleanup)
-            .join(Session, Session.id == ObjectCleanup.session_id)
-            .where(
-                ObjectCleanup.session_id == session_id,
-                ~referenced.exists(),
-                (
-                    ObjectCleanup.run_id.is_(None)
-                    & Session.upload_key.is_distinct_from(ObjectCleanup.object_key)
-                )
-                | (ObjectCleanup.run_id.is_not(None) & ~active_root.exists()),
-            )
+            _discarded_objects().where(ObjectCleanup.session_id == session_id)
         )
         return list(rows)
+
+
+async def list_discarded_object_batch(
+    db: SessionFactory, *, after: str | None, limit: int
+) -> list[ObjectCleanup]:
+    """Page discarded objects across all sessions in key order."""
+    statement = _discarded_objects().order_by(ObjectCleanup.object_key).limit(limit)
+    if after is not None:
+        statement = statement.where(ObjectCleanup.object_key > after)
+    async with db() as connection:
+        return list(await connection.scalars(statement))
 
 
 async def forget_discarded_objects(db: SessionFactory, keys: list[str]) -> None:

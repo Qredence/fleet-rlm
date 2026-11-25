@@ -25,6 +25,7 @@ from fleet_rlm.db import (
     TurnConflictError,
     WorkspaceSettings,
     acquire_root_run,
+    clear_retired_sandbox,
     create_child_run,
     create_db,
     create_session,
@@ -35,12 +36,16 @@ from fleet_rlm.db import (
     get_turn_for_refinement,
     get_workspace_settings_overrides,
     list_approved_session_memories,
+    list_deleting_sessions,
+    list_discarded_object_batch,
     list_discarded_objects,
+    list_retired_sandboxes,
     list_session_files,
     reap_stale_runs,
     rebind_session_sandbox,
     recall_procedures,
     register_object_write,
+    release_upload,
     reserve_session_sandbox,
     reset_workspace_settings_overrides,
     save_or_update_memory,
@@ -396,6 +401,69 @@ async def test_rebind_session_sandbox(db: SessionFactory) -> None:
             await connection.execute(
                 delete(Session).where(Session.id.in_([session_single.id, session_race.id]))
             )
+
+
+@pytest.mark.asyncio
+async def test_sweep_queries_skip_active_turns_and_upload_leases(db: SessionFactory) -> None:
+    idle = await create_session(db, title="Sweep idle")
+    busy = await create_session(db, title="Sweep busy")
+    try:
+        idle_vm, busy_vm = f"vm-{uuid4().hex}", f"vm-{uuid4().hex}"
+        finished = await acquire_root_run(db, idle.id, "Retire the sandbox")
+        await rebind_session_sandbox(db, idle.id, idle_vm, owner_run_id=finished.id)
+        orphan = f"sessions/{idle.id}/{uuid4().hex}"
+        await register_object_write(db, idle.id, orphan, "multipart-orphan", run_id=finished.id)
+        assert await finish_run(db, finished.id, status="failed", retire_sandbox_id=idle_vm)
+
+        active = await acquire_root_run(db, busy.id, "Still running")
+        await rebind_session_sandbox(db, busy.id, busy_vm, owner_run_id=active.id)
+        staged = f"sessions/{busy.id}/{uuid4().hex}"
+        await register_object_write(db, busy.id, staged, "multipart-staged", run_id=active.id)
+        upload = f"sessions/{busy.id}/{uuid4().hex}"
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Session)
+                .where(Session.id == busy.id)
+                .values(sandbox_needs_cleanup=True, upload_key=upload, upload_started_at=func.now())
+            )
+        await register_object_write(db, busy.id, upload, "multipart-upload")
+
+        retired = await list_retired_sandboxes(db, after=None, limit=1_000)
+        assert (idle.id, idle_vm) in retired and busy.id not in {sid for sid, _ in retired}
+        assert idle.id not in {
+            sid for sid, _ in await list_retired_sandboxes(db, after=idle.id, limit=1_000)
+        }
+
+        async def discarded(after: str) -> set[str]:
+            batch = await list_discarded_object_batch(db, after=after, limit=1_000)
+            return {entry.object_key for entry in batch}
+
+        assert orphan in await discarded(f"sessions/{idle.id}/")
+        assert orphan not in await discarded(orphan)
+        assert not {staged, upload} & await discarded(f"sessions/{busy.id}/")
+        await release_upload(db, busy.id, upload)
+        assert upload in await discarded(f"sessions/{busy.id}/")
+
+        assert not await clear_retired_sandbox(db, busy.id, busy_vm)
+        assert not await clear_retired_sandbox(db, idle.id, f"vm-{uuid4().hex}")
+        assert await clear_retired_sandbox(db, idle.id, idle_vm)
+        cleared = await get_session_or_raise(db, idle.id)
+        assert cleared.daytona_sandbox_id is None and not cleared.sandbox_needs_cleanup
+        assert not await clear_retired_sandbox(db, idle.id, idle_vm)
+
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Session).where(Session.id == busy.id).values(deleting=True)
+            )
+        assert busy.id in {
+            item.id for item in await list_deleting_sessions(db, after=None, limit=1_000)
+        }
+        assert busy.id not in {
+            item.id for item in await list_deleting_sessions(db, after=busy.id, limit=1_000)
+        }
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(Session).where(Session.id.in_([idle.id, busy.id])))
 
 
 @pytest.mark.asyncio

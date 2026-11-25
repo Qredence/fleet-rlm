@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import agent, ui_stream
+from . import agent, sweep, ui_stream
 from . import db as store
 from .config import Settings
 from .interpreter import (
@@ -53,7 +53,6 @@ from .interpreter import (
     SandboxStartupError,
     WorkspaceBrowseLimit,
     allocate_session_sandbox,
-    delete_pending_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
     get_running_sandbox,
@@ -721,21 +720,12 @@ async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
                 raise HTTPException(409, "Session already has an upload in progress")
             session.deleting = True
             session.upload_key = session.upload_started_at = None
-        sandbox_id = session.daytona_sandbox_id
-        pending_name = session.pending_sandbox_name
     try:
-        if sandbox_id:
-            await delete_sandbox_by_id(runtime.daytona, sandbox_id)
-        if pending_name:
-            await delete_pending_sandbox(runtime.daytona, runtime.settings, pending_name)
-        await _reclaim_discarded_objects(runtime, session_id)
-        await runtime.storage.delete_session(session_id)
+        await sweep.purge_session(
+            runtime.sessionmaker, runtime.daytona, runtime.settings, runtime.storage, session
+        )
     except (DaytonaError, SandboxStartupError, StorageError) as error:
         raise HTTPException(503, "Workspace deletion can be retried") from error
-    async with runtime.sessionmaker() as db, db.begin():
-        session = await db.get(store.Session, session_id, with_for_update=True)
-        if session is not None:
-            await db.delete(session)
 
 
 @app.get("/api/sessions/{session_id}/messages", dependencies=[Depends(require_auth)])
@@ -802,20 +792,9 @@ async def _ensure_bound_sandbox(
     return sandbox
 
 
-async def _reclaim_discarded_objects(runtime: Runtime, session_id: UUID) -> None:
-    reclaimed = []
-    try:
-        for entry in await store.list_discarded_objects(runtime.sessionmaker, session_id):
-            await runtime.storage.reclaim(entry.object_key, entry.upload_id)
-            reclaimed.append(entry.object_key)
-    finally:
-        if reclaimed:
-            await store.forget_discarded_objects(runtime.sessionmaker, reclaimed)
-
-
 async def _try_object_cleanup(runtime: Runtime, session_id: UUID) -> None:
     try:
-        await _reclaim_discarded_objects(runtime, session_id)
+        await sweep.reclaim_discarded_objects(runtime.sessionmaker, runtime.storage, session_id)
     except (StorageError, SQLAlchemyError) as error:
         _LOG.warning("Workspace object cleanup will retry (%s)", type(error).__name__)
 

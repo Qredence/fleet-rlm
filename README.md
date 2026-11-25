@@ -49,6 +49,12 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    make dev-frontend  # Vite SPA on http://localhost:5173 (proxies /api, /healthz, /readyz)
    ```
 
+5. **Schedule the maintenance sweep:**
+   ```bash
+   cd backend && uv run --env-file .env env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL python -m fleet_rlm.sweep
+   ```
+   Run the sweep from cron with the same environment as the API. One pass fails expired runs, deletes flagged Daytona sandboxes on idle sessions, reclaims discarded S3 objects in batches, and completes interrupted session deletes. The sweep prints counts as JSON and exits with status 1 when an item failed. Items that fail are retried on the next pass.
+
 ### Build and roll out the sandbox image
 
 Use the Daytona CLI for the target project and set `FLEET_DAYTONA_REGION` to the deployment region. Archive a committed revision. The archive contains the Dockerfile, locked dependencies, and tracked bundled Skills.

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Add `python -m fleet_rlm.sweep`, a cron-safe maintenance pass. It reaps stale runs, retires flagged Daytona sandboxes on idle sessions, reclaims discarded S3 objects across sessions, and completes interrupted session deletes. Refs [#726](https://github.com/Qredence/fleet-rlm/issues/726).
+
 ## [0.14.0] - 2026-11-23
 
 ### Added
