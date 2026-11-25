@@ -1,0 +1,14 @@
+AGENTS.md
+  h_f276322eb5eb9f 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af893f3a311c5ba6856dd60368e2811773b75ad4",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
