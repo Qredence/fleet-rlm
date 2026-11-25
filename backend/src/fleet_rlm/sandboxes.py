@@ -48,7 +48,7 @@ def browsable_workspace_path(path: str) -> bool:
     return parts[0] != "artifacts" and ".git" not in parts and all(map(safe_component, parts))
 
 
-async def ensure_bound_sandbox(
+async def _ensure_bound_sandbox(
     runtime: Runtime,
     effective: Settings,
     session_id: UUID,
@@ -98,7 +98,7 @@ async def chat_sandbox(
     owner_run_id: UUID,
 ) -> AsyncSandbox:
     effective = settings if settings is not None else await effective_settings(runtime)
-    return await ensure_bound_sandbox(
+    return await _ensure_bound_sandbox(
         runtime,
         effective,
         session.id,
