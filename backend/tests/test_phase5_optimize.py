@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -789,11 +789,144 @@ async def test_load_rlm_examples_from_db_reads_completed_roots(
     monkeypatch.setattr(db, "create_db", lambda _s: (FakeEngine(), fake_sessionmaker))
     examples = await optimize.load_rlm_examples_from_db(_BRANCH_URL, settings, limit=10)
     assert disposed is True
-    assert len(examples) == 2
-    assert examples[0].task == "Summarize sales.csv"
-    assert examples[0].answer == "Total is 42"
-    assert examples[0].files_manifest == [{"path": "files/sales.csv", "kind": "input"}]
-    assert examples[1].files_manifest == []
+    # Offline compilation does not upload run files, so file-dependent runs are skipped.
+    assert len(examples) == 1
+    assert examples[0].task == "Quick math"
+    assert examples[0].answer == "4"
+    assert examples[0].files_manifest == []
+
+
+def test_optimize_rlm_daytona_pins_one_thread_and_rejects_parallel_rollouts(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm.jsonl",
+        [{"task": f"Task {index}", "answer": f"Ans {index}"} for index in range(6)],
+    )
+    thread_counts: list[tuple[str, int | None]] = []
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            thread_counts.append(("evaluate", kwargs["num_threads"]))
+
+        def __call__(self, _program):
+            return SimpleNamespace(score=50.0)
+
+    class FakeGEPA:
+        def __init__(self, **kwargs):
+            thread_counts.append(("gepa", kwargs["num_threads"]))
+
+        def compile(self, student, *, trainset, valset):
+            return student.deepcopy()
+
+    @contextmanager
+    def fake_daytona(_settings: Settings):
+        yield lambda: None
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize, "_ephemeral_daytona_interpreter", fake_daytona)
+
+    with pytest.raises(ValueError, match="shares one Daytona sandbox"):
+        optimize.optimize_rlm(settings, database_url=_BRANCH_URL, dataset=dataset, num_threads=4)
+    assert thread_counts == []
+
+    optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "daytona.json",
+    )
+    assert thread_counts == [("evaluate", 1), ("gepa", 1)]
+
+    thread_counts.clear()
+    optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "local.json",
+        num_threads=4,
+        local_interpreter=True,
+    )
+    assert thread_counts == [("evaluate", 4), ("gepa", 4)]
+
+
+@pytest.mark.parametrize(
+    ("target", "rows"),
+    [
+        (
+            "skills",
+            [
+                {"task": "Summarize CSV columns", "expected_skill": "data-analysis"},
+                {"task": "Plot revenue chart", "expected_skill": "charts"},
+                {"task": "Say hello", "expected_skill": None},
+            ],
+        ),
+        (
+            "memory",
+            [
+                {"task": "Use UTC", "answer": "Noted.", "should_save": True, "scope": "global"},
+                {"task": "What is 2+2?", "answer": "4", "should_save": False},
+                {"task": "Prefer pandas", "answer": "OK.", "should_save": True},
+            ],
+        ),
+    ],
+)
+def test_reanchor_regression_keeps_existing_artifact_unless_forced(
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    target: str,
+    rows: list[dict],
+) -> None:
+    dataset = _write_jsonl(tmp_path / f"{target}.jsonl", rows)
+    report: dict = {}
+
+    class FakeReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = dict(report)
+
+        def compile(self, student, *, trainset, valset=None):
+            return student.deepcopy()
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    output_path = tmp_path / f"{target}.json"
+    existing = '{"calibrated": true}'
+    output_path.write_text(existing, encoding="utf-8")
+    argv = [
+        "--target",
+        target,
+        "--database-url",
+        _BRANCH_URL,
+        "--dataset",
+        str(dataset),
+        "--output",
+        str(output_path),
+    ]
+
+    for case in (
+        {"val_score_before": 0.9, "val_score": 0.6},
+        {"val_score_before": 0.9, "val_score": 0.9},
+        {},
+    ):
+        report.clear()
+        report.update(case)
+        assert optimize.main(argv, settings=settings) == 0
+        assert output_path.read_text(encoding="utf-8") == existing
+        stdout = capsys.readouterr().out
+        assert "discarded (no holdout gain)" in stdout
+        assert "FLEET_DECISION_MODEL" not in stdout
+
+    report.clear()
+    report.update({"val_score_before": 0.9, "val_score": 0.6})
+    assert optimize.main([*argv, "--force"], settings=settings) == 0
+    assert "calibrated" not in json.loads(output_path.read_text(encoding="utf-8"))
+    stdout = capsys.readouterr().out
+    assert f"saved to {output_path}" in stdout
+    assert "FLEET_DECISION_MODEL" in stdout
 
 
 def test_optimize_skills_reanchor_and_cli_reminder(

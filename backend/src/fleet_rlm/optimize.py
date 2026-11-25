@@ -239,7 +239,11 @@ async def load_rlm_examples_from_db(
     *,
     limit: int = 200,
 ) -> list[dspy.Example]:
-    """Load completed root runs from an isolated Neon branch database."""
+    """Load completed root runs from an isolated Neon branch database.
+
+    Runs with uploaded files are skipped: offline compilation does not upload their inputs
+    into the sandbox, so those examples would score against missing files.
+    """
     if limit <= 0:
         raise ValueError("limit must be positive")
     branch_settings = settings.model_copy(
@@ -264,19 +268,28 @@ async def load_rlm_examples_from_db(
         await engine.dispose()
 
     examples: list[dspy.Example] = []
+    skipped_with_files = 0
     for run in runs:
         if not run.prompt or run.answer is None:
+            continue
+        if _extract_files_manifest(run.ui_parts):
+            skipped_with_files += 1
             continue
         examples.append(
             dspy.Example(
                 task=run.prompt,
-                files_manifest=_extract_files_manifest(run.ui_parts),
+                files_manifest=[],
                 memories=[],
                 active_skills="",
                 prior_turns=[],
                 answer=run.answer,
                 artifact_paths=[],
             ).with_inputs("task", "files_manifest", "memories", "active_skills", "prior_turns")
+        )
+    if skipped_with_files:
+        _LOG.warning(
+            "Skipped %d runs with uploaded files; offline compilation does not hydrate them",
+            skipped_with_files,
         )
     return examples
 
@@ -601,7 +614,18 @@ def optimize_rlm(
     local_interpreter: bool = False,
     log_dir: Path | None = None,
 ) -> OptimizationResult:
-    """Compile dspy.RLM or dspy.Flex with GEPA and save only if holdout improves (or --force)."""
+    """Compile dspy.RLM or dspy.Flex with GEPA and save only if holdout improves (or --force).
+
+    The offline program has no host tools (no ``spawn_agent``), unlike the production program.
+    """
+    if program_kind == "rlm" and not local_interpreter:
+        # All rollouts share one Daytona sandbox, and DSPy runs 8 threads when this is None.
+        if num_threads is not None and num_threads > 1:
+            raise ValueError(
+                "--program rlm shares one Daytona sandbox across threads; "
+                "use --num-threads 1 or --local-interpreter"
+            )
+        num_threads = 1
     safe_url = guard_database_url(database_url, settings, allow_direct=allow_direct)
     examples = (
         load_rlm_dataset(dataset)
@@ -707,6 +731,7 @@ def _run_reanchor(
     allow_direct: bool,
     log_dir: Path | None,
     require_cache: bool,
+    force: bool,
 ) -> OptimizationResult:
     guard_database_url(database_url, settings, allow_direct=allow_direct)
     if len(examples) >= 2:
@@ -726,10 +751,17 @@ def _run_reanchor(
         )
         compiled = reanchor.compile(predictor, trainset=trainset, valset=holdout)
         report = dict(reanchor.report)
-        _save_program(compiled, output_path)
 
         baseline_score = report.get("val_score_before", report.get("train_score_before"))
         optimized_score = report.get("val_score", report.get("train_score"))
+        improved = (
+            isinstance(baseline_score, (int, float))
+            and isinstance(optimized_score, (int, float))
+            and optimized_score > baseline_score
+        )
+        saved = improved or force
+        if saved:
+            _save_program(compiled, output_path)
 
         if mlflow_active:
             tracking = _mlflow_api()
@@ -739,28 +771,29 @@ def _run_reanchor(
                     "decision_model": settings.decision_model,
                     "train_size": len(trainset),
                     "holdout_size": len(holdout) if holdout else 0,
+                    "force": force,
                 }
             )
-            metrics: dict[str, float] = {}
+            metrics: dict[str, float] = {"saved": 1.0 if saved else 0.0}
             if isinstance(baseline_score, (int, float)):
                 metrics["baseline_score"] = float(baseline_score)
             if isinstance(optimized_score, (int, float)):
                 metrics["optimized_score"] = float(optimized_score)
-            if metrics:
-                tracking.log_metrics(metrics)
-            tracking.log_artifact(str(output_path))
+            tracking.log_metrics(metrics)
+            if saved:
+                tracking.log_artifact(str(output_path))
 
     return OptimizationResult(
         target=target,
         output_path=output_path,
-        saved=True,
+        saved=saved,
         baseline_score=float(baseline_score) if isinstance(baseline_score, (int, float)) else None,
         optimized_score=(
             float(optimized_score) if isinstance(optimized_score, (int, float)) else None
         ),
         train_size=len(trainset),
         holdout_size=len(holdout) if holdout else 0,
-        reminder=_pin_reminder(env_var, output_path, settings.decision_model),
+        reminder=_pin_reminder(env_var, output_path, settings.decision_model) if saved else None,
         report=report,
     )
 
@@ -777,6 +810,7 @@ def optimize_skills(
     allow_direct: bool = False,
     log_dir: Path | None = None,
     require_cache: bool = True,
+    force: bool = False,
 ) -> OptimizationResult:
     """Calibrate SkillSelector thresholds and Choice weights via 5-fold ReAnchor CV."""
     registry = skills.SkillRegistry.load(settings.skills_dir, fallback_to_bundled=True)
@@ -800,6 +834,7 @@ def optimize_skills(
         allow_direct=allow_direct,
         log_dir=log_dir,
         require_cache=require_cache,
+        force=force,
     )
 
 
@@ -815,6 +850,7 @@ def optimize_memory(
     allow_direct: bool = False,
     log_dir: Path | None = None,
     require_cache: bool = True,
+    force: bool = False,
 ) -> OptimizationResult:
     """Calibrate MemoryGate thresholds and choice weights via 5-fold ReAnchor CV."""
     examples = load_memory_dataset(dataset)
@@ -835,6 +871,7 @@ def optimize_memory(
         allow_direct=allow_direct,
         log_dir=log_dir,
         require_cache=require_cache,
+        force=force,
     )
 
 
@@ -899,7 +936,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="light",
         help="GEPA auto budget for --target rlm.",
     )
-    parser.add_argument("--num-threads", type=int, default=None, help="Evaluation thread count.")
+    parser.add_argument(
+        "--num-threads",
+        type=int,
+        default=None,
+        help="Evaluation thread count (--program rlm uses 1 unless --local-interpreter is set).",
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -909,7 +951,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Save RLM artifact even if holdout score does not beat baseline.",
+        help="Save the artifact even if the holdout score does not beat the baseline.",
     )
     parser.add_argument(
         "--local-interpreter",
@@ -968,6 +1010,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 num_threads=args.num_threads,
                 allow_direct=args.allow_direct,
                 log_dir=args.log_dir,
+                force=args.force,
             )
         else:
             train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
@@ -981,6 +1024,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 num_threads=args.num_threads,
                 allow_direct=args.allow_direct,
                 log_dir=args.log_dir,
+                force=args.force,
             )
     except DatabaseSafetyError as error:
         print(f"Error: {error}", file=sys.stderr)

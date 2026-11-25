@@ -17,8 +17,8 @@ Runs strictly out-of-band as a CLI (`uv run python -m fleet_rlm.optimize ...`). 
    - Enable `mlflow.dspy.autolog(log_compiles=True, log_evals=True, log_traces_from_compile=True)`.
 3. **Three Independent Optimization Targets (`--target rlm | skills | memory`):**
    - **`rlm` (`dspy.GEPA`):** Loads labeled evaluation examples from approved Neon `runs` / JSONL dataset, performs a disjoint 3-way `train`/`val`/`holdout` split (default `60/20/20`, passing `trainset` and `valset` to `dspy.GEPA` while keeping `holdout` untouched for baseline vs. optimized evaluation), runs `--program rlm` inside an ephemeral Daytona sandbox torn down in `finally` (with `--local-interpreter` opt-in for local-only execution), and writes `artifacts/rlm_program.json` **only** when holdout improves (or `--force`).
-   - **`skills` (`dspy.experimental.ReAnchor`):** Fits 5-fold cross-validated thresholds and choice weights for `SkillSelector` from labeled `(task, expected_skill)` pairs; writes `artifacts/skill_selector.json`.
-   - **`memory` (`dspy.experimental.ReAnchor`):** Fits calibrated thresholds for `MemoryGate` from labeled `(turn_exchange, should_save, action, scope)` pairs; writes `artifacts/memory_gate.json`.
+   - **`skills` (`dspy.experimental.ReAnchor`):** Fits 5-fold cross-validated thresholds and choice weights for `SkillSelector` from labeled `(task, expected_skill)` pairs; writes `artifacts/skill_selector.json` **only** when holdout improves (or `--force`).
+   - **`memory` (`dspy.experimental.ReAnchor`):** Fits calibrated thresholds for `MemoryGate` from labeled `(turn_exchange, should_save, action, scope)` pairs; writes `artifacts/memory_gate.json` **only** when holdout improves (or `--force`).
    - **Important:** When deploying `ReAnchor`-calibrated JSON files, pin the exact TypeSafe Jev model snapshot in `FLEET_DECISION_MODEL` (do not keep floating `typesafe:jev-latest`) so decision probabilities remain aligned with calibrated thresholds.
 4. **Deployment:**
    - Set `FLEET_OPTIMIZED_PROGRAM_PATH`, `FLEET_SKILL_SELECTOR_PATH`, and/or `FLEET_MEMORY_GATE_PATH` and roll Uvicorn workers.

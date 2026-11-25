@@ -103,6 +103,10 @@ uv run python -m fleet_rlm.optimize --target skills --database-url "$NEON_BRANCH
 uv run python -m fleet_rlm.optimize --target memory --database-url "$NEON_BRANCH_URL" --dataset memory.jsonl
 ```
 
+Every target writes its artifact only when the holdout score beats the uncalibrated baseline. Pass `--force` to save it anyway.
+
+`--target rlm` compiles the program without host tools such as `spawn_agent`. It skips Neon runs that had uploaded files, because it does not upload those files into the sandbox. With `--program rlm`, all rollouts share one Daytona sandbox, so the optimizer uses one thread unless you pass `--local-interpreter`.
+
 When deploying `ReAnchor`-calibrated `skill_selector.json` or `memory_gate.json` gates, pin the exact TypeSafe Jev snapshot in `FLEET_DECISION_MODEL` instead of floating `typesafe:jev-latest`.
 
 ---
