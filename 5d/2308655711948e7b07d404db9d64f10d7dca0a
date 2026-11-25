@@ -1,0 +1,22 @@
+backend/eval_datasets/fixtures.py
+  h_f276322eb5eb9f 1-1110
+backend/eval_datasets/memory.jsonl
+  h_f276322eb5eb9f 1-100
+backend/eval_datasets/rlm.jsonl
+  h_f276322eb5eb9f 1-34
+backend/eval_datasets/skills.jsonl
+  h_f276322eb5eb9f 1-114
+scripts/extract_eval_archetypes.py
+  h_f276322eb5eb9f 1-1124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5d2308655711948e7b07d404db9d64f10d7dca0a",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
