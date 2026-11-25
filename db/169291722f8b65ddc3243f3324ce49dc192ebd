@@ -1,0 +1,16 @@
+frontend/pnpm-lock.yaml
+  h_f276322eb5eb9f 7-9,326-328,1824-1826,2745-2746,3105,4121,4123
+frontend/pnpm-workspace.yaml
+  h_f276322eb5eb9f 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db169291722f8b65ddc3243f3324ce49dc192ebd",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
