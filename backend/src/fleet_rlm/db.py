@@ -190,6 +190,20 @@ class WorkspaceSettings(Base):
     )
 
 
+class InstalledSkill(Base):
+    __tablename__ = "installed_skills"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    description: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    raw_markdown: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(CHAR(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SessionNotFoundError(LookupError):
     pass
 
@@ -199,6 +213,10 @@ class TurnConflictError(RuntimeError):
 
 
 class UploadConflictError(TurnConflictError):
+    pass
+
+
+class InstalledSkillConflictError(RuntimeError):
     pass
 
 
@@ -941,3 +959,40 @@ async def reset_workspace_settings_overrides(db: SessionFactory) -> dict[str, An
     async with db.begin() as connection:
         await connection.execute(statement)
     return {}
+
+
+async def list_installed_skills(db: SessionFactory) -> list[InstalledSkill]:
+    async with db() as connection:
+        result = await connection.scalars(select(InstalledSkill).order_by(InstalledSkill.name))
+        return list(result)
+
+
+async def insert_installed_skill(
+    db: SessionFactory,
+    *,
+    name: str,
+    description: str,
+    body: str,
+    raw_markdown: str,
+    sha256: str,
+) -> InstalledSkill:
+    """Insert a Skill once. A retry with identical content returns the stored row."""
+    statement = (
+        insert(InstalledSkill)
+        .values(
+            name=name,
+            description=description,
+            body=body,
+            raw_markdown=raw_markdown,
+            sha256=sha256,
+        )
+        .on_conflict_do_nothing(index_elements=[InstalledSkill.name])
+        .returning(InstalledSkill)
+    )
+    async with db.begin() as connection:
+        skill = await connection.scalar(statement)
+        if skill is None:
+            skill = await connection.get(InstalledSkill, name)
+            if skill is None or skill.sha256 != sha256:
+                raise InstalledSkillConflictError(f"Skill '{name}' already exists")
+    return skill
