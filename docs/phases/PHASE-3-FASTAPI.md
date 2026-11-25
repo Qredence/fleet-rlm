@@ -56,7 +56,7 @@ Wire `config.py`, `db.py`, `interpreter.py`, `skills.py`, and `agent.py` into a 
    - `GET /api/sessions/{session_id}/files` -> returns `list_session_files(db, session_id)`.
    - `GET /api/sessions/{session_id}/files/{file_path:path}` -> validates path is recorded in Neon `files`, downloads bytes from Daytona `/workspace/{file_path}`, returns response with safe `Content-Disposition`.
 7. **Unified Memories & Skills Inspection**
-   - `GET /api/memories` (optional `session_id`, `approved` filters), `PATCH /api/memories/{memory_id}` (approve/edit content), `DELETE /api/memories/{memory_id}`.
+   - `GET /api/memories` (optional `session_id`, `approved`, `kind`, `scope`, and `q` filters; `before_id` pages newest-first results and is rejected with `q`; memories of deleting sessions are hidden), `PATCH /api/memories/{memory_id}` (approve/edit content), `DELETE /api/memories/{memory_id}`.
    - `GET /api/skills` -> lists read-only `SkillRegistry` entries (name + description) for the Vite `@skill` picker.
 
 ## Exit Gate (Must Pass Before Phase 4)

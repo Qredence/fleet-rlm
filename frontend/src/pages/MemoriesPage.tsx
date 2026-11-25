@@ -1,4 +1,4 @@
-import { Brain, Check, ChevronDown, Pencil, RefreshCw, Trash2, Undo2 } from 'lucide-react'
+import { Brain, Check, ChevronDown, Pencil, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/PageHeader'
@@ -14,16 +14,19 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Item, ItemContent, ItemGroup } from '@/components/ui/item'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { errorMessage, type FleetApi, type Memory, type MemoryEdit, type Session } from '@/lib/api'
+import { errorMessage, type FleetApi, type Memory, type MemoryEdit, type MemoryFilters, type Session } from '@/lib/api'
 
 const followUpDelays = [2500, 6000]
 const memoryLimit = 100
+const maxMemoryLimit = 500
+const scopeLabels: Record<string, string> = { global: 'Global memories', session: 'All session memories' }
 
 export function MemoriesPage({ api, sessions, completedAt }: {
   api: FleetApi
@@ -31,12 +34,18 @@ export function MemoriesPage({ api, sessions, completedAt }: {
   completedAt: number
 }) {
   const [params, setParams] = useSearchParams()
-  const scope = params.get('session_id') ?? ''
+  const sessionId = params.get('session_id') ?? ''
+  const scopeParam = params.get('scope')
+  const scope = scopeParam === 'global' || scopeParam === 'session' ? scopeParam : undefined
+  const kindParam = params.get('kind')
+  const kind = kindParam === 'fact' || kindParam === 'procedure' ? kindParam : undefined
+  const search = params.get('q')?.trim() ?? ''
   const memoryId = params.get('memory_id') ?? ''
   const approval = params.get('approved')
   const approved = approval === 'true' ? true : approval === 'false' ? false : undefined
-  const scopedSession = sessions.find(({ id }) => id === scope)
-  const scopeLabel = scopedSession?.title ?? (scope ? 'Linked session' : 'All scopes')
+  const scopeValue = scope ?? sessionId
+  const scopedSession = sessions.find(({ id }) => id === sessionId)
+  const scopeLabel = scope ? scopeLabels[scope] : scopedSession?.title ?? (sessionId ? 'Linked session' : 'All scopes')
 
   function changeFilter(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -46,20 +55,33 @@ export function MemoriesPage({ api, sessions, completedAt }: {
     setParams(next)
   }
 
+  function changeScope(value: string) {
+    const next = new URLSearchParams(params)
+    next.delete('memory_id')
+    next.delete('scope')
+    next.delete('session_id')
+    if (value === 'global' || value === 'session') next.set('scope', value)
+    else if (value) next.set('session_id', value)
+    setParams(next)
+  }
+
   return (
     <>
       <PageHeader title="Memories" />
       <ScrollArea className="min-h-0 flex-1">
         <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-7" aria-label="Memory review">
+          <MemorySearch key={search} initial={search} onSearch={(value) => changeFilter('q', value)} />
           <div className="flex flex-wrap items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="max-w-full" aria-label={`Memory scope: ${scopeLabel}`} />}>
                 <span className="truncate">{scopeLabel}</span><ChevronDown data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent className="max-w-[min(20rem,calc(100vw-2rem))]">
-                <DropdownMenuRadioGroup value={scope} onValueChange={(value) => changeFilter('session_id', value)}>
+                <DropdownMenuRadioGroup value={scopeValue} onValueChange={changeScope}>
                   <DropdownMenuRadioItem value="">All sessions and global</DropdownMenuRadioItem>
-                  {scope && !scopedSession && <DropdownMenuRadioItem value={scope}>Linked session</DropdownMenuRadioItem>}
+                  <DropdownMenuRadioItem value="global">{scopeLabels.global}</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="session">{scopeLabels.session}</DropdownMenuRadioItem>
+                  {sessionId && !scopedSession && <DropdownMenuRadioItem value={sessionId}>Linked session</DropdownMenuRadioItem>}
                   {sessions.map(({ id, title }) => <DropdownMenuRadioItem key={id} value={id}><span className="truncate">{title}</span></DropdownMenuRadioItem>)}
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
@@ -73,10 +95,20 @@ export function MemoriesPage({ api, sessions, completedAt }: {
               <ToggleGroupItem value="false">Pending</ToggleGroupItem>
               <ToggleGroupItem value="true">Approved</ToggleGroupItem>
             </ToggleGroup>
+            <ToggleGroup
+              aria-label="Filter by kind" variant="outline" size="sm"
+              value={[kind ?? 'all']}
+              onValueChange={([value]) => { if (value) changeFilter('kind', value === 'all' ? '' : value) }}
+            >
+              <ToggleGroupItem value="all">All kinds</ToggleGroupItem>
+              <ToggleGroupItem value="fact">Facts</ToggleGroupItem>
+              <ToggleGroupItem value="procedure">Procedures</ToggleGroupItem>
+            </ToggleGroup>
           </div>
           <MemoryList
-            key={`${scope}:${approved}:${memoryId}`} api={api} scope={scope} approved={approved}
-            memoryId={memoryId} onShowAll={() => changeFilter('memory_id', '')}
+            key={`${scopeValue}:${approved}:${kind}:${search}:${memoryId}`} api={api}
+            filters={{ session_id: sessionId || undefined, scope, approved, kind, q: search || undefined, memory_id: memoryId || undefined }}
+            onShowAll={() => changeFilter('memory_id', '')}
             sessions={sessions} completedAt={completedAt}
           />
         </section>
@@ -85,29 +117,57 @@ export function MemoriesPage({ api, sessions, completedAt }: {
   )
 }
 
-function MemoryList({ api, scope, approved, memoryId, onShowAll, sessions, completedAt }: {
+function MemorySearch({ initial, onSearch }: { initial: string; onSearch: (value: string) => void }) {
+  const [draft, setDraft] = useState(initial)
+
+  return (
+    <form role="search" onSubmit={(event) => {
+      event.preventDefault()
+      onSearch(draft.trim())
+    }}>
+      <InputGroup>
+        <InputGroupInput
+          type="search" aria-label="Search memories" placeholder="Search memories…"
+          value={draft} onChange={(event) => {
+            setDraft(event.target.value)
+            if (!event.target.value && initial) onSearch('')
+          }}
+        />
+        <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+      </InputGroup>
+    </form>
+  )
+}
+
+function MemoryList({ api, filters, onShowAll, sessions, completedAt }: {
   api: FleetApi
-  scope: string
-  approved?: boolean
-  memoryId: string
+  filters: Omit<MemoryFilters, 'before_id' | 'limit'>
   onShowAll: () => void
   sessions: Session[]
   completedAt: number
 }) {
   const [rows, setRows] = useState<Memory[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [attempt, retry] = useState(0)
   const request = useRef<AbortController | null>(null)
+  const loaded = useRef(0)
+  const { session_id: sessionId, scope, approved, kind, q: search, memory_id: memoryId } = filters
+  const filtered = Object.entries(filters).some(([key, value]) => key !== 'memory_id' && value !== undefined)
 
   useEffect(() => {
     function load() {
       request.current?.abort()
       const controller = new AbortController()
       request.current = controller
-      const filters = { session_id: scope || undefined, memory_id: memoryId || undefined, approved, limit: memoryLimit }
-      void api.listMemories(filters, controller.signal).then((items) => {
+      const limit = Math.min(maxMemoryLimit, Math.max(memoryLimit, loaded.current))
+      const query = { session_id: sessionId, scope, approved, kind, q: search, memory_id: memoryId, limit }
+      void api.listMemories(query, controller.signal).then((items) => {
         if (controller.signal.aborted) return
+        loaded.current = items.length
         setRows(items)
+        setHasMore(!search && items.length === limit)
         setError('')
       }).catch((failure) => {
         if (!controller.signal.aborted) setError(errorMessage(failure))
@@ -122,14 +182,35 @@ function MemoryList({ api, scope, approved, memoryId, onShowAll, sessions, compl
       request.current?.abort()
       timers.forEach((timer) => window.clearTimeout(timer))
     }
-  }, [api, scope, approved, memoryId, attempt, completedAt])
+  }, [api, sessionId, scope, approved, kind, search, memoryId, attempt, completedAt])
+
+  function loadMore() {
+    const last = rows?.at(-1)
+    if (!last) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
+    setLoadingMore(true)
+    void api.listMemories({ ...filters, before_id: last.id, limit: memoryLimit }, controller.signal).then((items) => {
+      if (controller.signal.aborted) return
+      setRows((current) => {
+        const next = [...current ?? [], ...items]
+        loaded.current = next.length
+        return next
+      })
+      setHasMore(items.length === memoryLimit)
+      setError('')
+    }).catch((failure) => {
+      if (!controller.signal.aborted) setError(errorMessage(failure))
+    }).finally(() => setLoadingMore(false))
+  }
 
   return (
     <>
       <div className="flex items-center justify-between gap-2">
         {memoryId ? (
           <Button variant="outline" size="sm" onClick={onShowAll}>Show all in this scope</Button>
-        ) : <p className="text-xs text-muted-foreground">Showing up to {memoryLimit} recent memories for these filters.</p>}
+        ) : <p className="text-xs text-muted-foreground">{search ? `Showing up to ${memoryLimit} best matches.` : 'Showing the newest memories first.'}</p>}
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Refresh memories" onClick={() => retry((value) => value + 1)} />}>
             <RefreshCw />
@@ -150,7 +231,7 @@ function MemoryList({ api, scope, approved, memoryId, onShowAll, sessions, compl
           <EmptyHeader>
             <EmptyMedia variant="icon"><Brain /></EmptyMedia>
             <EmptyTitle>{memoryId ? 'Lesson unavailable' : 'No memories found'}</EmptyTitle>
-            {!memoryId && <EmptyDescription>{scope || approved !== undefined ? 'Change the filters to see more memories.' : 'Memory candidates appear here after conversations.'}</EmptyDescription>}
+            {!memoryId && <EmptyDescription>{filtered ? 'Change the filters to see more memories.' : 'Memory candidates appear here after conversations.'}</EmptyDescription>}
           </EmptyHeader>
         </Empty>
       ) : (
@@ -170,6 +251,11 @@ function MemoryList({ api, scope, approved, memoryId, onShowAll, sessions, compl
             />
           ))}
         </ItemGroup>
+      )}
+      {rows && hasMore && (
+        <Button variant="outline" className="self-center" disabled={loadingMore} onClick={loadMore}>
+          {loadingMore ? 'Loading…' : 'Load more memories'}
+        </Button>
       )}
     </>
   )

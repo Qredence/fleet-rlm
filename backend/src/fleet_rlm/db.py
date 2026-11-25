@@ -21,6 +21,7 @@ from sqlalchemy import (
     case,
     cast,
     delete,
+    exists,
     func,
     literal,
     select,
@@ -778,6 +779,45 @@ async def search_memories(
         filters.append(Memory.approved.is_(True))
     async with db() as connection:
         return await _match_memories(connection, query, filters, limit)
+
+
+async def list_memories(
+    connection: AsyncSession,
+    *,
+    limit: int,
+    session_id: UUID | None = None,
+    approved: bool | None = None,
+    memory_id: UUID | None = None,
+    kind: Literal["fact", "procedure"] | None = None,
+    scope: Literal["global", "session"] | None = None,
+    query: str | None = None,
+    before_id: UUID | None = None,
+) -> list[Memory]:
+    """List reviewable memories newest first, or by relevance when ``query`` is set."""
+    filters: list[ColumnElement[bool]] = [
+        ~exists().where(Session.id == Memory.session_id, Session.deleting.is_(True))
+    ]
+    if session_id is not None:
+        filters.append(Memory.session_id == session_id)
+    if approved is not None:
+        filters.append(Memory.approved.is_(approved))
+    if memory_id is not None:
+        filters.append(Memory.id == memory_id)
+    if kind is not None:
+        source = Memory.source_run_id
+        filters.append(source.is_(None) if kind == "fact" else source.is_not(None))
+    if scope is not None:
+        owner = Memory.session_id
+        filters.append(owner.is_(None) if scope == "global" else owner.is_not(None))
+    if before_id is not None:
+        filters.append(Memory.id < before_id)
+    if query:
+        return await _match_memories(connection, query, filters, limit)
+    return list(
+        await connection.scalars(
+            select(Memory).where(*filters).order_by(Memory.id.desc()).limit(limit)
+        )
+    )
 
 
 async def _match_memories(

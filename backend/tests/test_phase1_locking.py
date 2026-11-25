@@ -36,6 +36,7 @@ from fleet_rlm.db import (
     get_workspace_settings_overrides,
     list_approved_session_memories,
     list_discarded_objects,
+    list_memories,
     list_session_files,
     reap_stale_runs,
     rebind_session_sandbox,
@@ -596,6 +597,65 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
                 await connection.execute(delete(Memory).where(Memory.id.in_(global_ids)))
             await connection.execute(
                 delete(Session).where(Session.id.in_([session_a.id, session_b.id]))
+            )
+
+
+@pytest.mark.asyncio
+async def test_list_memories_filters_searches_and_hides_deleting_sessions(
+    db: SessionFactory,
+) -> None:
+    session = await create_session(db, title="Memory review")
+    deleting = await create_session(db, title="Memory review deleting")
+    token = f"orbit{uuid4().hex[:8]}"
+    global_id: UUID | None = None
+    try:
+        run = await acquire_root_run(db, session.id, "Review memories")
+        assert await finish_run(db, run.id, status="completed")
+        fact = await save_or_update_memory(
+            db, session_id=session.id, content=f"Session {token} fact"
+        )
+        procedure = await save_turn_lesson(
+            db, session.id, run.id, content=f"Check {token} first.", skill_name=None
+        )
+        global_fact = await save_or_update_memory(
+            db, session_id=None, content=f"Global {token} fact", approved=True
+        )
+        global_id = global_fact.id
+        hidden = await save_or_update_memory(
+            db, session_id=deleting.id, content=f"Deleting {token} fact"
+        )
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Session).where(Session.id == deleting.id).values(deleting=True)
+            )
+
+        async with db() as connection:
+            searched = await list_memories(connection, limit=10, query=token)
+            assert {memory.id for memory in searched} == {fact.id, procedure.id, global_fact.id}
+            facts = await list_memories(connection, limit=10, query=token, kind="fact")
+            assert {memory.id for memory in facts} == {fact.id, global_fact.id}
+            globals_only = await list_memories(connection, limit=10, query=token, scope="global")
+            assert [memory.id for memory in globals_only] == [global_fact.id]
+            assert await list_memories(connection, limit=10, session_id=deleting.id) == []
+            hidden_hits = await list_memories(connection, limit=10, memory_id=hidden.id)
+            assert hidden_hits == []
+
+            newest = await list_memories(connection, limit=1, session_id=session.id)
+            assert [memory.id for memory in newest] == [procedure.id]
+            older = await list_memories(
+                connection, limit=1, session_id=session.id, before_id=newest[0].id
+            )
+            assert [memory.id for memory in older] == [fact.id]
+            procedures = await list_memories(
+                connection, limit=10, session_id=session.id, kind="procedure", scope="session"
+            )
+            assert [memory.id for memory in procedures] == [procedure.id]
+    finally:
+        async with db.begin() as connection:
+            if global_id is not None:
+                await connection.execute(delete(Memory).where(Memory.id == global_id))
+            await connection.execute(
+                delete(Session).where(Session.id.in_([session.id, deleting.id]))
             )
 
 

@@ -1061,15 +1061,26 @@ async def list_memories(
     approved: bool | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     memory_id: UUID | None = None,
+    kind: Literal["fact", "procedure"] | None = None,
+    scope: Literal["global", "session"] | None = None,
+    q: Annotated[str | None, Query(max_length=500)] = None,
+    before_id: UUID | None = None,
 ) -> list[MemoryView]:
-    query = select(store.Memory).order_by(store.Memory.id.desc())
-    if session_id is not None:
-        query = query.where(store.Memory.session_id == session_id)
-    if approved is not None:
-        query = query.where(store.Memory.approved.is_(approved))
-    if memory_id is not None:
-        query = query.where(store.Memory.id == memory_id)
-    return [MemoryView.model_validate(memory) for memory in await db.scalars(query.limit(limit))]
+    query = (q or "").strip() or None
+    if query is not None and before_id is not None:
+        raise HTTPException(422, "Search results are ranked and cannot be paged with before_id")
+    memories = await store.list_memories(
+        db,
+        limit=limit,
+        session_id=session_id,
+        approved=approved,
+        memory_id=memory_id,
+        kind=kind,
+        scope=scope,
+        query=query,
+        before_id=before_id,
+    )
+    return [MemoryView.model_validate(memory) for memory in memories]
 
 
 @app.patch("/api/memories/{memory_id}", dependencies=[Depends(require_auth)])
