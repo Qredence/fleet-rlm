@@ -3,12 +3,10 @@
 import importlib.util
 import json
 import logging
-import os
 import re
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from types import MappingProxyType
 
 import dspy
@@ -19,7 +17,7 @@ from .config import Settings
 
 _MAX_CANDIDATES = 40
 MAX_SKILL_BYTES = 64 * 1024
-_INSTALL_DIR = ".installed"
+_INSTALL_DIR = "installed_skills"
 _LOG = logging.getLogger(__name__)
 
 
@@ -69,35 +67,23 @@ class SkillRegistry:
     def available_skills(self, settings: Settings) -> tuple[SkillDefinition, ...]:
         return tuple(skill for skill in self.skills if skill.unavailable_reason(settings) is None)
 
-    def with_installed(self, skills_dir: Path) -> "SkillRegistry":
-        # Installs are published as complete files on disk so every worker sees them.
+    def with_installed(self, installed: Mapping[str, str]) -> "SkillRegistry":
+        """Add installed Skills from their stored SKILL.md text, keyed by name."""
         skills = {skill.name: skill for skill in self.skills}
-        for path in (skills_dir / _INSTALL_DIR).glob("*.md"):
+        for name, markdown in installed.items():
             try:
-                skill = _load_skill(path)
-            except (ValueError, OSError) as error:
-                _LOG.warning("Skipping installed Skill %s: %s", path, error)
+                skill = _parse_skill(markdown.encode(), _installed_path(name), strict=False)
+            except ValueError as error:
+                _LOG.warning("Skipping installed Skill %s: %s", name, error)
                 continue
             skills.setdefault(skill.name, skill)
         return SkillRegistry(tuple(sorted(skills.values(), key=lambda skill: skill.name)))
 
-    def install(self, skills_dir: Path, content: bytes) -> SkillDefinition:
+    def validate_install(self, content: bytes) -> SkillDefinition:
         skill = _parse_skill(content, Path("SKILL.md"), strict=True)
         if any(existing.name == skill.name for existing in self.skills):
             raise FileExistsError(f"Skill '{skill.name}' already exists")
-
-        directory = skills_dir / _INSTALL_DIR
-        directory.mkdir(parents=True, exist_ok=True)
-        destination = directory / f"{skill.name}.md"
-        with NamedTemporaryFile(dir=directory) as staged:
-            staged.write(content)
-            staged.flush()
-            try:
-                os.link(staged.name, destination)
-            except FileExistsError as error:
-                if destination.read_bytes() != content:
-                    raise FileExistsError(f"Skill '{skill.name}' already exists") from error
-        return _load_skill(destination)
+        return replace(skill, path=_installed_path(skill.name))
 
 
 @dataclass(frozen=True)
@@ -134,6 +120,11 @@ def load_host_tools(
             if name in skill.allowed_tools:
                 tools[name] = tool
     return tools
+
+
+def _installed_path(name: str) -> Path:
+    # Installed Skills are data only. This path never resolves to shipped tool code.
+    return Path(_INSTALL_DIR, f"{name}.md")
 
 
 def _load_skill(path: Path, *, bundled: bool = False) -> SkillDefinition:

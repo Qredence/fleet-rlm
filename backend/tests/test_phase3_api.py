@@ -73,6 +73,7 @@ class OfflineStore:
         self.ui_messages_by_session: dict[UUID, list[dict]] = {}
         self.statements = []
         self.workspace_overrides = {}
+        self.installed_skills: dict[str, db.InstalledSkill] = {}
 
     @property
     def active(self) -> UUID | None:
@@ -391,6 +392,20 @@ class OfflineStore:
             self.workspace_overrides.clear()
             return {}
 
+    async def list_installed_skills(self, _sessionmaker):
+        async with self():
+            return [self.installed_skills[name] for name in sorted(self.installed_skills)]
+
+    async def insert_installed_skill(self, _sessionmaker, *, name, sha256, **values):
+        async with self():
+            existing = self.installed_skills.get(name)
+            if existing is None:
+                existing = db.InstalledSkill(name=name, sha256=sha256, **values)
+                self.installed_skills[name] = existing
+            elif existing.sha256 != sha256:
+                raise db.InstalledSkillConflictError(f"Skill '{name}' already exists")
+            return existing
+
 
 class OfflineStorage:
     prefix = staticmethod(ObjectStorage.prefix)
@@ -530,6 +545,8 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
     monkeypatch.setattr(db, "update_workspace_settings_overrides", store.update_workspace_overrides)
     monkeypatch.setattr(db, "reset_workspace_settings_overrides", store.reset_workspace_overrides)
+    monkeypatch.setattr(db, "list_installed_skills", store.list_installed_skills)
+    monkeypatch.setattr(db, "insert_installed_skill", store.insert_installed_skill)
     monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[artifact]))
     memory = AsyncMock(side_effect=RuntimeError("Optional memory gate failed"))
     monkeypatch.setattr(api.agent, "consolidate_memory", memory)
@@ -982,7 +999,57 @@ async def test_install_skill_artifact_is_immediately_available_to_new_turns(offl
     assert (
         await offline.client.post(endpoint, json={"path": artifact_path, "sha256": digest})
     ).status_code == 409
-    assert skill.path.read_bytes() == content
+    assert offline.store.installed_skills["receipt-check"].raw_markdown == content.decode()
+    skills_dir = offline.settings.skills_dir
+    assert list(skills_dir.rglob("*.md")) == [skills_dir / "table" / "SKILL.md"]
+
+
+@pytest.mark.asyncio
+async def test_installed_skill_is_shared_across_workers(offline, tmp_path_factory):
+    artifact_path = "artifacts/receipt-check/SKILL.md"
+    content = b"---\nname: receipt-check\ndescription: Check receipts\n---\nUse code RC-29.\n"
+    artifact = offline.storage.seed(offline.store, artifact_path, content)
+    endpoint = f"{offline.base}/skills"
+    install = {"path": artifact_path, "sha256": artifact.sha256}
+    assert (await offline.client.post(endpoint, json=install)).status_code == 201
+
+    # A second worker shares Postgres but has its own local skills directory.
+    other_dir = tmp_path_factory.mktemp("other-worker")
+    (other_dir / "table").mkdir()
+    (other_dir / "table" / "SKILL.md").write_bytes(
+        (offline.settings.skills_dir / "table" / "SKILL.md").read_bytes()
+    )
+    runtime = api.app.state.runtime
+    api.app.state.runtime = replace(
+        runtime,
+        settings=runtime.settings.model_copy(update={"skills_dir": other_dir}),
+        skills=SkillRegistry.load(other_dir),
+    )
+    catalog = await offline.client.get("/api/skills")
+    assert [item["name"] for item in catalog.json()] == ["receipt-check", "table"]
+    preview = await offline.client.get("/api/skills/receipt-check")
+    assert preview.json()["body"] == "Use code RC-29."
+    assert (await offline.client.post(endpoint, json=install)).status_code == 201
+
+    changed = offline.storage.seed(offline.store, artifact_path, content.replace(b"29", b"30"))
+    conflict = await offline.client.post(
+        endpoint, json={"path": artifact_path, "sha256": changed.sha256}
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "Skill 'receipt-check' already exists"
+    preview = await offline.client.get("/api/skills/receipt-check")
+    assert preview.json()["body"] == "Use code RC-29."
+    assert not list(other_dir.glob("installed_skills"))
+
+
+@pytest.mark.asyncio
+async def test_malformed_installed_row_does_not_break_the_catalog(offline):
+    offline.store.installed_skills["broken"] = db.InstalledSkill(
+        name="broken", description="", body="", raw_markdown="no frontmatter", sha256="0" * 64
+    )
+    catalog = await offline.client.get("/api/skills")
+    assert [item["name"] for item in catalog.json()] == ["table"]
+    assert (await offline.client.get("/api/skills/broken")).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -2546,8 +2613,15 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
 
     runtime = api.app.state.runtime
     registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
-    registry.install(
-        tmp_path, b"---\nname: other\ndescription: Test\nallowed-tools: web_open\n---\nRead."
+    other = b"---\nname: other\ndescription: Test\nallowed-tools: web_open\n---\nRead."
+    skill = registry.validate_install(other)
+    await offline.store.insert_installed_skill(
+        None,
+        name=skill.name,
+        description=skill.description,
+        body=skill.body,
+        raw_markdown=other.decode(),
+        sha256=hashlib.sha256(other).hexdigest(),
     )
     url = "https://example.org/report"
     route = offline.base + "/chat"

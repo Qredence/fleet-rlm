@@ -567,7 +567,8 @@ async def _effective_settings(runtime: Runtime) -> Settings:
 
 
 async def _skill_registry(runtime: Runtime) -> SkillRegistry:
-    return await asyncio.to_thread(runtime.skills.with_installed, runtime.settings.skills_dir)
+    installed = await store.list_installed_skills(runtime.sessionmaker)
+    return runtime.skills.with_installed({row.name: row.raw_markdown for row in installed})
 
 
 async def _workspace_settings_view(
@@ -1177,16 +1178,19 @@ async def install_skill(session_id: UUID, payload: SkillInstall, runtime: Runtim
             409, "The artifact changed. Reopen its preview and try again."
         ) from error
     try:
-        skill = await asyncio.to_thread(
-            runtime.skills.install, runtime.settings.skills_dir, content
+        skill = runtime.skills.validate_install(content)
+        await store.insert_installed_skill(
+            runtime.sessionmaker,
+            name=skill.name,
+            description=skill.description,
+            body=skill.body,
+            raw_markdown=content.decode(),
+            sha256=payload.sha256,
         )
-    except FileExistsError as error:
+    except (FileExistsError, store.InstalledSkillConflictError) as error:
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    except OSError as error:
-        _LOG.exception("Could not store installed Skill")
-        raise HTTPException(503, "Could not store the skill") from error
     return SkillView.model_validate(skill)
 
 

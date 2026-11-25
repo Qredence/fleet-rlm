@@ -91,6 +91,12 @@ def _skill(root, name, description="Analyze CSV data"):
     return path
 
 
+def _installed(registry, *documents):
+    return registry.with_installed(
+        {registry.validate_install(document.encode()).name: document for document in documents}
+    )
+
+
 def test_skill_registry_and_pinned_override(settings, tmp_path, monkeypatch):
     path = _skill(tmp_path, "data-analysis")
     _skill(tmp_path, "charts")
@@ -1869,16 +1875,17 @@ async def test_two_pinned_skills_have_complete_instructions_in_first_prompt(sett
     registry = SkillRegistry.load(tmp_path)
     middle_rule = "Check the synthetic label CEDAR-47 / café."
     second_rule = "Verify the row labeled ALDER-29."
-    for name, body in (
+    bodies = (
         ("first-review", "Inspect the schema.\n" * 30 + middle_rule + "\nCheck edge cases." * 12),
         ("second-review", "Corroborate the totals.\n" * 24 + second_rule),
-    ):
-        registry.install(
-            tmp_path, f"---\nname: {name}\ndescription: Review the output.\n---\n{body}\n".encode()
-        )
+    )
+    documents = [
+        f"---\nname: {name}\ndescription: Review the output.\n---\n{body}\n"
+        for name, body in bodies
+    ]
     selection = select_skills(
         settings,
-        registry.with_installed(tmp_path),
+        _installed(registry, *documents),
         "Review output",
         ["first-review", "second-review"],
     )
@@ -1926,18 +1933,14 @@ async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path,
     registry = SkillRegistry.load(tmp_path)
     rule = "Return the synthetic code GROVE-27."
     padding = "Verify each output against the fixture. " * 55
-    registry.install(
-        tmp_path,
-        (
-            "---\nname: long-review\ndescription: Review synthetic output\n---\n"
-            f"{padding}\n{rule}\n{padding.strip()}\n"
-        ).encode(),
-    )
+    documents = [
+        "---\nname: long-review\ndescription: Review synthetic output\n---\n"
+        f"{padding}\n{rule}\n{padding.strip()}\n"
+    ]
     if pins:
-        registry.install(
-            tmp_path,
-            b"---\nname: short-review\ndescription: Format the audit.\n---\n"
-            b"Use the audit code only.\n",
+        documents.append(
+            "---\nname: short-review\ndescription: Format the audit.\n---\n"
+            "Use the audit code only.\n"
         )
     with monkeypatch.context() as scoped:
         scoped.setattr(
@@ -1947,9 +1950,7 @@ async def test_long_installed_skill_is_readable_past_preview(settings, tmp_path,
                 needs_skill=SimpleNamespace(value=True, probability=1.0)
             ),
         )
-        selection = select_skills(
-            settings, registry.with_installed(tmp_path), "Review output", pins
-        )
+        selection = select_skills(settings, _installed(registry, *documents), "Review output", pins)
     expected = "\n\n".join(f"## {skill.name}\n{skill.body}" for skill in selection.active_skills)
     rule_offset = expected.index(rule)
     factory = make_interpreter_factory(
@@ -2185,7 +2186,7 @@ def test_skill_validation_on_load_and_install(tmp_path, monkeypatch, content, re
     with pytest.raises(ValueError, match=reason):
         SkillRegistry.load(tmp_path)
     with pytest.raises(ValueError, match=reason):
-        registry.install(tmp_path, content.encode())
+        registry.validate_install(content.encode())
 
 
 def test_skill_directory_and_legacy_description(tmp_path, monkeypatch):
@@ -2205,29 +2206,32 @@ def test_skill_directory_and_legacy_description(tmp_path, monkeypatch):
         .replace("name: old-folder", "name: old_skill")
         .replace("Analyze CSV data", "L" * 1025)
     )
-    installed = configured / ".installed" / "another.md"
-    installed.parent.mkdir()
-    installed.write_text(path.read_text().replace("Analyze CSV data", "L" * 1025))
-    catalog = SkillRegistry.load(configured, fallback_to_bundled=True).with_installed(configured)
+    installed = path.read_text().replace("Analyze CSV data", "L" * 1025)
+    catalog = SkillRegistry.load(configured, fallback_to_bundled=True).with_installed(
+        {"another": installed}
+    )
     assert [skill.name for skill in catalog.skills] == ["another", "old_skill"]
     for skill in catalog.skills:
         assert len(skill.description) == 1025
         assert skill.allowed_tools == ("inspect_csv", "retrieve")
 
 
-def test_persistent_install_directory_retains_bundled_skills(tmp_path, monkeypatch):
+def test_installed_skills_extend_bundled_skills_as_data_only(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled_skills"
     bundled.mkdir()
     _skill(bundled, "web-research")
     monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: bundled)
     configured = tmp_path / "persistent"
     registry = SkillRegistry.load(configured, fallback_to_bundled=True)
-    registry.install(configured, b"---\nname: custom\ndescription: Custom skill\n---\nRead it.")
-    reloaded = SkillRegistry.load(configured, fallback_to_bundled=True)
-    assert [skill.name for skill in reloaded.with_installed(configured).skills] == [
-        "custom",
-        "web-research",
-    ]
+    with pytest.raises(FileExistsError, match="already exists"):
+        registry.validate_install(
+            b"---\nname: web-research\ndescription: Replace it\n---\nRead it."
+        )
+    catalog = _installed(registry, "---\nname: custom\ndescription: Custom skill\n---\nRead it.")
+    assert [skill.name for skill in catalog.skills] == ["custom", "web-research"]
+    assert not configured.exists()
+    custom = catalog.skills[0]
+    assert skills._host_tools_path(custom) is None
 
 
 def test_malformed_installed_skill_is_skipped(tmp_path, monkeypatch, caplog):
@@ -2237,16 +2241,19 @@ def test_malformed_installed_skill_is_skipped(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(skills, "_bundled_skills_dir", lambda: bundled)
     configured = tmp_path / "persistent"
     registry = SkillRegistry.load(configured, fallback_to_bundled=True)
-    registry.install(configured, b"---\nname: custom\ndescription: Custom skill\n---\nRead it.")
-    (configured / ".installed" / "broken.md").write_text("no frontmatter")
-    (configured / ".installed" / "binary.md").write_bytes(b"\xff\xfe")
 
     with caplog.at_level("WARNING", logger="fleet_rlm.skills"):
-        catalog = registry.with_installed(configured)
+        catalog = registry.with_installed(
+            {
+                "custom": "---\nname: custom\ndescription: Custom skill\n---\nRead it.",
+                "broken": "no frontmatter",
+                "empty": "---\nname: empty\n---\nNo description.",
+            }
+        )
 
     assert [skill.name for skill in catalog.skills] == ["custom", "web-research"]
-    assert "broken.md" in caplog.text
-    assert "binary.md" in caplog.text
+    assert "Skipping installed Skill broken" in caplog.text
+    assert "Skipping installed Skill empty" in caplog.text
 
 
 def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(settings, monkeypatch):

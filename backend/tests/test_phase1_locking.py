@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.db import (
+    InstalledSkill,
+    InstalledSkillConflictError,
     Memory,
     Run,
     Session,
@@ -34,8 +36,10 @@ from fleet_rlm.db import (
     get_session_ui_messages,
     get_turn_for_refinement,
     get_workspace_settings_overrides,
+    insert_installed_skill,
     list_approved_session_memories,
     list_discarded_objects,
+    list_installed_skills,
     list_session_files,
     reap_stale_runs,
     rebind_session_sandbox,
@@ -699,3 +703,28 @@ async def test_workspace_settings_overrides_lifecycle(db: SessionFactory) -> Non
                         set_={"overrides_json": prior_overrides or {}, "updated_at": func.now()},
                     )
                 )
+
+
+@pytest.mark.asyncio
+async def test_installed_skills_insert_once_and_conflict_on_name(db: SessionFactory) -> None:
+    name = f"phase1-skill-{uuid4().hex[:12]}"
+    values = {
+        "name": name,
+        "description": "Test skill",
+        "body": "Read it.",
+        "raw_markdown": f"---\nname: {name}\ndescription: Test skill\n---\nRead it.",
+        "sha256": "a" * 64,
+    }
+    try:
+        contenders = await asyncio.gather(
+            insert_installed_skill(db, **values), insert_installed_skill(db, **values)
+        )
+        assert all(row.sha256 == "a" * 64 for row in contenders)
+        with pytest.raises(InstalledSkillConflictError, match="already exists"):
+            await insert_installed_skill(db, **{**values, "sha256": "b" * 64})
+        (row,) = [row for row in await list_installed_skills(db) if row.name == name]
+        assert row.raw_markdown == values["raw_markdown"]
+        assert row.created_at is not None
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(InstalledSkill).where(InstalledSkill.name == name))
