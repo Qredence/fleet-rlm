@@ -25,7 +25,7 @@ from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 from pydantic import SecretStr
 
-from fleet_rlm import api, db, interpreter
+from fleet_rlm import api, db, interpreter, skills
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
@@ -1290,6 +1290,9 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
         )
     )
     monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+    # A recall request needs no skill, so the selector stays offline.
+    selector = Mock(return_value=SimpleNamespace(needs_skill=SimpleNamespace(value=False)))
+    monkeypatch.setattr(skills, "build_skill_selector", Mock(return_value=selector))
 
     response = await offline.client.post(
         f"{offline.base}/chat",
