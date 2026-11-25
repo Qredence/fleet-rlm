@@ -1,0 +1,16 @@
+backend/eval_datasets/skills.jsonl
+  h_f276322eb5eb9f 102-105,112-114
+scripts/extract_eval_archetypes.py
+  h_f276322eb5eb9f 623-668,766-768,859-861
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af7a78ee0e6557996c426eafc3f220d796e7637f",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
