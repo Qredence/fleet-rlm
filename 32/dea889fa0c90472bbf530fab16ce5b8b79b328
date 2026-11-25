@@ -1,0 +1,14 @@
+.circleci/continue-config.yml
+  h_f276322eb5eb9f 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32dea889fa0c90472bbf530fab16ce5b8b79b328",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
