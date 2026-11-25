@@ -1,0 +1,16 @@
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 48-83,85-87,91,95-103
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 2363-2364,2368-2375,2413-2429,2440-2443,2453-2477
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b1bf6feaa4ca88b1708e7d463df8bda5026b1bbd",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
