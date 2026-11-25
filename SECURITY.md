@@ -7,9 +7,9 @@
 | 0.14.x  | Current maintenance line |
 | < 0.14  | Upgrade to the current line |
 
-The source version is defined in `backend/pyproject.toml`. This table identifies
-the maintenance line, not a claim that a particular checkout has passed a
-security audit. See [AGENTS.md](AGENTS.md) and the `check` targets in the
+`backend/pyproject.toml` defines the source version. This table identifies the
+maintenance line, not a claim that a particular checkout has passed a security
+audit. See [AGENTS.md](AGENTS.md) and the `check` targets in the
 [`Makefile`](Makefile) for the validation lanes.
 
 Fleet's API authenticates callers only when you set `FLEET_API_BEARER_TOKEN`.
@@ -19,8 +19,8 @@ do not set it, these routes accept all callers. The `/healthz` and `/readyz`
 probes never require a token. Set a token before you expose the API outside a
 trusted network.
 
-The backend does not limit the settings API to loopback callers. Browser access
-is controlled by the `FLEET_CORS_ORIGINS` allowlist, which defaults to
+The backend does not limit the settings API to loopback callers. The
+`FLEET_CORS_ORIGINS` allowlist controls browser access and defaults to
 `http://localhost:5173`. Add only the origins that serve your frontend.
 
 The Daytona, S3, LLM, and Tavily credentials stay on the Fleet host. The backend
