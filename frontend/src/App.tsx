@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router'
 import { AppSidebar } from '@/components/AppSidebar'
 import { Deferred, DeferredOverlay } from '@/components/Deferred'
@@ -47,11 +47,16 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
   const [skills, setSkills] = useState<Skill[] | null>(null)
   const [skillsError, setSkillsError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string }>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [filesDocked, setFilesDocked] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(() => !document.cookie.split('; ').includes('sidebar_state=false'))
   const skillsRequest = useRef<AbortController | null>(null)
   const recentStops = useRef(new Map<string, number>())
+  const currentRouteSessionId = useRef(routeSessionId)
+  useLayoutEffect(() => {
+    currentRouteSessionId.current = routeSessionId
+  }, [routeSessionId])
 
   const refreshSkills = useCallback(() => {
     skillsRequest.current?.abort()
@@ -96,15 +101,15 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
   async function deleteSession(id: string) {
     await sessions.remove(id)
     recentStops.current.delete(id)
-    if (routeSessionId === id) void navigate('/', { replace: true })
+    if (currentRouteSessionId.current === id) void navigate('/', { replace: true })
   }
 
   async function retryDeletion(id: string) {
-    setActionError('')
+    setDeleteError(undefined)
     try {
       await deleteSession(id)
     } catch (failure) {
-      setActionError(errorMessage(failure))
+      setDeleteError({ id, message: errorMessage(failure) })
     }
   }
 
@@ -177,7 +182,8 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
           )} />
           <Route path="/sessions/:id" element={session?.deleting ? (
             <ChatPlaceholder
-              title={session.title} error="Deletion is pending. Retry to finish clearing this workspace."
+              title={session.title}
+              error={deleteError?.id === session.id ? deleteError.message : 'Deletion is pending. Retry to finish clearing this workspace.'}
               actionLabel="Retry deletion" disabled={sessions.changing}
               onAction={() => void retryDeletion(session.id)}
             />
@@ -216,7 +222,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
           open={settingsOpen} onOpenChange={setSettingsOpen}
           api={api} token={token} onTokenChange={onTokenChange}
           theme={theme} systemTheme={systemTheme} onThemeChange={setTheme}
-          session={session} onUpdateSession={updateSessionSettings}
+          session={session?.deleting ? undefined : session} onUpdateSession={updateSessionSettings}
         />
       </DeferredOverlay>
     </SidebarProvider>

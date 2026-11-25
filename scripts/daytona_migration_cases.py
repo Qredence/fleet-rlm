@@ -114,6 +114,18 @@ def _verify_trace(turn: dict, spans: list, arm: str) -> None:
     def parents_include(span, ids):
         return any(parent.span_id in ids for parent in ancestors(span))
 
+    if arm == "v2" and turn.get("requires_batched_query"):
+        _require(
+            any(
+                span.name == "fleet.rlm.llm_query"
+                and span.attributes.get("fleet.tool") == "llm_query_batched"
+                and span.attributes.get("fleet.parent_run_id") == turn["run_id"]
+                and succeeded(span)
+                for span in spans
+            ),
+            "No successful batched query span",
+        )
+
     runs = [
         {
             "id": turn["run_id"],
@@ -441,8 +453,27 @@ async def run_daytona_migration(url: str, output: Path, repeats: int, arm: str) 
                     runs = await chat(
                         _RECONCILE, "18|approved|rejected", cells=2, depth=2
                     )
+                    root = row["turns"][-1]
+                    root["requires_batched_query"] = True
                     _require(
-                        any(run["kind"] == "llm_query" for run in runs),
+                        sum(
+                            run["kind"] == "subagent"
+                            and run["parent"] == root["run_id"]
+                            for run in runs
+                        )
+                        >= 2,
+                        "Fewer than two direct RLM children completed",
+                    )
+                    _require(
+                        any(run["kind"] == "llm_query" for run in runs)
+                        and any(
+                            part["type"] == "tool-python_exec"
+                            and part.get("state") == "output-available"
+                            and re.search(
+                                r"\bllm_query_batched\s*\(", part.get("input", "")
+                            )
+                            for part in root["parts"]
+                        ),
                         "No batched query",
                     )
                     files = (await call("GET", route + "/files")).json()
@@ -462,7 +493,7 @@ async def run_daytona_migration(url: str, output: Path, repeats: int, arm: str) 
                     _require(len(published) >= 2, "Missing child artifacts")
                     for total in ("7", "11"):
                         _require(
-                            any(total in item["text"] for item in published),
+                            any(total == item["text"].strip() for item in published),
                             f"Missing child total {total}",
                         )
                     row["artifacts"] = published

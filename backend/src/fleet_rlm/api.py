@@ -50,7 +50,7 @@ from .interpreter import (
     SandboxStartupError,
     WorkspaceBrowseLimit,
     allocate_session_sandbox,
-    delete_sandbox,
+    delete_pending_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
     get_running_sandbox,
@@ -711,10 +711,7 @@ async def delete_session(session_id: UUID, runtime: RuntimeDep) -> None:
         if sandbox_id:
             await delete_sandbox_by_id(runtime.daytona, sandbox_id)
         if pending_name:
-            pending = await allocate_session_sandbox(
-                runtime.daytona, runtime.settings, pending_name, recovering=True
-            )
-            await delete_sandbox(runtime.daytona, pending)
+            await delete_pending_sandbox(runtime.daytona, runtime.settings, pending_name)
         await _reclaim_discarded_objects(runtime, session_id)
         await runtime.storage.delete_session(session_id)
     except (DaytonaError, SandboxStartupError, StorageError) as error:
@@ -910,6 +907,8 @@ async def browse_workspace(session_id: UUID, runtime: RuntimeDep) -> list[Worksp
         workspace = await list_workspace_files(sandbox, timeout=timeout)
     except WorkspaceBrowseLimit as error:
         raise HTTPException(413, str(error)) from error
+    except (DaytonaError, RuntimeError, ValueError):
+        workspace = []
     for entry in workspace:
         if entry["path"] not in entries and _browsable_workspace_path(entry["path"]):
             entries[entry["path"]] = WorkspaceEntry.model_validate(entry)
@@ -1206,9 +1205,12 @@ async def _prepare_turn(
 
     sessionmaker = runtime.sessionmaker
     await store.get_session_or_raise(sessionmaker, session_id)
+    deadline = asyncio.get_running_loop().time() + runtime.settings.stale_run_timeout_seconds - 5
     try:
         try:
             run = await store.acquire_root_run(sessionmaker, session_id, prompt)
+        except store.UploadConflictError:
+            raise
         except store.TurnConflictError as error:
             reaped = await store.reap_stale_runs(
                 sessionmaker,
@@ -1219,14 +1221,17 @@ async def _prepare_turn(
                 raise HTTPException(409, "Session already has a running turn") from error
             try:
                 run = await store.acquire_root_run(sessionmaker, session_id, prompt)
+            except store.UploadConflictError:
+                raise
             except store.TurnConflictError as retry_error:
                 raise HTTPException(409, "Session already has a running turn") from retry_error
+    except store.UploadConflictError as error:
+        raise HTTPException(409, "Session already has an upload in progress") from error
     except IntegrityError:
         # Resolve a deletion that raced the existence check.
         await store.get_session_or_raise(sessionmaker, session_id)
         raise
 
-    deadline = asyncio.get_running_loop().time() + runtime.settings.stale_run_timeout_seconds - 5
     turn = Turn(run.id, session_id, prompt, pinned, registry, deadline)
     response.headers[_STREAM_HEADER] = "v1"
     # FastAPI's native SSE response supplies X-Accel-Buffering: no.

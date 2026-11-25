@@ -192,6 +192,10 @@ class TurnConflictError(RuntimeError):
     pass
 
 
+class UploadConflictError(TurnConflictError):
+    pass
+
+
 def upload_is_active(session: Session) -> bool:
     started = session.upload_started_at
     return started is not None and datetime.now(UTC) - started < _UPLOAD_LEASE
@@ -307,7 +311,7 @@ async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) ->
             if session is None or session.deleting:
                 raise SessionNotFoundError(session_id)
             if upload_is_active(session):
-                raise TurnConflictError(f"Session {session_id} already has an upload in progress")
+                raise UploadConflictError(f"Session {session_id} already has an upload in progress")
             if session.upload_key is not None:
                 session.upload_key = session.upload_started_at = None
             return (await connection.scalars(statement)).one()

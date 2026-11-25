@@ -6,6 +6,7 @@ import codecs
 import inspect
 import json
 import logging
+import os
 import re
 from collections.abc import (
     AsyncGenerator,
@@ -50,6 +51,8 @@ ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitab
 
 @asynccontextmanager
 async def make_daytona_client(settings: Settings) -> AsyncGenerator[AsyncDaytona]:
+    if "DAYTONA_API_URL" in os.environ or "DAYTONA_V2_API_URL" in os.environ:
+        raise ValueError("Unset DAYTONA_API_URL and DAYTONA_V2_API_URL for Daytona v2")
     async with AsyncDaytona(
         DaytonaConfig(
             api_key=settings.daytona_api_key.get_secret_value(),
@@ -212,6 +215,11 @@ async def delete_sandbox(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
 async def delete_sandbox_by_id(daytona: AsyncDaytona, sandbox_id: str) -> None:
     with suppress(NotFoundError):
         await daytona.v2.delete(sandbox_id, timeout=30)
+
+
+async def delete_pending_sandbox(daytona: AsyncDaytona, settings: Settings, name: str) -> None:
+    for sandbox in await daytona.v2.find_by_name(name, region=settings.daytona_region):
+        await delete_sandbox(daytona, sandbox)
 
 
 async def reset_managed_workspace(sandbox: AsyncSandbox, *, timeout: int) -> None:
@@ -691,6 +699,18 @@ class DaytonaCodeInterpreter:
 
     async def abort(self) -> None:
         """Fence replies and wait for the worker and its descendants to stop."""
+        cleanup = asyncio.create_task(self._abort())
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _abort(self) -> None:
         async with self._closing:
             self._closed = True
             operation = self._operation
@@ -861,15 +881,17 @@ class DaytonaCodeInterpreter:
             tasks.add(task)
             task.add_done_callback(on_task_done)
 
-        async def watch(target: asyncio.Task) -> None:
+        wall_timeout = max(self._timeout * 4, 600)
+
+        async def watch(target: asyncio.Task, deadline: float) -> None:
             nonlocal timed_out
             while not target.done():
                 changed.clear()
                 started = active_started_at
-                if started is None:
-                    await changed.wait()
-                    continue
-                remaining = self._timeout - active_elapsed - (loop.time() - started)
+                now = loop.time()
+                remaining = deadline - now
+                if started is not None:
+                    remaining = min(remaining, self._timeout - active_elapsed - (now - started))
                 if remaining <= 0:
                     timed_out = True
                     target.cancel()
@@ -885,16 +907,20 @@ class DaytonaCodeInterpreter:
             "variables": variables,
             "fields": [field["name"] for field in self.output_fields],
             "tools": list(tools),
-            "rpc_timeout": max(self._timeout * 4, 600),
+            "rpc_timeout": wall_timeout,
             "limit": self._limit,
             "frame_limit": _MAX_FRAME,
         }
         try:
             async with asyncio.TaskGroup() as group:
                 await self._send(handle, message)
-                active_started_at = loop.time()
+                started = active_started_at = loop.time()
                 task = group.create_task(self._read_cell(handle, output, done))
-                watchdog = group.create_task(watch(task)) if self._timeout else None
+                watchdog = (
+                    group.create_task(watch(task, started + wall_timeout))
+                    if self._timeout
+                    else None
+                )
                 try:
                     result = await task
                 except asyncio.CancelledError:

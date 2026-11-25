@@ -601,6 +601,38 @@ async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp
 
 
 @pytest.mark.asyncio
+async def test_cancelled_abort_waits_for_pending_worker_start(settings, tmp_path, monkeypatch):
+    sandbox = _LocalSandbox(tmp_path)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    start = sandbox.start
+
+    async def delayed_start(**kwargs):
+        entered.set()
+        await release.wait()
+        return await start(**kwargs)
+
+    monkeypatch.setattr(sandbox, "start", delayed_start)
+    worker = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())()
+    starting = asyncio.create_task(asyncio.to_thread(worker.start))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    aborting = asyncio.create_task(worker.abort())
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        aborting.cancel()
+        await asyncio.sleep(0)
+        assert not aborting.done()
+    finally:
+        release.set()
+        await starting
+        with pytest.raises(asyncio.CancelledError):
+            await aborting
+    assert len(sandbox.contexts) == 1 and sandbox.contexts == sandbox.deleted
+    assert sandbox.contexts[0].process.returncode is not None
+
+
+@pytest.mark.asyncio
 async def test_should_raise_recoverable_execution_error_and_reset_context_when_cell_times_out(
     settings, tmp_path, monkeypatch
 ):
@@ -631,9 +663,9 @@ async def test_should_raise_recoverable_execution_error_and_reset_context_when_c
         assert interpreter._closed is False
         assert interpreter._handle is None
 
-        assert await execute("print('cached' in globals())\nSUBMIT('recovered')") == FinalOutput(
-            {"answer": "recovered"}
-        )
+        assert await execute(
+            "assert 'cached' not in globals()\nSUBMIT('recovered')"
+        ) == FinalOutput({"answer": "recovered"})
         assert len(sandbox.contexts) == 2
         assert interpreter._handle is sandbox.contexts[1]
         assert interpreter._closed is False
@@ -1231,7 +1263,11 @@ async def test_preloaded_optimized_state_skips_disk_reads_and_clears_predictor_l
 )
 @pytest.mark.asyncio
 async def test_live_streamed_worker_failure_recovery(monkeypatch):
-    settings = Settings().model_copy(update={"daytona_exec_timeout_seconds": 3})
+    class LiveSettings(Settings):
+        database_url: str = "postgresql://localhost/unused"
+        database_direct_url: str = "postgresql://localhost/unused"
+
+    settings = LiveSettings().model_copy(update={"daytona_exec_timeout_seconds": 3})
     if not settings.mlflow_tracking_uri:
         pytest.skip("Configure the staging MLflow tracking URI")
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)

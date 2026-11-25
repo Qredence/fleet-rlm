@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -746,6 +747,7 @@ async def test_form_limits(offline):
     )
     assert response.status_code == 400
     offline.daytona.v2.get.assert_not_awaited()
+    offline.storage.put.assert_not_awaited()
 
 
 @pytest.mark.parametrize("name", ["../outside.csv", r"..\outside.csv", "/absolute.csv", "C:one"])
@@ -754,6 +756,7 @@ async def test_upload_rejects_unsafe_names(offline, name):
     response = await offline.client.post(f"{offline.base}/files", files={"file": (name, b"x")})
     assert response.status_code == 400
     offline.daytona.v2.get.assert_not_awaited()
+    offline.storage.put.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -828,6 +831,33 @@ async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monke
     with pytest.raises(StorageIntegrityError, match="hash"):
         await storage.put("object", source, register=register)
     assert changed.closed
+
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def slow_initiation(**_kwargs):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(timeout=5)
+        return {"UploadId": "cancelled-upload"}
+
+    sdk.create_multipart_upload.side_effect = slow_initiation
+    sdk.upload_part.reset_mock()
+    register_cancelled = AsyncMock()
+    upload = asyncio.create_task(storage.put("object", source, register=register_cancelled))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        upload.cancel()
+        await asyncio.sleep(0)
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await upload
+    register_cancelled.assert_not_awaited()
+    sdk.upload_part.assert_not_called()
+    sdk.abort_multipart_upload.assert_called_once_with(
+        Bucket=storage.bucket, Key="object", UploadId="cancelled-upload"
+    )
 
 
 @pytest.mark.parametrize(

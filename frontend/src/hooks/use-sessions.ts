@@ -96,7 +96,21 @@ export function useSessions(api: FleetApi, routeId: string | undefined) {
 
   async function remove(id: string) {
     try {
-      await mutate(() => api.deleteSession(id))
+      await mutate(async () => {
+        try {
+          await api.deleteSession(id)
+        } catch (failure) {
+          try {
+            const updated = await api.getSession(id)
+            listRequest.current?.abort()
+            setSessions((items) => items?.map((item) => item.id === id ? updated : item) ?? null)
+            setLookup((current) => current?.id === id ? { id, session: updated } : current)
+          } catch {
+            // The list refresh can still recover the server state.
+          }
+          throw failure
+        }
+      })
       setSessions((items) => items?.filter((item) => item.id !== id) ?? null)
       setLookup((current) => current?.id === id ? undefined : current)
       setRemembered((current) => current === id ? '' : current)

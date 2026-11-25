@@ -27,14 +27,22 @@ class StorageIntegrityError(StorageError):
     """The returned bytes differ from the committed file record."""
 
 
-async def _transfer[T](operation: Callable[[], T]) -> T:
+async def _transfer[T](
+    operation: Callable[[], T], *, on_cancel: Callable[[T], Awaitable[None]] | None = None
+) -> T:
     task = asyncio.create_task(asyncio.to_thread(operation))
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:
         # The SDK uses blocking I/O. Keep the caller's spool and write fence alive
         # until the request settles, even when the HTTP client has disconnected.
-        await asyncio.gather(task, return_exceptions=True)
+        settlement = asyncio.gather(task, return_exceptions=True)
+        while not settlement.done():
+            with suppress(asyncio.CancelledError):
+                await asyncio.shield(settlement)
+        result = settlement.result()[0]
+        if on_cancel is not None and not isinstance(result, BaseException):
+            await on_cancel(result)
         raise
     except ClientError as error:
         if error.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
@@ -93,7 +101,11 @@ class ObjectStorage:
             )
             return upload["UploadId"], digest, size
 
-        upload_id, digest, size = await _transfer(begin_upload)
+        async def abort_initialization(result: tuple[str, str, int]) -> None:
+            with suppress(StorageError):
+                await _transfer(lambda: self._abort_upload(key, result[0]))
+
+        upload_id, digest, size = await _transfer(begin_upload, on_cancel=abort_initialization)
         try:
             # A lease holder cannot write data until its abortable upload ID is durable.
             await register(upload_id)
