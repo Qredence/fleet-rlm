@@ -25,7 +25,7 @@ from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 from pydantic import SecretStr
 
-from fleet_rlm import api, db, interpreter
+from fleet_rlm import api, db, interpreter, sweep
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
@@ -354,6 +354,50 @@ class OfflineStore:
             )
         ]
 
+    async def discarded_batch(self, _sessionmaker, *, after, limit):
+        rows = [
+            item
+            for sid, session in self.sessions.items()
+            if not session.deleting
+            for item in await self.discarded_objects(None, sid)
+        ]
+        rows.sort(key=lambda item: item.object_key)
+        return [item for item in rows if after is None or item.object_key > after][:limit]
+
+    async def retired_sandboxes(self, _sessionmaker, *, after, limit):
+        rows = sorted(
+            (session.id, session.daytona_sandbox_id)
+            for session in self.sessions.values()
+            if session.sandbox_needs_cleanup
+            and session.daytona_sandbox_id
+            and not session.deleting
+            and session.id not in self.active_by_session
+            and (after is None or session.id > after)
+        )
+        return rows[:limit]
+
+    async def clear_sandbox(self, _sessionmaker, session_id, sandbox_id):
+        async with self():
+            session = self.sessions.get(session_id)
+            if (
+                session is None
+                or session.deleting
+                or not session.sandbox_needs_cleanup
+                or session.daytona_sandbox_id != sandbox_id
+                or session_id in self.active_by_session
+            ):
+                return False
+            session.daytona_sandbox_id = None
+            session.sandbox_needs_cleanup = False
+            return True
+
+    async def deleting_sessions(self, _sessionmaker, *, after, limit):
+        rows = sorted(
+            (item for item in self.sessions.values() if item.deleting),
+            key=lambda item: item.id,
+        )
+        return [item for item in rows if after is None or item.id > after][:limit]
+
     async def forget_objects(self, _sessionmaker, keys):
         for key in keys:
             self.cleanup.pop(key, None)
@@ -515,6 +559,10 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "register_object_write", store.register_object)
     monkeypatch.setattr(db, "list_discarded_objects", store.discarded_objects)
     monkeypatch.setattr(db, "forget_discarded_objects", store.forget_objects)
+    monkeypatch.setattr(db, "list_discarded_object_batch", store.discarded_batch)
+    monkeypatch.setattr(db, "list_retired_sandboxes", store.retired_sandboxes)
+    monkeypatch.setattr(db, "clear_retired_sandbox", store.clear_sandbox)
+    monkeypatch.setattr(db, "list_deleting_sessions", store.deleting_sessions)
     monkeypatch.setattr(db, "acquire_root_run", store.acquire_root)
     monkeypatch.setattr(db, "create_child_run", create_child)
     monkeypatch.setattr(db, "finish_run", finish)
@@ -2199,6 +2247,73 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
     deleted = await offline.client.delete(base)
     assert deleted.status_code == 204
     assert not any(key.startswith(offline.storage.prefix(sid)) for key in offline.storage.objects)
+
+
+@pytest.mark.asyncio
+async def test_sweep_reclaims_idle_sessions_and_repeats_as_a_no_op(offline):
+    store, storage = offline.store, offline.storage
+    offline.reap.reset_mock()
+    offline.reap.side_effect = [2, 0, 0]
+
+    def add_session(sandbox_id, **values):
+        session = db.Session(id=uuid4(), title="Sweep", daytona_sandbox_id=sandbox_id, **values)
+        store.sessions[session.id] = session
+        return session
+
+    def add_object(session, *, run_id=None):
+        key = storage.new_key(session.id)
+        storage.objects[key] = b"bytes"
+        store.cleanup[key] = db.ObjectCleanup(
+            session_id=session.id, object_key=key, upload_id="multipart", run_id=run_id
+        )
+        return key
+
+    idle = store.session
+    idle.sandbox_needs_cleanup = True
+    aborted = add_object(idle)
+    busy = add_session("busy-sandbox", sandbox_needs_cleanup=True)
+    store.active_by_session[busy.id] = uuid4()
+    staged = add_object(busy, run_id=store.active_by_session[busy.id])
+    busy.upload_key = add_object(busy)
+    flaky = add_session("flaky-sandbox", sandbox_needs_cleanup=True)
+    doomed = add_session("doomed-sandbox", deleting=True)
+    add_object(doomed)
+
+    deleted = []
+    unavailable = {"flaky-sandbox"}
+
+    async def delete(sandbox_id, **_options):
+        assert store.checkouts == 0
+        deleted.append(sandbox_id)
+        if sandbox_id in unavailable:
+            unavailable.discard(sandbox_id)
+            raise DaytonaError("Gateway down", status_code=503)
+
+    offline.daytona.v2.delete.side_effect = delete
+
+    async def run():
+        return await sweep.run_sweep(
+            offline.settings, store, offline.daytona, storage, batch_size=1
+        )
+
+    first = await run()
+    assert first == sweep.SweepReport(runs=2, sandboxes=1, objects=1, sessions=1, failures=1)
+    offline.reap.assert_awaited_with(store, offline.settings.stale_run_timeout_seconds)
+    assert idle.daytona_sandbox_id is None and not idle.sandbox_needs_cleanup
+    assert busy.daytona_sandbox_id == "busy-sandbox" and busy.sandbox_needs_cleanup
+    assert flaky.sandbox_needs_cleanup
+    assert aborted not in storage.objects and aborted not in store.cleanup
+    assert {staged, busy.upload_key} <= store.cleanup.keys() <= storage.objects.keys()
+    assert doomed.id not in store.sessions
+    assert not any(key.startswith(storage.prefix(doomed.id)) for key in storage.objects)
+
+    assert await run() == sweep.SweepReport(sandboxes=1)
+    assert flaky.daytona_sandbox_id is None
+    assert await run() == sweep.SweepReport()
+    assert "busy-sandbox" not in deleted
+    assert sorted(deleted) == sorted(
+        ["test-sandbox", "flaky-sandbox", "flaky-sandbox", "doomed-sandbox"]
+    )
 
 
 @pytest.mark.asyncio
