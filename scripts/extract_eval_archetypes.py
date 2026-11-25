@@ -620,6 +620,52 @@ def _validate_prior_turns(value: Any, *, label: str) -> None:
             )
 
 
+def _norm_clause(text: str) -> str:
+    return " ".join(text.casefold().split()).rstrip(".!?")
+
+
+def _check_disjoint_prior_turns(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    allowed_splits: set[str],
+    label: str,
+) -> None:
+    """Reject cross-split leakage of prior_turns text or prior_turns matching other-split tasks."""
+    prior_texts: dict[str, set[str]] = {split: set() for split in allowed_splits}
+    task_texts: dict[str, set[str]] = {split: set() for split in allowed_splits}
+
+    for row in rows:
+        split = row["split"]
+        task = row.get("task")
+        if isinstance(task, str) and task.strip():
+            task_texts[split].add(_norm_clause(task))
+        for turn in row.get("prior_turns") or ():
+            for role in ("user", "assistant"):
+                text = turn.get(role)
+                if isinstance(text, str) and text.strip():
+                    prior_texts[split].add(_norm_clause(text))
+
+    splits = sorted(allowed_splits)
+    for i, left in enumerate(splits):
+        for right in splits[i + 1 :]:
+            direct = prior_texts[left] & prior_texts[right]
+            if direct:
+                raise ValueError(
+                    f"{label}: prior_turns overlap between {left} and {right}: "
+                    f"{sorted(direct)[:3]}"
+                )
+            for src, dst in ((left, right), (right, left)):
+                for p_text in prior_texts[src]:
+                    if len(p_text) < 25:
+                        continue
+                    for t_text in task_texts[dst]:
+                        if p_text in t_text or (len(t_text) >= 25 and t_text in p_text):
+                            raise ValueError(
+                                f"{label}: prior_turns in {src} overlaps task in {dst}: "
+                                f"{p_text[:80]!r}"
+                            )
+
+
 def _scan_text_for_secrets(files: Iterable[Path]) -> list[str]:
     findings: list[str] = []
     for path in files:
@@ -717,6 +763,9 @@ def validate_datasets(
             raise ValueError(
                 f"skills.jsonl: split {split!r} missing classes {sorted(missing)}"
             )
+    _check_disjoint_prior_turns(
+        skill_rows, allowed_splits={"train", "holdout"}, label="skills.jsonl"
+    )
 
     # 2. Validate memory.jsonl
     memory_rows = _load_jsonl(memory_path)
@@ -805,6 +854,9 @@ def validate_datasets(
 
     rlm_rows = _load_jsonl(rlm_path)
     rlm_lineages = _check_disjoint_lineages(
+        rlm_rows, allowed_splits={"train", "val", "holdout"}, label="rlm.jsonl"
+    )
+    _check_disjoint_prior_turns(
         rlm_rows, allowed_splits={"train", "val", "holdout"}, label="rlm.jsonl"
     )
     seen_ids: set[str] = set()
