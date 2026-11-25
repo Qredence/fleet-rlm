@@ -1,0 +1,23 @@
+backend/src/fleet_rlm/api.py
+  s_745044d988d6e0::t_736f36a39ddc6e 807
+backend/src/fleet_rlm/interpreter.py
+  s_745044d988d6e0::t_86cfa58946e73a 702-703
+backend/tests/test_phase2_engine.py
+  s_745044d988d6e0::t_7414a1dd715501 13,1066-1074
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76ef405da02dd5e7e8dd0058dded75497ab16ba4",
+  "prompts": {},
+  "sessions": {
+    "s_745044d988d6e0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b10-3167-70f2-9ab9-3dde81a478a5",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
