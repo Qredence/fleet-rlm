@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     daytona_otel_enabled: bool = False
     daytona_exec_timeout_seconds: int = Field(default=120, ge=5, le=600)
 
+    tavily_api_key: SecretStr | None = Field(
+        default=None, validation_alias="TAVILY_API_KEY", repr=False
+    )
+
     s3_bucket: str = "fleet-workspaces"
     s3_endpoint_url: str | None = None
     s3_region: str = "eu-central-1"

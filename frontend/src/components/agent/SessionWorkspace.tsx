@@ -1,5 +1,6 @@
 import { PanelRight, Terminal } from 'lucide-react'
 import { lazy, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 import { Deferred } from '@/components/Deferred'
 import { PageHeader } from '@/components/PageHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -57,6 +58,8 @@ export function SessionWorkspace({
   const [transcriptError, setTranscriptError] = useState('')
   const [attempt, retry] = useState(0)
   const [prompt, setPrompt] = useState('')
+  const [skillDraft, setSkillDraft] = useState<string | null>(null)
+  const [receivedDraftKey, setReceivedDraftKey] = useState<string | null>(null)
   const [pinned, setPinned] = useState<string[]>([])
   const [modelSaving, setModelSaving] = useState(false)
   const [modelError, setModelError] = useState('')
@@ -68,6 +71,19 @@ export function SessionWorkspace({
   const wide = useMediaQuery('(min-width: 80rem)')
   const files = useWorkspaceFiles(api, session.id, onFilesUploaded)
   const { refresh } = files
+  const location = useLocation()
+  const navigate = useNavigate()
+  const incomingDraft: unknown = location.state?.skillDraft
+  if (visible && typeof incomingDraft === 'string' && receivedDraftKey !== location.key) {
+    setReceivedDraftKey(location.key)
+    setSkillDraft(incomingDraft)
+  }
+
+  useEffect(() => {
+    if (!visible || typeof incomingDraft !== 'string') return
+    const { pathname, search, hash } = location
+    void navigate({ pathname, search, hash }, { replace: true, state: null })
+  }, [incomingDraft, location, navigate, visible])
 
   useEffect(() => {
     const request = new AbortController()
@@ -102,7 +118,8 @@ export function SessionWorkspace({
   async function submit(text: string) {
     if (!text || active || modelSavePending.current || files.isUploading() || files.hasFailed) return
     await chat.send(text, pinned, () => {
-      setPrompt((current) => current.trim() === text ? '' : current)
+      if (skillDraft === null) setPrompt((current) => current.trim() === text ? '' : current)
+      else setSkillDraft((current) => current?.trim() === text ? null : current)
       files.clearCompleted()
     })
   }
@@ -246,6 +263,7 @@ export function SessionWorkspace({
                                     <MessageParts
                                       parts={message.parts} live={active && index === messages.length - 1}
                                       preview={openFromChat} download={files.download}
+                                      refine={() => api.refineTurn(session.id, message.id)}
                                     />
                                   </>
                                 )}
@@ -284,9 +302,15 @@ export function SessionWorkspace({
                   </span>
                 </p>
               )}
+              {skillDraft !== null && (
+                <Button className="self-end" variant="ghost" size="sm" onClick={() => setSkillDraft(null)}>
+                  Cancel skill draft
+                </Button>
+              )}
               <ChatComposer
-                skills={skills} pinned={pinned} setPinned={setPinned} value={prompt}
-                onValueChange={setPrompt} onSubmit={submit} onStop={chat.stop} loading={active}
+                skills={skills} pinned={pinned} setPinned={setPinned} value={skillDraft ?? prompt}
+                onValueChange={skillDraft === null ? setPrompt : setSkillDraft}
+                onSubmit={submit} onStop={chat.stop} loading={active}
                 submitDisabled={initialMessages === null || modelSaving || files.uploading || files.hasFailed}
                 attachments={attachments} onUpload={canUpload ? upload : undefined}
                 modelSelector={<ModelSelector

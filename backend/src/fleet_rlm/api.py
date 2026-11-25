@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Annotated, Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID
 
 import dspy
@@ -69,7 +69,7 @@ from .interpreter import (
     upload_workspace_file,
     workspace_span,
 )
-from .skills import MAX_SKILL_BYTES, SkillRegistry, select_skills
+from .skills import MAX_SKILL_BYTES, SkillRegistry, load_host_tools, select_skills
 from .storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
 
 _STREAM_HEADER = "x-vercel-ai-ui-message-stream"
@@ -88,6 +88,7 @@ class Runtime:
     decision_lm: dspy.BaseLM
     turn_semaphore: asyncio.Semaphore
     optimized_program_state: dict[str, Any] | None
+    mlflow_experiment_id: str | None = None
 
 
 def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> dict[str, Any] | None:
@@ -110,15 +111,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     engine, sessionmaker = store.create_db(settings)
     try:
         await store.reap_stale_runs(sessionmaker, settings.stale_run_timeout_seconds)
+        experiment_id = None
         if settings.mlflow_tracking_uri:
             mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
             experiment = mlflow.set_experiment(settings.mlflow_experiment)
+            experiment_id = experiment.experiment_id
             # Concurrent creation can return the experiment without activating it.
             mlflow.set_experiment(experiment_id=experiment.experiment_id)
             if settings.daytona_otel_enabled and not MLFLOW_USE_DEFAULT_TRACER_PROVIDER.get():
                 mlflow.tracing.set_destination(MlflowExperimentLocation(experiment.experiment_id))
             mlflow.dspy.autolog()
-        skills = SkillRegistry.load(settings.skills_dir)
+        skills = SkillRegistry.load(settings.skills_dir, fallback_to_bundled=True)
         lm = agent._model(settings, settings.llm_model)
         sub_lm = agent._model(settings, settings.sub_llm_model)
         decision_lm = dspy.LM(settings.decision_model)
@@ -137,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     decision_lm=decision_lm,
                     turn_semaphore=turn_semaphore,
                     optimized_program_state=optimized_program_state,
+                    mlflow_experiment_id=experiment_id,
                 )
                 yield
     finally:
@@ -361,6 +365,8 @@ class MemoryView(BaseModel):
 
     id: UUID
     session_id: UUID | None
+    source_run_id: UUID | None
+    skill_name: str | None
     content: str
     approved: bool
     created_at: datetime
@@ -374,6 +380,10 @@ class MemoryView(BaseModel):
 class MemoryEdit(BaseModel):
     content: str | None = Field(default=None, min_length=1)
     approved: bool | None = None
+
+
+class RefineTurnView(BaseModel):
+    memory: MemoryView | None
 
 
 class MessagePart(BaseModel):
@@ -594,7 +604,7 @@ async def _workspace_settings_view(
             memory_gate_path=str(base.memory_gate_path)
             if base.memory_gate_path is not None
             else None,
-            skills_count=len((await _skill_registry(runtime)).skills),
+            skills_count=len((await _skill_registry(runtime)).available_skills(base)),
         ),
     )
 
@@ -1050,12 +1060,15 @@ async def list_memories(
     session_id: UUID | None = None,
     approved: bool | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    memory_id: UUID | None = None,
 ) -> list[MemoryView]:
     query = select(store.Memory).order_by(store.Memory.id.desc())
     if session_id is not None:
         query = query.where(store.Memory.session_id == session_id)
     if approved is not None:
         query = query.where(store.Memory.approved.is_(approved))
+    if memory_id is not None:
+        query = query.where(store.Memory.id == memory_id)
     return [MemoryView.model_validate(memory) for memory in await db.scalars(query.limit(limit))]
 
 
@@ -1089,16 +1102,54 @@ async def delete_memory(memory_id: UUID, db: DbDep) -> None:
         await db.delete(memory)
 
 
+@app.post("/api/sessions/{session_id}/runs/{run_id}/refine", dependencies=[Depends(require_auth)])
+async def refine_turn(session_id: UUID, run_id: UUID, runtime: RuntimeDep) -> RefineTurnView:
+    source = await store.get_turn_for_refinement(runtime.sessionmaker, session_id, run_id)
+    if source is None:
+        raise HTTPException(404, "Turn not found")
+    run, existing = source
+    if run.status != "completed":
+        raise HTTPException(409, "Only completed turns can be refined")
+    if existing is not None:
+        return RefineTurnView(memory=MemoryView.model_validate(existing))
+    skills, observations = agent.refinement_evidence(run.ui_parts)
+    if not observations:
+        raise HTTPException(409, "This turn has no saved RLM telemetry")
+    effective = await _effective_settings(runtime)
+    try:
+        async with asyncio.timeout(30):
+            lesson = await agent.refine_turn(
+                run.prompt, skills, observations, lm=_request_sub_lm(runtime, effective)
+            )
+    except TimeoutError as error:
+        raise HTTPException(504, "Refinement timed out. Try again.") from error
+    except Exception as error:
+        _LOG.warning("Refinement failed for %s (%s)", run_id, type(error).__name__)
+        raise HTTPException(502, "Fleet could not refine this turn. Try again.") from error
+    if lesson is None:
+        return RefineTurnView(memory=None)
+    memory = await store.save_turn_lesson(
+        runtime.sessionmaker,
+        session_id,
+        run_id,
+        content=lesson.content,
+        skill_name=lesson.skill_name,
+    )
+    return RefineTurnView(memory=MemoryView.model_validate(memory))
+
+
 @app.get("/api/skills", dependencies=[Depends(require_auth)])
 async def list_skills(runtime: RuntimeDep) -> list[SkillView]:
     registry = await _skill_registry(runtime)
-    return [SkillView.model_validate(skill) for skill in registry.skills]
+    return [
+        SkillView.model_validate(skill) for skill in registry.available_skills(runtime.settings)
+    ]
 
 
 @app.get("/api/skills/{name}", dependencies=[Depends(require_auth)])
 async def get_skill(name: str, runtime: RuntimeDep) -> SkillDetail:
     registry = await _skill_registry(runtime)
-    for skill in registry.skills:
+    for skill in registry.available_skills(runtime.settings):
         if skill.name == name:
             return SkillDetail.model_validate(skill)
     raise HTTPException(404, "Skill not found")
@@ -1206,6 +1257,8 @@ async def _prepare_turn(
     pinned = list(
         dict.fromkeys([*(name.removeprefix("@") for name in payload.pinned_skills), *mentioned])
     )
+    if "web-research" in pinned and not runtime.settings.tavily_api_key:
+        raise HTTPException(422, "Configure TAVILY_API_KEY on the Fleet host to use web-research.")
     if set(pinned) - {skill.name for skill in registry.skills}:
         raise HTTPException(422, "Unknown pinned Skill")
 
@@ -1376,6 +1429,32 @@ async def _run_turn(
                 _LOG.info("Turn %s MLflow trace %s", turn.run_id, span.trace_id)
 
 
+def _trace_link(runtime: Runtime, trace: LiveSpan | None) -> str | None:
+    if (
+        trace is None
+        or not runtime.mlflow_experiment_id
+        or not runtime.settings.mlflow_tracking_uri
+    ):
+        return None
+    try:
+        uri = urlsplit(runtime.settings.mlflow_tracking_uri)
+        if uri.scheme not in {"http", "https"} or not uri.hostname or uri.username is not None:
+            return None
+    except ValueError:
+        return None
+    experiment = quote(runtime.mlflow_experiment_id, safe="")
+    trace_id = quote(trace.trace_id, safe="")
+    return urlunsplit(
+        (
+            uri.scheme,
+            uri.netloc,
+            uri.path.rstrip("/") + "/",
+            "",
+            f"/experiments/{experiment}/traces?traceId={trace_id}",
+        )
+    )
+
+
 async def _execute_turn(
     request: Request,
     runtime: Runtime,
@@ -1397,6 +1476,8 @@ async def _execute_turn(
     buffering_terminal = False
     failure_parts = None
     committed = False
+    timed_out = False
+    telemetry = agent.TurnTelemetry()
 
     async def send_frame(frame: dict) -> None:
         if buffering_terminal:
@@ -1414,6 +1495,18 @@ async def _execute_turn(
         return await runtime.storage.put(key, local, register=register)
 
     stream = ui_stream.UiStream(root_id, send_frame)
+
+    def details(outcome: str) -> dict:
+        completion = telemetry.completion if outcome == "completed" else outcome
+        return {
+            "runtime": "dspy.RLM" if telemetry.started_at is not None else None,
+            "root_actions": telemetry.root_actions,
+            "child_rlms": telemetry.child_rlms,
+            "sub_lm_queries": telemetry.sub_lm_queries,
+            "elapsed_ms": telemetry.elapsed_ms,
+            "completion": completion,
+            "trace_url": _trace_link(runtime, trace),
+        }
 
     async def start_child(child: agent.ChildRun) -> UUID:
         call_id = stream.reserve_call(child.parent_id)
@@ -1479,11 +1572,16 @@ async def _execute_turn(
                 turn.skills,
                 turn.prompt,
                 turn.pinned_skills,
+                prior_turns=prior_turns,
                 decision_lm=decision_lm,
             )
             records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
+            selected_skill_names = [skill.name for skill in selection.active_skills]
+            procedures = await store.recall_procedures(
+                sessionmaker, turn.session_id, turn.prompt, selected_skill_names
+            )
             task_memories = records
-            if any(skill.name == "skill-creator" for skill in selection.active_skills):
+            if "skill-creator" in selected_skill_names:
                 task_memories = await store.list_approved_session_memories(
                     sessionmaker, turn.session_id
                 )
@@ -1518,7 +1616,12 @@ async def _execute_turn(
                 task=turn.prompt,
                 files_manifest=manifest,
                 memories=[
-                    fact for record in task_memories if (fact := agent.memory_fact(record.content))
+                    *(f"Approved procedure\n{record.content}" for record in procedures),
+                    *(
+                        fact
+                        for record in task_memories
+                        if (fact := agent.memory_fact(record.content))
+                    ),
                 ],
                 interpreter_factory=make_interpreter_factory(
                     sandbox, effective, asyncio.get_running_loop(), turn_deadline=turn.deadline
@@ -1528,10 +1631,12 @@ async def _execute_turn(
                 history=dspy.History.model_validate(session.history_json),
                 prior_turns=prior_turns,
                 selection=selection,
+                host_tools=load_host_tools(runtime.skills, selection, effective),
                 model_override=session.model_override or _request_root_lm(runtime, effective),
                 sub_lm=_request_sub_lm(runtime, effective),
                 optimized_state=runtime.optimized_program_state,
                 callbacks=agent.ChildCallbacks(start_child, finish_child),
+                telemetry=telemetry,
             )
             with (
                 workspace_span("fleet.workspace.publish") as publication,
@@ -1577,6 +1682,7 @@ async def _execute_turn(
                 await stream.files(
                     root_id, sorted(updated_files.values(), key=lambda file: file["path"])
                 )
+            await send_frame(stream.turn_details(details("completed")))
             await stream.publish(root_id, agent.RunResultEvent(result.answer))
             status = "completed"
     except asyncio.CancelledError:
@@ -1603,6 +1709,10 @@ async def _execute_turn(
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
+        if status != "completed":
+            terminal_frames.clear()
+            terminal_frames.extend(stream.interrupt_web_calls())
+            terminal_frames.append(stream.turn_details(details("timeout" if timed_out else status)))
         with workspace_span("fleet.turn.finalize") as finalization:
             fence_committed = False
             try:
@@ -1628,6 +1738,13 @@ async def _execute_turn(
             except Exception as error:
                 _LOG.warning("Could not finalize turn %s (%s)", turn.run_id, type(error).__name__)
                 if not turn.finalized:
+                    failed_details = stream.turn_details(
+                        details("cancelled" if status == "cancelled" else "failed")
+                    )
+                    # Keep the failed transcript free of an answer that did not commit.
+                    if failure_parts is not None:
+                        failure_parts.append(failed_details)
+                    terminal_frames[:] = [failed_details]
                     fence_committed = await _finish_root(
                         sessionmaker,
                         turn,
@@ -1645,13 +1762,26 @@ async def _execute_turn(
             await _try_object_cleanup(runtime, turn.session_id)
         if trace is not None:
             outcome = "failed" if status == "completed" and not committed else status
-            trace.set_attribute("fleet.turn.status", outcome)
+            trace.set_attributes(
+                {
+                    "fleet.turn.status": outcome,
+                    "fleet.rlm.root_actions": telemetry.root_actions,
+                    "fleet.rlm.child_rlms": telemetry.child_rlms,
+                    "fleet.rlm.sub_lm_queries": telemetry.sub_lm_queries,
+                    "fleet.rlm.completion": details("timeout" if timed_out else outcome)[
+                        "completion"
+                    ],
+                }
+            )
             trace.set_status("OK" if outcome == "completed" else "ERROR")
 
     if status == "completed" and committed and result is not None:
         background.add_task(_consolidate, runtime, turn, result.answer, memories)
         return terminal_frames
-    return [ui_stream.error_frame(error_text or "Could not persist turn")]
+    error_frame = ui_stream.error_frame(error_text or "Could not persist turn")
+    if status != "completed" and fence_committed:
+        return [*terminal_frames, error_frame]
+    return [error_frame]
 
 
 @app.post(

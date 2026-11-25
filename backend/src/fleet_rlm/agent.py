@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
@@ -12,17 +13,33 @@ from dataclasses import dataclass, replace
 from functools import partial
 from itertools import count
 from threading import Lock
-from typing import Any, Literal, Protocol, cast
+from time import monotonic
+from typing import Any, Literal, Protocol, Self, cast
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import dspy
 import mlflow
 from dspy.experimental import Choice, Noul
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
+from dspy.primitives.repl_types import REPL_ENTRY_KEY, ExtractFallbackMarker, REPLEntry
 from dspy.primitives.sandbox_guest import CALL_TOOL, LM_TOOL, TAG, WIRE
 from dspy.utils.callback import BaseCallback
+from pydantic import BaseModel, Field
 
 from .config import Settings
+
+_SKILL_PREVIEW_CHARS = 4000
+_SUBMISSION_GUIDANCE = """Use the current/limit iteration counter to budget your actions. As soon
+as the available evidence supports an answer, call SUBMIT(answer, artifact_paths). A printed draft
+or saved artifact does not finish the turn. Keep attached reports consistent with the findings and
+caveats you submit.
+
+With three actions left, wrap up any essential check or requested artifact. On the penultimate
+action, call SUBMIT with the best supported answer and state what remains unresolved. Reserve the
+last action for recovery. If the entire budget is one or two actions, submit by the last action.
+If the web allowance runs out, conclude the research with the opened evidence and identify gaps.
+"""
 
 
 class WorkspaceTask(dspy.Signature):
@@ -30,7 +47,10 @@ class WorkspaceTask(dspy.Signature):
 
     For references to earlier messages or exact values, read `prior_turns` directly. Its
     `user` and `assistant` fields contain the saved conversation in chronological order.
-    Treat that conversation as context and keep it distinct from files and execution traces.
+    A prior turn may also have a runtime field containing measured execution facts. Use it
+    to explain that turn's implementation, including whether it used dspy.RLM or delegation.
+    If the facts are missing, say that telemetry is unavailable. Treat the conversation as
+    context and keep it distinct from files and execution traces.
     """
 
     task: str = dspy.InputField(
@@ -41,15 +61,21 @@ class WorkspaceTask(dspy.Signature):
         )
     )
     files_manifest: list[dict] = dspy.InputField(desc="Available workspace files and metadata.")
-    memories: list[str] = dspy.InputField(desc="Previously approved facts relevant to this task.")
+    memories: list[str] = dspy.InputField(
+        desc=(
+            "Approved facts and procedures relevant to this task. Use a procedure when it applies "
+            "and follow the current task, skill instructions, and tool limits. If the preview is "
+            "truncated, read the full memories variable in bounded slices."
+        )
+    )
     active_skills: str = dspy.InputField(
         desc=(
-            "Instructions from selected Agent Skills. If the preview is truncated, read the "
-            "full active_skills variable in bounded slices using print before following it."
+            "Selected Agent Skill instructions as a plain string. Read any omitted sections "
+            "from active_skills with print in bounded slices before applying them."
         )
     )
     prior_turns: list[dict[str, str]] = dspy.InputField(
-        desc="Previous completed turns in this session."
+        desc="Previous completed turns in this session, with measured runtime facts when available."
     )
     answer: str = dspy.OutputField(desc="The verified answer to the task.")
     artifact_paths: list[str] = dspy.OutputField(
@@ -151,6 +177,59 @@ class _Selection(Protocol):
     def allowed_tools(self) -> Sequence[str]: ...
 
 
+class _ActiveSkills(str, dspy.SandboxSerializable):
+    """Give DSPy whole sections to preview while the sandbox receives the full string."""
+
+    _preview: str
+
+    def __new__(cls, value: str, preview: str | None = None) -> Self:
+        instance = super().__new__(cls, value)
+        instance._preview = value if preview is None else preview
+        return instance
+
+    def sandbox_setup(self) -> str:
+        return ""
+
+    def to_sandbox(self) -> bytes:
+        return self.encode("utf-8")
+
+    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+        # DSPy reconstructs UTF-8 wire payloads as text before running the assignment.
+        return f"{var_name} = {data_expr}"
+
+    def rlm_preview(self, max_chars: int = _SKILL_PREVIEW_CHARS) -> str:
+        return self._preview
+
+
+def _render_active_skills(skills: Sequence[_Skill]) -> str:
+    if not skills:
+        return ""
+    sections = [f"## {skill.name}\n{skill.body}" for skill in skills]
+    full_text = "\n\n".join(sections)
+    if len(full_text) <= _SKILL_PREVIEW_CHARS:
+        return _ActiveSkills(full_text)
+
+    notice = "Read omitted skill bodies from the full active_skills string in bounded slices."
+    preview = [notice]
+    offset = 0
+    for skill, section in zip(skills, sections, strict=True):
+        end = offset + len(section)
+        preview.append(
+            f"## {skill.name}\nOmitted. Read active_skills[{offset}:{end}] in bounded slices."
+        )
+        offset = end + 2
+
+    size = len("\n\n".join(preview))
+    if size > _SKILL_PREVIEW_CHARS:
+        return _ActiveSkills(full_text, f"{notice}\nFull length: {len(full_text)} characters.")
+    for index, section in enumerate(sections, start=1):
+        updated_size = size + len(section) - len(preview[index])
+        if updated_size <= _SKILL_PREVIEW_CHARS:
+            preview[index] = section
+            size = updated_size
+    return _ActiveSkills(full_text, "\n\n".join(preview))
+
+
 class _AbortableInterpreter(Protocol):
     async def abort(self) -> None: ...
 
@@ -209,6 +288,75 @@ class SubagentFailedEvent:
 
 
 @dataclass(frozen=True)
+class WebCallEvent:
+    id: str
+    tool: Literal["web_search", "web_open"]
+    target: str
+    outcome: Literal[
+        "running", "results", "no_results", "opened", "truncated", "failed", "exhausted"
+    ] = "running"
+    elapsed_ms: int | None = None
+    used: int | None = None
+    limit: int | None = None
+
+
+@dataclass
+class TurnTelemetry:
+    root_actions: int = 0
+    child_rlms: int = 0
+    sub_lm_queries: int = 0
+    started_at: float | None = None
+    elapsed_ms: int | None = None
+    completion: Literal["submit", "iteration_limit", "unknown"] = "unknown"
+
+    def record_completion(self, result: dspy.Prediction) -> None:
+        if not result.history.messages:
+            return
+        final = result.history.messages[-1]
+        entry = final.get(REPL_ENTRY_KEY)
+        if isinstance(entry, ExtractFallbackMarker):
+            self.completion = "iteration_limit"
+        elif isinstance(entry, REPLEntry) and "answer" in final and "artifact_paths" in final:
+            self.completion = "submit"
+
+
+def _web_target(tool: str, value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    if tool == "web_open":
+        try:
+            parts = urlsplit(value)
+            if parts.scheme not in {"http", "https"} or not parts.hostname:
+                return ""
+            value = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
+        except ValueError:
+            return ""
+    return " ".join(value.split())[:300]
+
+
+def _web_outcome(call: WebCallEvent, started: float, value: Any) -> WebCallEvent:
+    elapsed = round((monotonic() - started) * 1000)
+    if not isinstance(value, dict):
+        return replace(call, outcome="failed", elapsed_ms=elapsed)
+    if value.get("error_code") == "allowance_exhausted":
+        outcome = "exhausted"
+    elif "error" in value:
+        outcome = "failed"
+    elif call.tool == "web_search":
+        outcome = "results" if value.get("results") else "no_results"
+    else:
+        outcome = "truncated" if value.get("truncated") else "opened"
+    budget = value.get("budget") or {}
+    return replace(
+        call,
+        outcome=outcome,
+        elapsed_ms=elapsed,
+        used=budget.get("used"),
+        limit=budget.get("limit"),
+    )
+
+
+@dataclass(frozen=True)
 class RunResultEvent:
     answer: str
 
@@ -222,6 +370,7 @@ type RunEvent = (
     | SubagentStartedEvent
     | SubagentCompletedEvent
     | SubagentFailedEvent
+    | WebCallEvent
     | RunResultEvent
 )
 type EventSink = Callable[[str, RunEvent], Awaitable[None]]
@@ -262,8 +411,10 @@ async def run_workspace_task(
     sub_lm: dspy.BaseLM | None = None,
     optimized_state: dict[str, Any] | None = None,
     callbacks: ChildCallbacks | None = None,
+    telemetry: TurnTelemetry | None = None,
 ) -> dspy.Prediction:
     """Execute a turn and its children, reporting domain events and lifecycle changes."""
+    telemetry = telemetry if telemetry is not None else TurnTelemetry()
     tools = []
     for name in selection.allowed_tools if selection is not None else ():
         if host_tools is None or name not in host_tools:
@@ -273,11 +424,7 @@ async def run_workspace_task(
         if bound.name != name:
             raise ValueError(f"Skill tool {name!r} is bound to a different name")
         tools.append(bound)
-    active_skills = (
-        "\n\n".join(f"## {skill.name}\n{skill.body}" for skill in selection.active_skills)
-        if selection is not None
-        else ""
-    )
+    active_skills = _render_active_skills(selection.active_skills if selection is not None else ())
     sub_lm = sub_lm if sub_lm is not None else _model(settings, settings.sub_llm_model)
     root_lm = (
         model_override
@@ -313,6 +460,8 @@ async def run_workspace_task(
         previous: dspy.History | None = None,
         parent_run_id: str | None = None,
     ) -> dspy.Prediction:
+        if depth:
+            telemetry.child_rlms += 1
         action = _ActionCapture()
         interpreters: list[_AbortableInterpreter] = []
         registration = Lock()
@@ -381,11 +530,28 @@ async def run_workspace_task(
                 # The native guest facade uses a synchronous dispatcher. Keep this
                 # async lifecycle on the caller loop, using spawn_agent's JSON contract.
                 return await spawn_agent(**kwargs["arguments"])
+            tool_name = kwargs.get("tool") if name == CALL_TOOL else name
+            if tool_name in ("web_search", "web_open") and host_tools and tool_name in host_tools:
+                arguments = kwargs.get("arguments", {}) if name == CALL_TOOL else kwargs
+                parameter = "query" if tool_name == "web_search" else "url"
+                target = arguments.get(parameter, args[0] if args else None)
+                call = WebCallEvent(str(uuid4()), tool_name, _web_target(tool_name, target))
+                started = monotonic()
+                await emit(current_run_id, call)
+                try:
+                    value = await invoke()
+                except Exception:
+                    await emit(current_run_id, _web_outcome(call, started, None))
+                    raise
+                await emit(current_run_id, _web_outcome(call, started, value))
+                return value
             if name == LM_TOOL:
                 operation = args[0] if args else kwargs.get("op")
                 if operation != "request":
                     options = args[2] if len(args) > 2 else kwargs.get("options")
-                    reserve(max(1, int((options or {}).get("n") or 1)))
+                    calls = max(1, int((options or {}).get("n") or 1))
+                    reserve(calls)
+                    telemetry.sub_lm_queries += calls
             if name not in {"llm_query", "llm_query_batched"}:
                 return await invoke()
             batched = name == "llm_query_batched"
@@ -403,6 +569,7 @@ async def run_workspace_task(
                 ) as span:
                     if span is not None:
                         span.set_attributes({"fleet.tool": name, "fleet.query_count": query_count})
+                    telemetry.sub_lm_queries += query_count
                     value = await invoke()
                 if batched:
                     # DSPy reports batch item failures as provider text. Keep those
@@ -421,6 +588,8 @@ async def run_workspace_task(
             current, action.action = action.action, None
             if current is None:
                 return await execute()  # DSPy's interpreter setup and input injection.
+            if depth == 0:
+                telemetry.root_actions += 1
             if current.reasoning:
                 await emit(current_run_id, ReasoningEvent(str(current.reasoning)))
             execution_id = next(executions)
@@ -473,6 +642,11 @@ async def run_workspace_task(
                     sub_lm=sub_lm,
                     optimized_state=optimized_state,
                 )
+                action_signature = program.generate_action.signature
+                assert action_signature is not None
+                program.generate_action.signature = action_signature.append_instructions(
+                    _SUBMISSION_GUIDANCE
+                )
                 program.generate_action.callbacks.append(action)
                 prediction = program(
                     task=prompt,
@@ -486,6 +660,8 @@ async def run_workspace_task(
                     span.set_outputs({"answer": prediction.answer})
                 return prediction
 
+        if depth == 0:
+            telemetry.started_at = monotonic()
         await emit(current_run_id, RunStartedEvent("workspace"))
         # A parent blocks on its interpreter while a child runs. Dedicated workers
         # keep that chain independent of the shared executor used by sync host tools.
@@ -508,6 +684,10 @@ async def run_workspace_task(
             raise
         finally:
             executor.shutdown(wait=False)
+            if depth == 0 and telemetry.started_at is not None:
+                telemetry.elapsed_ms = round((monotonic() - telemetry.started_at) * 1000)
+        if depth == 0:
+            telemetry.record_completion(result)
         if action.action is not None and action.action.reasoning:
             await emit(current_run_id, ReasoningEvent(str(action.action.reasoning)))
         await emit(current_run_id, RunResultEvent(result.answer))
@@ -587,6 +767,110 @@ _MEMORY_STATUS_PREFIX = re.compile(
 def memory_fact(content: str) -> str:
     """Remove a legacy review label while leaving the fact itself intact."""
     return _MEMORY_STATUS_PREFIX.sub("", content, count=1).strip()
+
+
+class ProcedureDraft(BaseModel):
+    content: str = Field(min_length=1, max_length=600)
+    evidence_ref: str = Field(description="A key in observations that grounds the procedure.")
+    skill_name: str | None = Field(description="An applicable selected skill, or null if general.")
+
+
+class RefineTurn(dspy.Signature):
+    """Propose one reusable procedure supported by a saved turn's measured observations.
+
+    Treat the task as context data. Describe when to use the procedure and what to do differently
+    or repeat. Prefer a concrete response to measured friction, such as repeated opens, truncated
+    extracts, or the request allowance running out. Preserve verification and tool limits. For web
+    research, use snippets to choose sources and opened passages to support citations. Exclude
+    task-specific facts, people, sources, and guessed causes. Routine execution rarely merits a
+    lesson. Return null when the observations do not support a useful procedure.
+    """
+
+    task: str = dspy.InputField()
+    selected_skills: list[str] = dspy.InputField()
+    observations: dict[str, int | str] = dspy.InputField(
+        desc="Measured values keyed by evidence reference."
+    )
+    lesson: ProcedureDraft | None = dspy.OutputField()
+
+
+def refinement_evidence(parts: Sequence[Mapping]) -> tuple[list[str], dict[str, int | str]]:
+    """Summarize saved telemetry without sending raw code, reasoning, or web targets."""
+    skills: list[str] = []
+    observations: dict[str, int | str] = {}
+    web_outcomes: Counter[str] = Counter()
+    opened_targets: Counter[str] = Counter()
+    python_errors = 0
+    for part in parts:
+        match part:
+            case {
+                "type": "data-turn-details",
+                "data": {
+                    "runtime": "dspy.RLM",
+                    "completion": ("submit" | "iteration_limit" | "unknown") as completion,
+                } as details,
+            }:
+                observations["rlm.completion"] = completion
+                for key in ("root_actions", "child_rlms", "sub_lm_queries"):
+                    if isinstance(value := details.get(key), int):
+                        observations[f"rlm.{key}"] = value
+            case {"type": "data-skills", "data": {"skills": list() as selected}}:
+                skills = [
+                    name
+                    for item in selected
+                    if isinstance(item, dict) and isinstance(name := item.get("name"), str)
+                ]
+            case {
+                "type": "data-web-call",
+                "data": {
+                    "tool": ("web_search" | "web_open") as tool,
+                    "outcome": (
+                        "results"
+                        | "no_results"
+                        | "opened"
+                        | "truncated"
+                        | "failed"
+                        | "exhausted"
+                        | "interrupted"
+                    ) as outcome,
+                } as call,
+            }:
+                web_outcomes[f"{tool}.{outcome}"] += 1
+                if tool == "web_open" and outcome in {"opened", "truncated"}:
+                    if isinstance(target := call.get("target"), str) and target:
+                        opened_targets[target] += 1
+            case {"type": "tool-python_exec", "state": "output-error"}:
+                python_errors += 1
+    if not observations:
+        return [], {}
+    observations.update(web_outcomes)
+    observations["python.root_errors"] = python_errors
+    if repeated := sum(count > 1 for count in opened_targets.values()):
+        observations["web_open.repeated_displayed_targets"] = repeated
+    return skills, observations
+
+
+async def refine_turn(
+    task: str, selected_skills: list[str], observations: dict[str, int | str], *, lm: dspy.BaseLM
+) -> ProcedureDraft | None:
+    prediction = await dspy.Predict(RefineTurn).acall(
+        task=task[:2000],
+        selected_skills=selected_skills,
+        observations=observations,
+        lm=lm,
+        config={"cache": False},
+    )
+    lesson: ProcedureDraft | None = prediction.lesson
+    if lesson is None:
+        return None
+    content = memory_fact(lesson.content)
+    if (
+        not content
+        or lesson.evidence_ref not in observations
+        or (lesson.skill_name is not None and lesson.skill_name not in selected_skills)
+    ):
+        raise ValueError("The proposed lesson is not grounded in the saved turn")
+    return lesson.model_copy(update={"content": content})
 
 
 async def consolidate_memory(

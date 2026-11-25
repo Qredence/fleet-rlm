@@ -1,6 +1,8 @@
 ---
 name: scientific-computing
-description: Use when a task requires a statistical test, regression, optimization, or numerical solving with verified results.
+description: Run statistical tests, regression, numerical optimization, or equation solving when the answer depends on inference or numerical accuracy.
 ---
 
-Use NumPy and SciPy. Check finite inputs, sample sizes, and the method's assumptions (e.g. independent groups for Welch). Verify key results with a reference calculation, residual, or invariant and scale-appropriate tolerances. Report the method, units, and relevant statistics or diagnostics; explain when invalid inputs limit inference.
+Use NumPy or SciPy for the chosen method. Check finite inputs, sample size, units and the assumptions that affect interpretation. For example, check independence before applying a two-sample Welch test.
+
+Verify the result with a residual, invariant or independent calculation using a tolerance appropriate to the scale. Report the method and relevant diagnostics, including uncertainty or convergence where applicable. Explain how invalid inputs limit the conclusion.

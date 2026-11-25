@@ -30,17 +30,21 @@ from fleet_rlm.db import (
     create_session,
     finish_run,
     get_session_or_raise,
+    get_session_prior_turns,
     get_session_ui_messages,
+    get_turn_for_refinement,
     get_workspace_settings_overrides,
     list_approved_session_memories,
     list_discarded_objects,
     list_session_files,
     reap_stale_runs,
     rebind_session_sandbox,
+    recall_procedures,
     register_object_write,
     reserve_session_sandbox,
     reset_workspace_settings_overrides,
     save_or_update_memory,
+    save_turn_lesson,
     search_memories,
     update_workspace_settings_overrides,
     upsert_file_record,
@@ -183,7 +187,20 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
             assert await finish_run(db, child.id, status="completed")
 
         history = {"messages": [{"prompt": root.prompt, "answer": "Done"}]}
-        parts = [{"type": "text", "text": "Done"}]
+        parts = [
+            {
+                "type": "data-turn-details",
+                "data": {
+                    "runtime": "dspy.RLM",
+                    "root_actions": 2,
+                    "child_rlms": 1,
+                    "sub_lm_queries": 3,
+                    "completion": "submit",
+                    "trace_url": "https://mlflow.test/",
+                },
+            },
+            {"type": "text", "text": "Done"},
+        ]
         assert await finish_run(
             db, root.id, status="completed", answer="Done", ui_parts=parts, history_json=history
         )
@@ -196,6 +213,12 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
             },
             {"id": str(root.id), "role": "assistant", "parts": parts},
         ]
+        (prior,) = await get_session_prior_turns(db, session.id, max_turns=1, max_chars=100)
+        assert prior["assistant"] == "Done"
+        assert prior["runtime"] == (
+            "dspy.RLM, 2 root actions, 1 child RLMs started, "
+            "3 sub-LM queries launched. Completion: submit."
+        )
         next_root = await acquire_root_run(db, session.id, "Next turn")
         assert next_root.id != root.id
         assert next_root.status == "running"
@@ -574,6 +597,69 @@ async def test_search_memories_and_save_or_update_memory(db: SessionFactory) -> 
             await connection.execute(
                 delete(Session).where(Session.id.in_([session_a.id, session_b.id]))
             )
+
+
+@pytest.mark.asyncio
+async def test_procedures_require_approval_and_stay_in_their_source_session(
+    db: SessionFactory,
+) -> None:
+    session = await create_session(db, title="Procedure recall")
+    try:
+        typed = await acquire_root_run(db, session.id, "Compare web citations")
+        assert await finish_run(db, typed.id, status="completed")
+        generic = await acquire_root_run(db, session.id, "Verify migration revisions")
+        assert await finish_run(db, generic.id, status="completed")
+        other_id = uuid4()
+        assert await get_turn_for_refinement(db, other_id, typed.id) is None
+
+        targeted, duplicate = await asyncio.gather(
+            *(
+                save_turn_lesson(
+                    db,
+                    session.id,
+                    typed.id,
+                    content="Narrow the source after a truncated extract.",
+                    skill_name="web-research",
+                )
+                for _ in range(2)
+            )
+        )
+        assert targeted.id == duplicate.id and targeted.approved is False
+        source = await get_turn_for_refinement(db, session.id, typed.id)
+        assert source is not None and source[1] is not None and source[1].id == targeted.id
+        general = await save_turn_lesson(
+            db,
+            session.id,
+            generic.id,
+            content="Verify migration revisions before deploying.",
+            skill_name=None,
+        )
+        query = "Verify migration revisions"
+        assert await recall_procedures(db, session.id, query, ["web-research"]) == []
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Memory).where(Memory.session_id == session.id).values(approved=True)
+            )
+        recalled = await recall_procedures(db, session.id, query, ["web-research"])
+        assert [memory.id for memory in recalled] == [targeted.id, general.id]
+        recalled = await recall_procedures(db, session.id, query, ["spreadsheet-audit"])
+        assert [memory.id for memory in recalled] == [general.id]
+        assert await recall_procedures(db, other_id, query, ["web-research"]) == []
+
+        facts = await search_memories(db, session.id, query, include_unapproved=True)
+        assert general.id not in {memory.id for memory in facts}
+        with pytest.raises(LookupError):
+            await save_or_update_memory(
+                db, session_id=session.id, content="Attempted fact update", memory_id=targeted.id
+            )
+        async with db.begin() as connection:
+            await connection.execute(
+                update(Memory).where(Memory.id == targeted.id).values(approved=False)
+            )
+        assert await recall_procedures(db, session.id, "Unrelated task", ["web-research"]) == []
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(Session).where(Session.id == session.id))
 
 
 @pytest.mark.asyncio

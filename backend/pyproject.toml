@@ -149,3 +149,12 @@ source_modules = [
 ]
 forbidden_modules = ["boto3", "botocore"]
 allow_indirect_imports = true
+
+[tool.hatch.build.targets.wheel]
+dev-mode-dirs = ["src"]
+only-include = ["src/fleet_rlm", "skills"]
+exclude = ["skills/.*", "**/__pycache__"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"skills" = "fleet_rlm/bundled_skills"

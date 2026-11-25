@@ -145,6 +145,8 @@ class OfflineStore:
             return rows[:limit] if limit is not None else rows
         if entity is db.Memory:
             rows = list(self.memories.values())
+            if "id_1" in params:
+                rows = [item for item in rows if item.id == params["id_1"]]
             if "session_id_1" in params:
                 rows = [item for item in rows if item.session_id == params["session_id_1"]]
             if "memories.approved IS true" in sql:
@@ -518,6 +520,7 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "get_session_ui_messages", ui_messages)
     monkeypatch.setattr(db, "get_session_prior_turns", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db, "recall_procedures", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "upsert_file_record", upsert_artifact)
     monkeypatch.setattr(db, "release_upload", store.release_upload)
     pull = AsyncMock(side_effect=pull_artifact)
@@ -1105,6 +1108,9 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
         content="Prefix summaries with COBALT-QA",
         approved=True,
     )
+    procedure = db.Memory(content="Verify column types before aggregating.")
+    procedure_lookup = AsyncMock(return_value=[procedure] if skill_name == "table" else [])
+    monkeypatch.setattr(db, "recall_procedures", procedure_lookup)
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[global_memory]))
     session_lookup = AsyncMock(return_value=[session_memory])
     monkeypatch.setattr(db, "list_approved_session_memories", session_lookup)
@@ -1130,12 +1136,108 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
         max_chars=offline.settings.history_max_chars,
     )
     assert turn.await_args.kwargs["prior_turns"] == prior
+    procedure_lookup.assert_awaited_once_with(
+        offline.store, offline.store.session_id, "Use a skill", [skill_name]
+    )
     if skill_name == "skill-creator":
         session_lookup.assert_awaited_once_with(offline.store, offline.store.session_id)
         assert turn.await_args.kwargs["memories"] == [session_memory.content]
     else:
         session_lookup.assert_not_awaited()
-        assert turn.await_args.kwargs["memories"] == ["Use USD for financial totals"]
+        assert turn.await_args.kwargs["memories"] == [
+            f"Approved procedure\n{procedure.content}",
+            "Use USD for financial totals",
+        ]
+
+
+@pytest.mark.asyncio
+async def test_refine_saved_turn_creates_one_reviewable_lesson(offline, monkeypatch):
+    run_id = uuid4()
+    session_id = offline.store.session_id
+    run = db.Run(id=run_id, status="failed", prompt="x" * 2001, ui_parts=[])
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(db, "get_turn_for_refinement", lookup)
+    content = "When an extract is truncated, search for a narrower source before opening it."
+    lesson = {"content": content, "evidence_ref": "web_open.truncated", "skill_name": "table"}
+    model = DummyLM(
+        [
+            {"lesson": None},
+            {"lesson": {**lesson, "evidence_ref": "nonexistent"}},
+            {"lesson": {**lesson, "skill_name": "unselected"}},
+            {"lesson": lesson},
+        ]
+    )
+    monkeypatch.setattr(api, "_request_sub_lm", lambda *_: model)
+    refine = api.agent.refine_turn
+
+    async def predict(*args, **kwargs):
+        assert offline.store.checkouts == 0
+        return await refine(*args, **kwargs)
+
+    monkeypatch.setattr(api.agent, "refine_turn", predict)
+
+    async def save(_db, sid, source_id, **fields):
+        assert (sid, source_id) == (session_id, run_id)
+        record = db.Memory(session_id=sid, source_run_id=source_id, approved=False, **fields)
+        offline.store.add(record)
+        lookup.return_value = run, record
+        return record
+
+    save_lesson = AsyncMock(side_effect=save)
+    monkeypatch.setattr(db, "save_turn_lesson", save_lesson)
+    path = f"{offline.base}/runs/{run_id}/refine"
+
+    assert (await offline.client.post(path, headers={"Authorization": ""})).status_code == 401
+    assert (await offline.client.post(path)).status_code == 404
+    lookup.assert_awaited_once_with(offline.store, session_id, run_id)
+    lookup.return_value = run, None
+    assert (await offline.client.post(path)).status_code == 409
+    run.status = "completed"
+    assert (await offline.client.post(path)).status_code == 409
+    assert model.history == []
+
+    opened = {"tool": "web_open", "outcome": "truncated", "target": "PRIVATE_TARGET"}
+    run.ui_parts = [
+        {"type": "data-skills", "data": {"skills": [{"name": "table", "score": 1}]}},
+        {"type": "data-web-call", "data": {"tool": "web_search", "outcome": "results"}},
+        {"type": "data-web-call", "data": {**opened, "id": "first"}},
+        {"type": "data-web-call", "data": {**opened, "id": "second"}},
+        {"type": "reasoning", "text": "PRIVATE_NOTES"},
+        {"type": "tool-python_exec", "state": "output-error", "input": "PRIVATE_CODE"},
+        {
+            "type": "data-turn-details",
+            "data": {
+                "runtime": "dspy.RLM",
+                "completion": "submit",
+                "root_actions": 5,
+            },
+        },
+    ]
+    assert (await offline.client.post(path)).json() == {"memory": None}
+    assert (await offline.client.post(path)).status_code == 502
+    assert (await offline.client.post(path)).status_code == 502
+    save_lesson.assert_not_awaited()
+    result = await offline.client.post(path)
+    assert result.status_code == 200
+    memory = result.json()["memory"]
+    assert memory["content"] == content
+    assert memory["approved"] is False
+    assert memory["skill_name"] == "table"
+    assert memory["source_run_id"] == str(run_id)
+    assert (await offline.client.post(path)).json() == result.json()
+    save_lesson.assert_awaited_once()
+
+    user_input = model.get_convo(-1)[0][-1]["content"]
+    assert '"web_open.truncated": 2' in user_input
+    assert '"web_open.repeated_displayed_targets": 1' in user_input
+    assert '"python.root_errors": 1' in user_input
+    assert '"rlm.completion": "submit"' in user_input
+    assert "x" * 2001 not in user_input and "x" * 2000 in user_input
+    assert "PRIVATE_" not in user_input
+    scoped = await offline.client.get(
+        "/api/memories", params={"session_id": str(session_id), "memory_id": memory["id"]}
+    )
+    assert scoped.json() == [memory]
 
 
 @pytest.mark.asyncio
@@ -1240,7 +1342,13 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
         json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
     )
     assert response.status_code == 200
-    assert json.loads(response.text.splitlines()[0].removeprefix("data: "))["type"] == "error"
+    frames = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
+    ]
+    assert [frame["type"] for frame in frames] == ["data-turn-details", "error"]
+    assert frames[0]["data"]["runtime"] is None
+    assert frames[0]["data"]["completion"] == "failed"
+    assert frames[0]["data"]["trace_url"] is None
     assert "Fleet could not start the workspace. Try again." in response.text
     assert "private provider diagnostics" not in response.text
     assert response.text.endswith("data: [DONE]\n\n")
@@ -1325,6 +1433,7 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         "tool-input-available",
         *["tool-output-available"] * 15,
         "data-file-tree",
+        "data-turn-details",
         "text-start",
         "text-delta",
         "text-end",
@@ -1338,15 +1447,15 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         "id": f"{root_id}:skills",
         "data": {"skills": [{"name": "table", "score": 1.0}]},
     }
-    assert frames[2]["id"] == frames[-5]["id"] == f"{root_id}:file-tree"
-    assert frames[-5]["data"]["files"][0]["path"] == "artifacts/report.txt"
+    assert frames[2]["id"] == frames[-6]["id"] == f"{root_id}:file-tree"
+    assert frames[-6]["data"]["files"][0]["path"] == "artifacts/report.txt"
     assert [frame["id"] for frame in frames[3:6]] == [f"{root_id}:1"] * 3
     assert frames[6]["toolCallId"] == frames[8]["toolCallId"] == f"{root_id}:2"
     assert frames[6]["inputEncoding"] == "text"
     assert frames[7]["inputTextDelta"] == "print(x)"
     assert frames[8]["errorText"] == "NameError: x"
     assert frames[9]["toolCallId"] == f"{root_id}:3"
-    progress = frames[10:-5]
+    progress = frames[10:-6]
     assert all(frame["preliminary"] is True for frame in progress[:-1])
     assert progress[0]["output"] == {"id": str(child_id), "role": "assistant", "parts": []}
 
@@ -1364,8 +1473,8 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         "parts": nested_finish.kwargs["ui_parts"],
     }
     assert child_parts[2]["preliminary"] is False
-    assert root_finish.kwargs["ui_parts"][-2]["output"] == progress[-1]["output"]
-    assert root_finish.kwargs["ui_parts"][1] == frames[-5]
+    assert root_finish.kwargs["ui_parts"][-3]["output"] == progress[-1]["output"]
+    assert root_finish.kwargs["ui_parts"][1] == frames[-6]
     assert [item["path"] for item in root_finish.kwargs["files"]] == ["artifacts/report.txt"]
     assert offline.store.files[(offline.store.session_id, "artifacts/report.txt")].size_bytes == 6
     assert offline.create_child.await_count == 2
@@ -1394,6 +1503,7 @@ async def test_incomplete_child_snapshot_survives_root_teardown(offline, monkeyp
         await emit(run_id, api.agent.SubagentStartedEvent(child))
         await emit(child.id, api.agent.RunStartedEvent("workspace"))
         await emit(child.id, api.agent.PythonExecStartedEvent(1, "print('working')"))
+        await emit(child.id, api.agent.WebCallEvent("request-1", "web_open", "https://example.org"))
         assert offline.store.statements == []
         offline.finish.assert_not_awaited()
         if status == "cancelled":
@@ -1406,7 +1516,10 @@ async def test_incomplete_child_snapshot_survives_root_teardown(offline, monkeyp
     assert ("data: [DONE]" in response.text) is (status == "failed")
     offline.finish.assert_awaited_once()
     assert offline.finish.await_args.kwargs["status"] == status
-    child_part = offline.finish.await_args.kwargs["ui_parts"][-1]
+    root_parts = offline.finish.await_args.kwargs["ui_parts"]
+    child_part, web_part, details = root_parts[-3:]
+    assert web_part["data"]["outcome"] == "interrupted"
+    assert details["data"]["completion"] == status
     assert child_part["preliminary"] is True
     parts = child_part["output"]["parts"]
     assert parts[-1]["state"] == "input-streaming"
@@ -1499,7 +1612,10 @@ async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
     )
     assert offline.finish.await_args.args == (offline.store, root_id)
     assert offline.finish.await_args.kwargs["status"] == "cancelled"
-    part = offline.finish.await_args.kwargs["ui_parts"][-1]
+    part, details = offline.finish.await_args.kwargs["ui_parts"][-2:]
+    assert details["data"]["runtime"] == "dspy.RLM"
+    assert details["data"]["root_actions"] == 1
+    assert details["data"]["completion"] == "cancelled"
     assert part["state"] == "input-streaming"
     assert part["input"] == "SUBMIT('Verified', [])"
     assert offline.store.active is None and offline.store.checkouts == 0
@@ -2320,6 +2436,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     monkeypatch.setattr(db, "list_session_files", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "get_session_prior_turns", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db, "recall_procedures", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
     monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[]))
     monkeypatch.setattr(api.agent, "consolidate_memory", AsyncMock())
@@ -2359,3 +2476,170 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
             assert resp.status_code == 200
             assert "Cached" in resp.text
         assert seen_states == [cached]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["search", "open", "failure", "cap", "installed", "ordinary"])
+async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenario):
+    from pydantic import SecretStr
+    from test_phase2_engine import _LocalSandbox
+
+    runtime = api.app.state.runtime
+    registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
+    registry.install(
+        tmp_path, b"---\nname: other\ndescription: Test\nallowed-tools: web_open\n---\nRead."
+    )
+    url = "https://example.org/report"
+    route = offline.base + "/chat"
+    payload = {
+        "messages": [{"role": "user", "parts": [{"type": "text", "text": "Read report"}]}],
+        "pinned_skills": ["web-research"],
+    }
+    api.app.state.runtime = replace(runtime, skills=registry)
+    response = await offline.client.post(route, json=payload)
+    assert response.status_code == 422 and "TAVILY_API_KEY" in response.text
+    if scenario == "open":
+        catalog = (await offline.client.get("/api/skills")).json()
+        assert "data-analysis" in {skill["name"] for skill in catalog}
+        assert "web-research" not in {skill["name"] for skill in catalog}
+
+    requests = []
+
+    def post(endpoint, *, headers, json, timeout):
+        assert headers["Authorization"] == "Bearer mock-host-key"
+        action = endpoint.rsplit("/", 1)[1]
+        requests.append(action)
+        request = httpx.Request("POST", endpoint)
+        if scenario == "failure":
+            if len(requests) == 1:
+                return httpx.Response(
+                    200, request=request, json={"results": [], "failed_results": [{"url": url}]}
+                )
+            if len(requests) == 2:
+                raise httpx.ReadTimeout("timeout", request=request)
+            return httpx.Response(429, request=request)
+        if action == "search":
+            assert json["include_answer"] is False and json["max_results"] == 5
+            result = {"results": [{"url": url, "title": "Report", "content": "summary"}]}
+        else:
+            assert json["urls"] == [url]
+            result = {
+                "results": [
+                    {"url": url, "raw_content": "Verified 27. [Source](/source)" + " " * 16000}
+                ]
+            }
+        return httpx.Response(200, json=result, request=request)
+
+    monkeypatch.setattr(httpx, "post", post)
+    open_call = f"web_open({url!r})"
+    code = {
+        "search": "hit = web_search('public figures')['results'][0]\npage = web_open(hit['url'])",
+        "open": "page = " + open_call,
+        "cap": "for _ in range(7): web_search('sample')\n"
+        "result = spawn_agent('read twice')\nassert result['answer'] == 'budget verified'",
+        "failure": f"assert 'error' in {open_call}\nassert 'error' in {open_call}\n"
+        f"assert '429' in {open_call}['error']",
+        "installed": "assert 'web_open' not in globals()",
+        "ordinary": "assert 'web_search' not in globals()",
+    }[scenario]
+    if scenario in {"search", "open"}:
+        code += "\nassert page['truncated'] and '[Source](/source)' in page['markdown']"
+        code += "\nSUBMIT(page['markdown'][:12] + ' [Report](' + page['url'] + ')', [])"
+    else:
+        code += "\nSUBMIT('Passed', [])"
+    steps = [{"plan": "Check the tool", "code": code}]
+    if scenario == "cap":
+        steps.append(
+            {
+                "plan": "Check shared allowance",
+                "code": f"assert 'markdown' in {open_call}\n"
+                f"assert 'eight-call' in {open_call}['error']\n"
+                "SUBMIT('budget verified', [])",
+            }
+        )
+    if scenario in {"ordinary", "installed"}:
+        payload["pinned_skills"] = ["data-analysis" if scenario == "ordinary" else "other"]
+    model = DummyLM(steps)
+    api.app.state.runtime = replace(
+        runtime,
+        skills=registry,
+        lm=model,
+        sub_lm=model,
+        settings=runtime.settings.model_copy(update={"tavily_api_key": SecretStr("mock-host-key")}),
+    )
+    if scenario == "open":
+        catalog = (await offline.client.get("/api/skills")).json()
+        assert "web-research" in {skill["name"] for skill in catalog}
+    monkeypatch.setattr(api, "_chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path)))
+    response = await offline.client.post(route, json=payload)
+    expected = {
+        "search": ["search", "extract"],
+        "open": ["extract"],
+        "cap": ["search"] * 7 + ["extract"],
+        "failure": ["extract"] * 3,
+        "installed": [],
+        "ordinary": [],
+    }
+    assert requests == expected[scenario], response.text[-3000:]
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
+    ]
+    web_events = [event for event in events if event["type"] == "data-web-call"]
+    outcomes = [
+        event["data"]["outcome"] for event in web_events if event["data"]["outcome"] != "running"
+    ]
+    assert (
+        outcomes
+        == {
+            "search": ["results", "truncated"],
+            "open": ["truncated"],
+            "failure": ["failed"] * 3,
+            "cap": ["results"] * 7 + ["truncated", "exhausted"],
+            "installed": [],
+            "ordinary": [],
+        }[scenario]
+    )
+    saved = offline.finish.await_args.kwargs["ui_parts"]
+    saved_web = [part for part in saved if part["type"] == "data-web-call"]
+    assert {part["id"]: part for part in saved_web} == {event["id"]: event for event in web_events}
+    if saved_web:
+        assert saved_web[-1]["data"]["limit"] == 8
+        assert saved_web[-1]["data"]["used"] == len(requests)
+        assert saved_web[-1]["data"]["target"] == url
+        assert saved_web[-1]["data"]["elapsed_ms"] >= 0
+    (details,) = [part for part in saved if part["type"] == "data-turn-details"]
+    assert details in events
+    assert details["data"]["runtime"] == "dspy.RLM"
+    assert details["data"]["completion"] == "submit"
+    assert details["data"]["root_actions"] == 1
+    assert details["data"]["child_rlms"] == int(scenario == "cap")
+    assert details["data"]["sub_lm_queries"] == 0
+    assert details["data"]["trace_url"] is None
+    if scenario == "cap":
+        # Re-enter the real chat route. The skill tools must receive a new allowance.
+        model = DummyLM([{"plan": "Read page", "code": f"{open_call}\nSUBMIT('Fresh', [])"}])
+        api.app.state.runtime = replace(api.app.state.runtime, lm=model)
+        fresh = await offline.client.post(route, json=payload)
+        assert "Fresh" in fresh.text and len(requests) == 9
+        (next_web,) = [
+            part["data"]
+            for part in offline.finish.await_args.kwargs["ui_parts"]
+            if part["type"] == "data-web-call"
+        ]
+        assert next_web["used"] == 1 and next_web["limit"] == 8
+    answer = "Verified 27. [Report]" if scenario in {"open", "search"} else "Passed"
+    assert answer in response.text and "mock-host-key" not in response.text
+
+
+def test_turn_details_link_targets_the_mlflow_trace(offline):
+    runtime = api.app.state.runtime
+    runtime = replace(
+        runtime,
+        mlflow_experiment_id="1",
+        settings=runtime.settings.model_copy(
+            update={"mlflow_tracking_uri": "http://localhost:5001/metrics?token=excluded"}
+        ),
+    )
+    assert api._trace_link(runtime, SimpleNamespace(trace_id="tr-test")) == (
+        "http://localhost:5001/metrics/#/experiments/1/traces?traceId=tr-test"
+    )

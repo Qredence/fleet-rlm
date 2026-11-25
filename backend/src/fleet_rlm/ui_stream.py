@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable, Iterator
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from . import agent
@@ -31,8 +31,18 @@ class UiPartAccumulator:
     def start(self) -> dict:
         return {"type": "start", "messageId": self.message_id}
 
-    def data(self, name: Literal["skills", "file-tree"], value: dict) -> dict:
-        part = {"type": f"data-{name}", "id": f"{self.message_id}:{name}", "data": deepcopy(value)}
+    def data(
+        self,
+        name: Literal["skills", "file-tree", "web-call", "turn-details"],
+        value: dict,
+        *,
+        key: str | None = None,
+    ) -> dict:
+        part = {
+            "type": f"data-{name}",
+            "id": f"{self.message_id}:{key or name}",
+            "data": deepcopy(value),
+        }
         for index, existing in enumerate(self._parts):
             if existing.get("id") == part["id"]:
                 self._parts[index] = part
@@ -128,6 +138,7 @@ class UiStream:
         self._root = UiPartAccumulator(root_id)
         self._children: dict[str, _ChildStream] = {}
         self._emit = emit
+        self._web_calls: dict[str, dict] = {}
 
     def _parts(self, run_id: str) -> UiPartAccumulator:
         if run_id == self._root.message_id:
@@ -165,6 +176,25 @@ class UiStream:
     async def files(self, run_id: str, files: list[dict]) -> None:
         await self._forward(run_id, self._parts(run_id).data("file-tree", {"files": files}))
 
+    async def web_call(self, event: agent.WebCallEvent) -> None:
+        row = asdict(event)
+        if event.outcome == "running":
+            self._web_calls[event.id] = row
+        else:
+            self._web_calls.pop(event.id, None)
+        await self._emit(self._root.data("web-call", row, key=event.id))
+
+    def interrupt_web_calls(self) -> list[dict]:
+        frames = [
+            self._root.data("web-call", {**call, "outcome": "interrupted"}, key=call_id)
+            for call_id, call in self._web_calls.items()
+        ]
+        self._web_calls.clear()
+        return frames
+
+    def turn_details(self, details: dict) -> dict:
+        return self._root.data("turn-details", details)
+
     def _frames(self, parts: UiPartAccumulator, event: agent.RunEvent) -> Iterator[dict]:
         match event:
             case agent.RunStartedEvent():
@@ -195,6 +225,9 @@ class UiStream:
                 yield from parts.finish(answer)
 
     async def publish(self, run_id: str, event: agent.RunEvent) -> None:
+        if isinstance(event, agent.WebCallEvent):
+            await self.web_call(event)
+            return
         # Apply and forward one frame at a time so each snapshot shows its exact state.
         for frame in self._frames(self._parts(run_id), event):
             await self._forward(run_id, frame)

@@ -1,6 +1,10 @@
 ---
 name: skill-creator
-description: Use when explicitly asked to create an installable Fleet skill or turn a workflow into a reusable SKILL.md for future sessions.
+description: Create an installable Fleet skill when asked to turn a repeatable workflow into a SKILL.md for future sessions.
 ---
 
-Use approved Session memories and generalize workflows; omit private details. Save UTF-8 `/workspace/artifacts/<name>/SKILL.md`: YAML matching kebab-case name (1–64), description with trigger (1–1024), then steps and a check. Try one known input. Reopen and parse YAML; verify fields and assert `0 < len(body.strip()) <= 450` for ALL Markdown after the closing YAML delimiter. Shorten and recheck before SUBMIT; return the path.
+Identify the request that should select the skill and what a future agent needs to do differently. When the workflow depends on approved session memories, generalize their relevant instructions and omit private details.
+
+Write UTF-8 to `/workspace/artifacts/<name>/SKILL.md`. Start with YAML between two lines containing only `---`. Use a 1–64 character name matching the directory, with lowercase ASCII letters or digits separated by single hyphens. Write a nonempty description of at most 1,024 characters covering the outcome and trigger. If documenting existing host tools use the canonical space-separated `allowed-tools` field. Tool availability depends on the host.
+
+Follow the frontmatter with self-contained Markdown instructions. Include the decisions, concrete operations and checks needed for this workflow. Fleet installs a single file up to 64 KiB. Reopen it, parse the YAML, check its body and byte size, and try the workflow on a representative input. Return the artifact path.

@@ -1,6 +1,8 @@
 ---
 name: document-extraction
-description: Use when extracting page-cited text, figures, or tables from PDFs, or synthesizing facts across long text documents.
+description: Extract passages, figures, or tables with page or section citations from PDFs and text documents.
 ---
 
-Inspect PDFs with `pypdf.PdfReader` and keep 1-based page numbers. Identify pages with no extractable text as needing OCR; leave their figures unverified. Verify each extracted figure against an exact quote on a text-bearing page. Reconcile reconstructed tables against the source. For text files, keep section or line references. Use bounded `llm_query_batched` for semantic chunks and handle failed items.
+For PDFs use pypdf.PdfReader and record one-based page numbers while extracting. A page with no extracted text may be blank, image-based, or contain graphics. Inspect the page if possible. Identify content that still requires OCR or visual verification.
+
+Anchor each reported value to its page and supporting text or visible table cell. Preserve row and column associations when reconstructing tables, and reconcile totals where available. For plain text, use section names or line references that the reader can locate.
