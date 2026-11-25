@@ -1,0 +1,18 @@
+.circleci/continue-config.yml
+  h_f276322eb5eb9f 59,67
+frontend/package.json
+  h_f276322eb5eb9f 38
+frontend/pnpm-lock.yaml
+  h_f276322eb5eb9f 28,79-80,89,98,101,855-856,2259-2260,3095,3100,3140,3142,3222,3225,3227,3234,4622,4687,4695,4699,4702,4713,4716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "86ce85036b95fd0adb702f39830b7faef639b40d",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
