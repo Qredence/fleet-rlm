@@ -1,0 +1,14 @@
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 720
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b67bcfc62bd32862a1f6abde02060b33c0063d96",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
