@@ -1,0 +1,32 @@
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 53,714,910-911,1208,1212-1213,1224-1225,1228-1229
+backend/src/fleet_rlm/db.py
+  h_f276322eb5eb9f 195-198,314
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 9,54-55,220-224,702-713,884-886,891-894,910,917,919-923
+backend/src/fleet_rlm/storage.py
+  h_f276322eb5eb9f 30-32,39-45,104-108
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 603-634,666-668,1266-1270
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 9,750,759,835-861
+docs/daytona-v2-migration-plan.md
+  h_f276322eb5eb9f 37,102
+frontend/src/App.tsx
+  h_f276322eb5eb9f 1,50,56-59,104,108,112,185-186,225
+frontend/src/hooks/use-sessions.ts
+  h_f276322eb5eb9f 99-113
+scripts/daytona_migration_cases.py
+  h_f276322eb5eb9f 117-128,456-457,459-476,496
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2c562b2c09dcf78a666dd418c1bcdbcf8675c2d3",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
