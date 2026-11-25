@@ -44,6 +44,8 @@ from fleet_rlm.agent import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import (
+    ArtifactLimitError,
+    ArtifactLimits,
     ClientTimeoutError,
     DaytonaConnectionError,
     DaytonaError,
@@ -599,7 +601,8 @@ async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp
     (root / "old").touch()
     (root / "new.csv").write_bytes(b"x\n1\n")
     (root / "linked").symlink_to(root / "new.csv")
-    assert await list_new_artifacts(sandbox, {str(root / "old")}) == [
+    limits = ArtifactLimits.from_settings(settings)
+    assert await list_new_artifacts(sandbox, {str(root / "old")}, limits) == [
         {
             "path": str(root / "new.csv"),
             "size_bytes": 4,
@@ -1056,9 +1059,10 @@ async def test_host_tool_code_execution_error_forwarded_and_other_errors_masked(
 
 @pytest.mark.asyncio
 async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_compat(
-    tmp_path, monkeypatch
+    settings, tmp_path, monkeypatch
 ):
     sandbox = _LocalSandbox(tmp_path)
+    limits = ArtifactLimits.from_settings(settings)
     root = tmp_path / "artifacts"
     root.mkdir()
     monkeypatch.setattr("fleet_rlm.interpreter.WORKSPACE", str(tmp_path))
@@ -1085,7 +1089,7 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
     known_mapping.update(
         {f"files/{index:04d}-{'x' * 246}.csv": ("a" * 64, 1) for index in range(410)}
     )
-    assert await list_new_artifacts(sandbox, known_mapping) == []
+    assert await list_new_artifacts(sandbox, known_mapping, limits) == []
 
     # Mutate two existing artifacts and create one brand-new artifact.
     overwritten.write_bytes(b"version-2-longer")
@@ -1093,7 +1097,7 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
     brand_new = root / "fresh.json"
     brand_new.write_bytes(b"{}")
 
-    changed = await list_new_artifacts(sandbox, known_mapping)
+    changed = await list_new_artifacts(sandbox, known_mapping, limits)
     assert changed == [
         {
             "path": str(brand_new),
@@ -1116,6 +1120,7 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
     legacy = await list_new_artifacts(
         sandbox,
         {"artifacts/unchanged.csv", "artifacts/overwritten.csv", str(same_size)},
+        limits,
     )
     assert legacy == [
         {
@@ -1124,6 +1129,27 @@ async def test_list_new_artifacts_detects_overwrites_and_preserves_collection_co
             "size_bytes": 2,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_new_artifacts_enforces_size_count_and_total_limits(tmp_path, monkeypatch):
+    sandbox = _LocalSandbox(tmp_path)
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    monkeypatch.setattr("fleet_rlm.interpreter.WORKSPACE", str(tmp_path))
+    monkeypatch.setattr("fleet_rlm.interpreter.ARTIFACTS", str(root))
+    for name in ("a", "b", "c"):
+        (root / name).write_bytes(b"1234")
+    known = {"artifacts/a": (hashlib.sha256(b"1234").hexdigest(), 4)}
+
+    assert len(await list_new_artifacts(sandbox, known, ArtifactLimits(2, 4, 8))) == 2
+    for limits, message in (
+        (ArtifactLimits(10, 3, 100), "at most 3 bytes"),
+        (ArtifactLimits(1, 100, 100), "at most 1 artifacts"),
+        (ArtifactLimits(10, 100, 7), "at most 7 artifact bytes"),
+    ):
+        with pytest.raises(ArtifactLimitError, match=message):
+            await list_new_artifacts(sandbox, known, limits)
 
 
 @pytest.mark.asyncio
