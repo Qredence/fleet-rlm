@@ -2369,7 +2369,7 @@ def _repeat_holdout_examples(
         for repeat in range(1, repeats + 1):
             copied = ex.copy()
             copied.case_id = case_id
-            copied._repeat = repeat
+            copied.eval_repeat = repeat
             repeated.append(copied.with_inputs(*input_keys))
     return repeated
 
@@ -2414,7 +2414,7 @@ class _HoldoutMetricCollector:
     def metric(self, gold: dspy.Example, pred: Any, trace: Any = None) -> ScoreWithFeedback:
         outcome = _evaluate_rlm_case(gold, pred, judge_lm=self._judge_lm)
         case_id = str(getattr(gold, "case_id", None) or getattr(gold, "task", ""))
-        repeat = int(getattr(gold, "_repeat", 1))
+        repeat = int(getattr(gold, "eval_repeat", 1))
         with self._lock:
             self.outcomes[(case_id, repeat)] = outcome
         return ScoreWithFeedback(score=outcome.score, feedback=outcome.feedback)
@@ -2432,7 +2432,7 @@ def _extract_holdout_rows(
         for index, item in enumerate(results, 1):
             example, prediction, raw_score = item
             case_id = str(getattr(example, "case_id", None) or f"row-{index}")
-            repeat = int(getattr(example, "_repeat", 1))
+            repeat = int(getattr(example, "eval_repeat", 1))
             outcome = collector_outcomes.get((case_id, repeat))
             if outcome is None:
                 if (

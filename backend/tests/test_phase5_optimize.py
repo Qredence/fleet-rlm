@@ -2489,3 +2489,100 @@ def test_saved_rlm_artifact_strips_tool_docs_and_round_trips_runtime(
     assert "web_open(" not in rebuilt_instr
     assert rebuilt_instr.count(agent._SUBMISSION_GUIDANCE.strip()) == 1
     assert all(predictor.lm is None for predictor in rebuilt.predictors())
+
+
+def test_optimize_rlm_holdout_repeats_preserve_per_repeat_outcomes(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm_repeats.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "Train 1", "answer": "A"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "Val 1", "answer": "B"},
+            {
+                "id": "ho-block",
+                "lineage": "l3",
+                "split": "holdout",
+                "task": "Blocking case",
+                "answer": "EXACT",
+                "blocking": True,
+                "verifier": {"type": "exact", "expected": "EXACT"},
+            },
+            {
+                "id": "ho-normal",
+                "lineage": "l4",
+                "split": "holdout",
+                "task": "Normal case",
+                "answer": "OK",
+                "verifier": {"type": "exact", "expected": "OK"},
+            },
+        ],
+    )
+
+    class FakeGEPA:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, student, *, trainset, valset):
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nMutated candidate."
+            )
+            return compiled
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            self.devset = list(kwargs["devset"])
+            self.metric = kwargs["metric"]
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            results = []
+            total = 0.0
+            for ex in self.devset:
+                repeat = int(getattr(ex, "eval_repeat", 0))
+                assert repeat in (1, 2)
+                if self.calls == 1:
+                    answer = "EXACT" if ex.case_id == "ho-block" else "WRONG"
+                elif ex.case_id == "ho-block":
+                    # Repeat 1 fails blocking check; repeat 2 passes. Must not overwrite repeat 1.
+                    answer = "WRONG" if repeat == 1 else "EXACT"
+                else:
+                    answer = "OK"
+                pred = dspy.Prediction(
+                    answer=answer,
+                    telemetry=optimize._RolloutTelemetry(completion="submit", root_actions=2),
+                )
+                score = self.metric(ex, pred)
+                total += float(score)
+                results.append((ex, pred, score))
+            return SimpleNamespace(
+                score=round(100.0 * total / len(self.devset), 2),
+                results=results,
+            )
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+
+    result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "rlm_repeats_out.json",
+        holdout_repeats=2,
+        local_interpreter=True,
+    )
+
+    assert result.saved is False
+    block_rows = [r for r in result.report["candidate_cases"] if r["case_id"] == "ho-block"]
+    assert [r["repeat"] for r in block_rows] == [1, 2]
+    assert [r["passed"] for r in block_rows] == [False, True]
+    assert result.report["metrics"]["blocking_failures"] == 1
+    assert result.report["metrics"]["paired_regressions"] == 1
+    assert [(r["case_id"], r["repeat"]) for r in result.report["blocking_failures"]] == [
+        ("ho-block", 1)
+    ]
