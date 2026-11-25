@@ -355,7 +355,12 @@ class OfflineStore:
         ]
 
     async def discarded_batch(self, _sessionmaker, *, after, limit):
-        rows = [item for sid in self.sessions for item in await self.discarded_objects(None, sid)]
+        rows = [
+            item
+            for sid, session in self.sessions.items()
+            if not session.deleting
+            for item in await self.discarded_objects(None, sid)
+        ]
         rows.sort(key=lambda item: item.object_key)
         return [item for item in rows if after is None or item.object_key > after][:limit]
 
@@ -554,6 +559,10 @@ async def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "register_object_write", store.register_object)
     monkeypatch.setattr(db, "list_discarded_objects", store.discarded_objects)
     monkeypatch.setattr(db, "forget_discarded_objects", store.forget_objects)
+    monkeypatch.setattr(db, "list_discarded_object_batch", store.discarded_batch)
+    monkeypatch.setattr(db, "list_retired_sandboxes", store.retired_sandboxes)
+    monkeypatch.setattr(db, "clear_retired_sandbox", store.clear_sandbox)
+    monkeypatch.setattr(db, "list_deleting_sessions", store.deleting_sessions)
     monkeypatch.setattr(db, "acquire_root_run", store.acquire_root)
     monkeypatch.setattr(db, "create_child_run", create_child)
     monkeypatch.setattr(db, "finish_run", finish)
@@ -2241,12 +2250,8 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
 
 
 @pytest.mark.asyncio
-async def test_sweep_reclaims_idle_sessions_and_repeats_as_a_no_op(offline, monkeypatch):
+async def test_sweep_reclaims_idle_sessions_and_repeats_as_a_no_op(offline):
     store, storage = offline.store, offline.storage
-    monkeypatch.setattr(db, "list_retired_sandboxes", store.retired_sandboxes)
-    monkeypatch.setattr(db, "clear_retired_sandbox", store.clear_sandbox)
-    monkeypatch.setattr(db, "list_discarded_object_batch", store.discarded_batch)
-    monkeypatch.setattr(db, "list_deleting_sessions", store.deleting_sessions)
     offline.reap.reset_mock()
     offline.reap.side_effect = [2, 0, 0]
 
@@ -2266,11 +2271,11 @@ async def test_sweep_reclaims_idle_sessions_and_repeats_as_a_no_op(offline, monk
     idle = store.session
     idle.sandbox_needs_cleanup = True
     aborted = add_object(idle)
-    busy = add_session("busy-sandbox", sandbox_needs_cleanup=True, deleting=False)
+    busy = add_session("busy-sandbox", sandbox_needs_cleanup=True)
     store.active_by_session[busy.id] = uuid4()
     staged = add_object(busy, run_id=store.active_by_session[busy.id])
     busy.upload_key = add_object(busy)
-    flaky = add_session("flaky-sandbox", sandbox_needs_cleanup=True, deleting=False)
+    flaky = add_session("flaky-sandbox", sandbox_needs_cleanup=True)
     doomed = add_session("doomed-sandbox", deleting=True)
     add_object(doomed)
 
@@ -2292,7 +2297,7 @@ async def test_sweep_reclaims_idle_sessions_and_repeats_as_a_no_op(offline, monk
         )
 
     first = await run()
-    assert first == sweep.SweepReport(runs=2, sandboxes=1, objects=2, sessions=1, failures=1)
+    assert first == sweep.SweepReport(runs=2, sandboxes=1, objects=1, sessions=1, failures=1)
     offline.reap.assert_awaited_with(store, offline.settings.stale_run_timeout_seconds)
     assert idle.daytona_sandbox_id is None and not idle.sandbox_needs_cleanup
     assert busy.daytona_sandbox_id == "busy-sandbox" and busy.sandbox_needs_cleanup

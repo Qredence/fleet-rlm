@@ -34,17 +34,31 @@ class SweepReport:
     failures: int = 0
 
 
-async def reclaim_discarded_objects(
-    sessionmaker: store.SessionFactory, storage: ObjectStorage, session_id: UUID
-) -> None:
-    reclaimed = []
+async def _reclaim(
+    sessionmaker: store.SessionFactory, storage: ObjectStorage, entries: list[store.ObjectCleanup]
+) -> tuple[int, int]:
+    """Return reclaimed and failed counts. Forget only the objects that storage deleted."""
+    reclaimed, failures = [], 0
     try:
-        for entry in await store.list_discarded_objects(sessionmaker, session_id):
-            await storage.reclaim(entry.object_key, entry.upload_id)
-            reclaimed.append(entry.object_key)
+        for entry in entries:
+            try:
+                await storage.reclaim(entry.object_key, entry.upload_id)
+            except StorageError:
+                failures += 1
+            else:
+                reclaimed.append(entry.object_key)
     finally:
         if reclaimed:
             await store.forget_discarded_objects(sessionmaker, reclaimed)
+    return len(reclaimed), failures
+
+
+async def reclaim_discarded_objects(
+    sessionmaker: store.SessionFactory, storage: ObjectStorage, session_id: UUID
+) -> None:
+    entries = await store.list_discarded_objects(sessionmaker, session_id)
+    if (await _reclaim(sessionmaker, storage, entries))[1]:
+        raise StorageError("Some workspace objects could not be reclaimed")
 
 
 async def purge_session(
@@ -89,20 +103,11 @@ async def _reclaim_objects(
 ) -> None:
     after = None
     while batch := await store.list_discarded_object_batch(sessionmaker, after=after, limit=limit):
-        reclaimed = []
-        try:
-            for entry in batch:
-                try:
-                    await storage.reclaim(entry.object_key, entry.upload_id)
-                except StorageError as error:
-                    _LOG.warning("Workspace object cleanup will retry (%s)", type(error).__name__)
-                    report.failures += 1
-                else:
-                    reclaimed.append(entry.object_key)
-        finally:
-            if reclaimed:
-                await store.forget_discarded_objects(sessionmaker, reclaimed)
-        report.objects += len(reclaimed)
+        reclaimed, failures = await _reclaim(sessionmaker, storage, batch)
+        if failures:
+            _LOG.warning("%d workspace objects will retry", failures)
+        report.objects += reclaimed
+        report.failures += failures
         after = batch[-1].object_key
 
 

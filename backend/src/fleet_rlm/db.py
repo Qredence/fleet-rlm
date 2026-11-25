@@ -804,8 +804,13 @@ async def list_discarded_objects(db: SessionFactory, session_id: UUID) -> list[O
 async def list_discarded_object_batch(
     db: SessionFactory, *, after: str | None, limit: int
 ) -> list[ObjectCleanup]:
-    """Page discarded objects across all sessions in key order."""
-    statement = _discarded_objects().order_by(ObjectCleanup.object_key).limit(limit)
+    """Page discarded objects in key order. Session deletion removes the rest by prefix."""
+    statement = (
+        _discarded_objects()
+        .where(Session.deleting.is_(False))
+        .order_by(ObjectCleanup.object_key)
+        .limit(limit)
+    )
     if after is not None:
         statement = statement.where(ObjectCleanup.object_key > after)
     async with db() as connection:

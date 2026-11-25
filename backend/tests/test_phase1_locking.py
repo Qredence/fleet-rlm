@@ -455,6 +455,7 @@ async def test_sweep_queries_skip_active_turns_and_upload_leases(db: SessionFact
             await connection.execute(
                 update(Session).where(Session.id == busy.id).values(deleting=True)
             )
+        assert upload not in await discarded(f"sessions/{busy.id}/")
         assert busy.id in {
             item.id for item in await list_deleting_sessions(db, after=None, limit=1_000)
         }
