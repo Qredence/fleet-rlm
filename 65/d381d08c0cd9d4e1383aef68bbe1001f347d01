@@ -1,0 +1,41 @@
+Makefile
+  s_b7d8cf56425355::t_3ac648a0fa7d23 1,11,30-38
+README.md
+  s_b7d8cf56425355::t_51a84281f57c20 27,42,50-72
+backend/.env.example
+  s_b7d8cf56425355::t_857c4f03f67a5b 14
+backend/snapshot/Dockerfile
+  s_b7d8cf56425355::t_7f145ccdeef4d2 1,3-6,8
+backend/snapshot/requirements.in
+  s_b7d8cf56425355::t_1e5c307ec8cf1e 1-9
+backend/snapshot/requirements.lock
+  s_b7d8cf56425355::t_1f8a9bd4f13842 1-1502
+backend/src/fleet_rlm/api.py
+  s_b7d8cf56425355::t_06c787dbf771d9 36-38,70,118-119,1361-1386,1457-1466,1468-1473,1524,1536-1539,1561-1562,1606-1616,1619-1625,1627-1649
+backend/src/fleet_rlm/interpreter.py
+  s_b7d8cf56425355::t_73cc02434e25a9 17,20-21,41,55-75,626,635,642,711-715,718-719,721-734,744-745,777-790,794,1012-1013,1018,1031,1041-1042,1044
+backend/tests/test_phase2_engine.py
+  s_b7d8cf56425355::t_f18bf44b3e8599 397,409,411,531-537,702-753,758-759,844-845,1324-1364
+backend/tests/test_phase3_api.py
+  s_b7d8cf56425355::t_65554909ae0cc4 21,1221-1232,1247-1264
+docs/daytona-v2-migration-plan.md
+  s_b7d8cf56425355::t_2af63334ae4099 14
+scripts/daytona_migration_cases.py
+  s_b7d8cf56425355::t_a2a49351d8b324 15,244-245,252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "65d381d08c0cd9d4e1383aef68bbe1001f347d01",
+  "prompts": {},
+  "sessions": {
+    "s_b7d8cf56425355": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21118-c931-70c0-b67a-bd17e5861275",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
