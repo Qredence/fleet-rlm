@@ -1345,15 +1345,14 @@ async def test_live_daytona_enforces_worker_deadline():
             info = await handle.get()
             assert info.state == "terminal" and info.reason == "timed_out"
             assert info.execution_timeout is not None and 0 < info.execution_timeout <= 8
+            check_code = (
+                "from pathlib import Path\n"
+                "import sys\n"
+                "p = Path('/proc') / sys.argv[1] / 'stat'\n"
+                "assert not p.exists() or p.read_text().rsplit(') ', 1)[1].startswith('Z ')"
+            )
             check = await vm.process.run(
-                argv=[
-                    "python",
-                    "-c",
-                    "from pathlib import Path; import sys; "
-                    "p = Path('/proc') / sys.argv[1] / 'stat'; "
-                    "assert not p.exists() or p.read_text().rsplit(') ', 1)[1].startswith('Z ')",
-                    str(pid),
-                ],
+                argv=["python", "-c", check_code, str(pid)],
                 timeout=5,
                 execution_timeout=5,
             )
