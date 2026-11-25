@@ -1031,11 +1031,9 @@ async def test_installed_skill_is_shared_across_workers(offline, tmp_path_factor
     assert preview.json()["body"] == "Use code RC-29."
     assert (await offline.client.post(endpoint, json=install)).status_code == 201
 
-    different = content.replace(b"RC-29", b"RC-30")
-    artifact.sha256 = hashlib.sha256(different).hexdigest()
-    offline.storage.objects[artifact.object_key] = different
+    changed = offline.storage.seed(offline.store, artifact_path, content.replace(b"29", b"30"))
     conflict = await offline.client.post(
-        endpoint, json={"path": artifact_path, "sha256": artifact.sha256}
+        endpoint, json={"path": artifact_path, "sha256": changed.sha256}
     )
     assert conflict.status_code == 409
     assert conflict.json()["detail"] == "Skill 'receipt-check' already exists"
@@ -2615,10 +2613,15 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
 
     runtime = api.app.state.runtime
     registry = SkillRegistry.load(Path(__file__).resolve().parents[1] / "skills")
-    other = "---\nname: other\ndescription: Test\nallowed-tools: web_open\n---\nRead."
-    registry.validate_install(other.encode())
-    offline.store.installed_skills["other"] = db.InstalledSkill(
-        name="other", raw_markdown=other, sha256=hashlib.sha256(other.encode()).hexdigest()
+    other = b"---\nname: other\ndescription: Test\nallowed-tools: web_open\n---\nRead."
+    skill = registry.validate_install(other)
+    await offline.store.insert_installed_skill(
+        None,
+        name=skill.name,
+        description=skill.description,
+        body=skill.body,
+        raw_markdown=other.decode(),
+        sha256=hashlib.sha256(other).hexdigest(),
     )
     url = "https://example.org/report"
     route = offline.base + "/chat"

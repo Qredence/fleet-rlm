@@ -1179,11 +1179,6 @@ async def install_skill(session_id: UUID, payload: SkillInstall, runtime: Runtim
         ) from error
     try:
         skill = runtime.skills.validate_install(content)
-    except FileExistsError as error:
-        raise HTTPException(409, str(error)) from error
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    try:
         await store.insert_installed_skill(
             runtime.sessionmaker,
             name=skill.name,
@@ -1192,8 +1187,10 @@ async def install_skill(session_id: UUID, payload: SkillInstall, runtime: Runtim
             raw_markdown=content.decode(),
             sha256=payload.sha256,
         )
-    except store.InstalledSkillConflictError as error:
+    except (FileExistsError, store.InstalledSkillConflictError) as error:
         raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
     return SkillView.model_validate(skill)
 
 
