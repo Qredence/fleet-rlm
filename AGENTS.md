@@ -1,30 +1,31 @@
-# Repository Guidelines
+# Working on Fleet-RLM
 
-## Make the change
+## Where should I start?
 
-- Check `git status --short` before editing. Preserve unrelated changes, including untracked files.
-- Start at the entry point affected by the request. Backend code lives in `backend/src/fleet_rlm/`. Trace HTTP requests from `api.py` and agent turns from `agent.py`. For UI changes, follow the affected page, component, or hook in `frontend/src/`.
-- Read the callers and nearest tests before changing a shared contract. Reuse existing code and match local conventions. Extend an existing test when it can cover the regression.
-- Use `uv` in `backend/` and `pnpm` in `frontend/`. For library-specific API or configuration questions, resolve the library in Context7 and query the relevant documentation.
+Check `git status --short` and preserve unrelated work, including untracked files. Follow one request from its entry point to its callers and nearest tests. Start chat, workspace and optimization HTTP requests in `api.py`, a DSPy turn in `agent.py`, optimization subprocesses in `opt_runner.py`, and the offline CLI in `optimize.py`. For browser behavior start in the affected page or hook under `frontend/src`. The [architecture guide](docs/architecture.md) maps ownership.
 
-## Preserve runtime contracts
+Use `uv` in `backend/` and `pnpm` in `frontend/`. For dependency-specific changes check the lock, resolve the library in Context7, and query the relevant API. Consult the tagged upstream source when the index omits the installed release.
 
-- **Database:** Keep session state and locks out of process. Use pooled `FLEET_DATABASE_URL` with `prepare_threshold=None` at runtime and direct `FLEET_DATABASE_DIRECT_URL` with `NullPool` for Alembic. Keep transactions short, including during streaming.
-- **Chat:** Keep FastAPI imports in `api.py`. Use `EventSourceResponse` and `ui_stream.py` to emit the AI SDK stream consumed by `useChat` and `DefaultChatTransport`. Release database connections before yielding events.
-- **Sandbox:** Keep Daytona SDK calls in `interpreter.py`. Keep model, database, and storage credentials on the host. Use `make dev-backend` to launch with the correct Daytona environment.
-- **DSPy:** Keep `Noul`, `Choice`, and `Score` outputs in standalone `dspy.Predict` gates. Reserve `history`, `repl_entry`, `variables_info`, and `iteration` for DSPy. Run offline optimization on an isolated Neon branch and pin `FLEET_DECISION_MODEL` when deploying ReAnchor artifacts.
+## Which contracts does the change touch?
 
-## Verify the change
+- FastAPI belongs in `api.py`. Chat uses native EventSourceResponse and the AI SDK frames from `ui_stream.py`. Optimization streams named job events. Release DB connections before yielding.
+- Postgres owns session state, root locks, and job admission. Use the pooled runtime URL with `prepare_threshold=None` and the direct migration URL with `NullPool`. Keep transactions short and allocate a separate async session for each concurrent task.
+- Keep Daytona SDK calls in `interpreter.py` and S3 SDK calls in `storage.py`. Keep model, database and storage credentials on the host. Start the backend with `make dev-backend`.
+- Keep Noul, Choice and Score outputs in standalone DSPy Predict gates. Reserve `history`, `repl_entry`, `variables_info` and `iteration` for DSPy. Use an isolated Neon branch for offline optimization and pin `FLEET_DECISION_MODEL` when deploying ReAnchor artifacts.
 
-Run the closest test while iterating. For example, use `uv run pytest tests/test_phase3_api.py` from `backend/` or `pnpm test src/lib/file-tree.test.ts` from `frontend/`.
+## How do I verify it?
 
-Choose the root check that covers the final diff:
+Extend the nearest existing test. Run it first, then use the root check for the diff.
 
-| Changed scope | Command |
+| Change | Check |
 | --- | --- |
-| Documentation only | `git diff --check` and verify referenced paths |
-| Backend only | `make check-backend` |
-| Frontend only | `make check-frontend` |
-| Both packages or a shared contract | `make check` |
+| Documentation | Check relative links and run `git diff --check` |
+| Backend | `make check-backend` |
+| Frontend | `make check-frontend` |
+| Both or shared contracts | `make check` |
 
-Report the commands run, their results, and any behavior that still needs verification.
+Use CircleCI for CI changes. Pull requests and main run both package jobs. Keep local checks reproducible and record commands, results and outstanding live acceptance separately.
+
+## Where does lasting knowledge belong?
+
+Keep runtime ownership in the architecture guide, setup in the README, terminology in the glossary, operator procedures in runbooks and dated measurements in the evaluation baseline. Retire completed plans in Git history after transferring outstanding checks.
