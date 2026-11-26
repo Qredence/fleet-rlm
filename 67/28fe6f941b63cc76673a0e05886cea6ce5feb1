@@ -1,0 +1,57 @@
+README.md
+  s_0013f30890577c::t_9b2ab63a56491a 54
+backend/.env.example
+  s_0013f30890577c::t_0520527d68ec16 65-66
+frontend/src/components/agent/SettingsDialogBody.tsx
+  s_a4d215107ddff0::t_f3ee01b7b8181b 40,146,256,284,537-539,541-542,548,550-574
+frontend/src/components/optimization/LaunchOptimizationDialog.tsx
+  s_0b63530c2fefc9::t_92dd6333230e98 333-334,336,339
+frontend/src/components/optimization/ProvidersSection.tsx
+  s_0b63530c2fefc9::t_9b4319885dca18 259-261,346,526-527,549,567-568,725-726,735,737,786,873,980,1019,1021,1023,1025,1028,1035
+frontend/src/components/ui/slider.tsx
+  s_64863219f72b60::t_b4419dd034fc4c 132-137,231,433,647-656,661-662,669-681,688,696,703,756-757,800-801,850,853,867-870,881-883,1292,1329,1332-1339,1396,1416,1423,1435-1436,1438,1485-1486,1491-1492,1495-1496,1500,1505-1507,1516,1523,1525,1545,1613,1615-1617,1628,1659,1666,1670-1671
+frontend/src/pages/OptimizationPage.test.tsx
+  s_64863219f72b60::t_673d2b37161ebb 17,804-840
+scripts/catalog_skill_cases.py
+  s_64863219f72b60::t_f927f804b0380d 8,392-404,542-543,564-579
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6728fe6f941b63cc76673a0e05886cea6ce5feb1",
+  "prompts": {},
+  "sessions": {
+    "s_0013f30890577c": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "75a972be-7224-456d-8d8c-e7199d22a901",
+        "model": "custom:droidproxy:gemini-3.8-flash-high"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_0b63530c2fefc9": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "8cb0b26c-7381-42b0-86d8-ce8895bb1550",
+        "model": "custom:droidproxy:gemini-3.8-flash-high"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_64863219f72b60": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21981-7241-72e1-b2d1-d40eed792fb8",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_a4d215107ddff0": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "22e3f92d-4539-4067-bb1b-07551959bb1e",
+        "model": "custom:chatgpt/gpt-6.2-sol"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
