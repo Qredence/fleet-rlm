@@ -1634,6 +1634,7 @@ async def test_live_two_turn_csv(tmp_path):
             ["chart-visualization", "data-analysis"],
         ),
         ("Plot the CSV as an SVG chart.", None, ["chart-visualization"]),
+        ("Plot the already-aggregated CSV as a chart.", None, ["chart-visualization"]),
         (
             "Analyze this sales data and create charts.",
             None,
@@ -1671,6 +1672,20 @@ def test_compound_analysis_and_chart_selection(settings, monkeypatch, prompt, pi
     monkeypatch.setattr(dspy.Predict, "forward", decide)
     selection = select_skills(settings, registry, prompt, pins)
     assert [skill.name for skill in selection.active_skills] == expected
+
+
+@pytest.mark.parametrize(
+    ("task", "expected"),
+    [
+        (
+            "Extract citations from chunks of minutes.pdf and synthesize findings.",
+            "document-extraction",
+        ),
+        ("Synthesize independent reports and preserve citations.", None),
+    ],
+)
+def test_recursive_document_companion(task, expected):
+    assert skills._companion_skill("recursive-synthesis", task) == expected
 
 
 @pytest.mark.asyncio
@@ -2251,8 +2266,15 @@ def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(set
 
     def decide(self, *, task, lm):
         choices = self.signature.output_fields["primary_skill"].annotation.criteria()
-        assert "web-research" not in choices
+        assert "chart-visualization" in choices
         assert "plot" in task or "summarize" in task
+        if "web-research" in choices and "summarize" in task:
+            return SimpleNamespace(
+                needs_skill=SimpleNamespace(value=True),
+                primary_skill=SimpleNamespace(
+                    value="web-research", probabilities={"web-research": 1.0}
+                ),
+            )
         return SimpleNamespace(
             needs_skill=SimpleNamespace(value="plot" in task),
             primary_skill=SimpleNamespace(
@@ -2266,7 +2288,9 @@ def test_direct_public_url_requires_web_and_routes_the_requested_deliverable(set
         settings.model_copy(update={"tavily_api_key": None}), registry, prompt
     ).active_skills
     settings = settings.model_copy(update={"tavily_api_key": SecretStr("mock")})
-    assert select_skills(settings, registry, prompt).allowed_tools == ("web_search", "web_open")
+    summary = select_skills(settings, registry, prompt)
+    assert [skill.name for skill in summary.active_skills] == ["web-research"]
+    assert summary.allowed_tools == ("web_search", "web_open")
     plain = select_skills(settings, registry, "Open https://example.org/report")
     assert [skill.name for skill in plain.active_skills] == ["web-research"]
     compound = select_skills(settings, registry, "Read https://example.org/report and plot revenue")
