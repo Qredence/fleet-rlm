@@ -619,6 +619,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "boto3" },
+    { name = "cryptography" },
     { name = "daytona", extra = ["otel"] },
     { name = "dspy" },
     { name = "fastapi", extra = ["standard"] },
@@ -643,6 +644,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
     { name = "boto3", specifier = ">=1.43.0,<2" },
+    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "daytona", extras = ["otel"], specifier = "==2.1.0" },
     { name = "dspy", specifier = "==3.5.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.165.0" },

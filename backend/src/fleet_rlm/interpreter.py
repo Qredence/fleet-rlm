@@ -18,10 +18,12 @@ from collections.abc import (
     Generator,
     Mapping,
 )
-from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager, contextmanager, suppress
 from contextvars import Context, copy_context
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
+from time import monotonic
 from typing import Any, cast
 from uuid import uuid4
 
@@ -29,15 +31,27 @@ import mlflow
 from daytona import AsyncDaytona, DaytonaConfig
 from daytona.v2 import AsyncSandbox
 from daytona.v2.errors import (
+    AtomicUploadUnsupportedError,
+    BadRequestError,
+    BucketCreateFailedError,
     ClientTimeoutError,
     DaytonaError,
+    FeatureNotEnabledError,
+    ForbiddenError,
+    NameConflictError,
     NotFoundError,
+    NotSupportedError,
+    ReadOnlyUnsupportedError,
     SandboxCreateConnectionError,
     SandboxCreateRequestTimeoutError,
+    SandboxNotRunningError,
+    UnsupportedOperationError,
+    UnsupportedVolumeTypeError,
 )
 from daytona.v2.errors import ConnectionError as DaytonaConnectionError
+from daytona.v2.errors import FileNotFoundError as DaytonaFileNotFoundError
 from daytona.v2.process import AsyncProcessHandle
-from daytona.v2.types import StreamLogEvent
+from daytona.v2.types import StreamLogEvent, VolumeMount
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import INTERPRETER_TOOL
 from mlflow.entities import LiveSpan
@@ -1224,3 +1238,432 @@ if os.path.isdir(root) and not os.path.islink(root):
                     })
 print(json.dumps(sorted(files, key=lambda item: item["path"])))
 """
+
+
+# ---------------------------------------------------------------------------
+# Daytona Volume dataset storage helpers (Daytona SDK v2 isolated here)
+# ---------------------------------------------------------------------------
+
+DATASET_VOLUME_MOUNT = "/mnt/datasets"
+_DATASET_MAX_BYTES = 12 * 1024 * 1024
+_DISK_HELPER_IDLE_SECONDS = 120.0
+_BUCKET_FALLBACK_ERRORS = (
+    UnsupportedVolumeTypeError,
+    FeatureNotEnabledError,
+    ForbiddenError,
+    NotSupportedError,
+    UnsupportedOperationError,
+    BucketCreateFailedError,
+    BadRequestError,
+)
+
+
+class DatasetVolumeError(RuntimeError):
+    """A Daytona dataset volume operation failed."""
+
+
+class DatasetVolumeObjectMissing(DatasetVolumeError):
+    """The requested dataset file was not found in the Daytona volume."""
+
+
+@dataclass
+class _DiskVolumeHelper:
+    volume_id: str
+    sandbox: AsyncSandbox
+    client: AsyncDaytona
+    exit_stack: AsyncExitStack | None
+    idle_seconds: float
+    last_used: float
+    idle_task: asyncio.Task[None] | None = None
+
+
+_DATASET_VOLUME_CACHE: dict[str, tuple[str, str]] = {}
+_DISK_HELPERS: dict[str, _DiskVolumeHelper] = {}
+_VOLUME_LOOP_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _volume_lock() -> asyncio.Lock:
+    loop_id = id(asyncio.get_running_loop())
+    lock = _VOLUME_LOOP_LOCKS.get(loop_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _VOLUME_LOOP_LOCKS[loop_id] = lock
+    return lock
+
+
+def _validate_dataset_rel_path(rel_path: str) -> str:
+    cleaned = rel_path.strip()
+    if not cleaned or cleaned.startswith("/") or "\\" in cleaned:
+        raise ValueError(f"Invalid dataset volume path: {rel_path!r}")
+    parts = cleaned.split("/")
+    if not all(_safe_workspace_component(part) for part in parts):
+        raise ValueError(f"Invalid dataset volume path: {rel_path!r}")
+    posix = PurePosixPath(*parts)
+    if posix.is_absolute() or ".." in posix.parts or "." in posix.parts:
+        raise ValueError(f"Invalid dataset volume path: {rel_path!r}")
+    return str(posix)
+
+
+@asynccontextmanager
+async def _daytona_client_scope(
+    settings: Settings, daytona: AsyncDaytona | None
+) -> AsyncGenerator[AsyncDaytona]:
+    if daytona is not None:
+        yield daytona
+        return
+    async with make_daytona_client(settings) as client:
+        yield client
+
+
+async def ensure_dataset_volume(
+    settings: Settings, *, daytona: AsyncDaytona | None = None
+) -> tuple[str, str]:
+    """Ensure the managed Daytona dataset volume exists and return (volume_id, volume_type).
+
+    Prefers a managed ``bucket`` volume (immediate consistency, read-only mounts) and falls
+    back cleanly to a ``disk`` volume when bucket volumes are unsupported or forbidden.
+    """
+    volume_name = settings.daytona_dataset_volume.strip()
+    if not volume_name:
+        raise DatasetVolumeError("FLEET_DAYTONA_DATASET_VOLUME must not be empty")
+    if (cached := _DATASET_VOLUME_CACHE.get(volume_name)) is not None:
+        return cached
+
+    async with _volume_lock():
+        if (cached := _DATASET_VOLUME_CACHE.get(volume_name)) is not None:
+            return cached
+        try:
+            async with _daytona_client_scope(settings, daytona) as client:
+                try:
+                    volume = await client.v2.volumes.get(volume_name)
+                except NotFoundError:
+                    try:
+                        volume = await client.v2.volumes.create(name=volume_name, type="bucket")
+                    except _BUCKET_FALLBACK_ERRORS:
+                        _LOG.info(
+                            "Daytona bucket volume %s unsupported or forbidden; "
+                            "falling back to disk",
+                            volume_name,
+                        )
+                        try:
+                            volume = await client.v2.volumes.create(name=volume_name, type="disk")
+                        except NameConflictError:
+                            volume = await client.v2.volumes.get(volume_name)
+                    except NameConflictError:
+                        volume = await client.v2.volumes.get(volume_name)
+        except DaytonaError as error:
+            raise DatasetVolumeError(
+                f"Could not ensure Daytona dataset volume {volume_name!r}"
+            ) from error
+
+        volume_type = "bucket" if volume.type == "bucket" else "disk"
+        resolved = (volume.id, volume_type)
+        _DATASET_VOLUME_CACHE[volume_name] = resolved
+        return resolved
+
+
+async def _create_volume_helper_sandbox(
+    daytona: AsyncDaytona,
+    settings: Settings,
+    *,
+    volume_id: str,
+    volume_type: str,
+    read_only: bool,
+    idle_expiry_seconds: int = 300,
+) -> AsyncSandbox:
+    mount = VolumeMount(
+        volume_id=volume_id,
+        mount_path=DATASET_VOLUME_MOUNT,
+        read_only=True if (volume_type == "bucket" and read_only) else None,
+    )
+    name = f"fleet-vol-{uuid4().hex[:16]}"
+    sandbox: AsyncSandbox | None = None
+    try:
+        async with asyncio.timeout(120):
+            try:
+                sandbox = await daytona.v2.create(
+                    settings.daytona_image,
+                    name=name,
+                    region=settings.daytona_region,
+                    volumes=[mount],
+                    create_timeout_seconds=110,
+                    wait_seconds=0,
+                    lifecycle_policy={
+                        "idle_expiry_seconds": idle_expiry_seconds,
+                        "on_idle_timeout": "delete",
+                        "timeout_seconds": max(idle_expiry_seconds * 4, 1800),
+                        "on_timeout": "delete",
+                    },
+                    network_policy={"block_all": True},
+                    labels={"fleet-runtime": "v2", "fleet-role": "dataset-volume-helper"},
+                )
+            except ReadOnlyUnsupportedError:
+                if not (volume_type == "bucket" and read_only):
+                    raise
+                sandbox = await daytona.v2.create(
+                    settings.daytona_image,
+                    name=name,
+                    region=settings.daytona_region,
+                    volumes=[VolumeMount(volume_id=volume_id, mount_path=DATASET_VOLUME_MOUNT)],
+                    create_timeout_seconds=110,
+                    wait_seconds=0,
+                    lifecycle_policy={
+                        "idle_expiry_seconds": idle_expiry_seconds,
+                        "on_idle_timeout": "delete",
+                        "timeout_seconds": max(idle_expiry_seconds * 4, 1800),
+                        "on_timeout": "delete",
+                    },
+                    network_policy={"block_all": True},
+                    labels={"fleet-runtime": "v2", "fleet-role": "dataset-volume-helper"},
+                )
+            if sandbox.state != "started":
+                await sandbox.wait(until="started", timeout=110)
+            return sandbox
+    except (Exception, asyncio.CancelledError) as error:
+        if sandbox is not None:
+            with suppress(DaytonaError, TimeoutError):
+                await delete_sandbox(daytona, sandbox)
+        if isinstance(error, (DaytonaError, TimeoutError)):
+            raise DatasetVolumeError("Could not start Daytona dataset helper sandbox") from error
+        raise
+
+
+async def _retire_disk_helper(volume_id: str, helper: _DiskVolumeHelper | None = None) -> None:
+    current = _DISK_HELPERS.get(volume_id)
+    if helper is not None and current is not helper:
+        target = helper
+    else:
+        target = _DISK_HELPERS.pop(volume_id, None)
+    if target is None:
+        return
+    if target.idle_task is not None and target.idle_task is not asyncio.current_task():
+        target.idle_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await target.idle_task
+    target.idle_task = None
+    with suppress(DaytonaError, TimeoutError, Exception):
+        await delete_sandbox(target.client, target.sandbox)
+    if target.exit_stack is not None:
+        with suppress(Exception):
+            await target.exit_stack.aclose()
+
+
+def _schedule_disk_helper_reap(helper: _DiskVolumeHelper) -> None:
+    if helper.idle_task is not None:
+        helper.idle_task.cancel()
+        helper.idle_task = None
+
+    async def _reap_after_idle() -> None:
+        try:
+            await asyncio.sleep(helper.idle_seconds)
+            async with _volume_lock():
+                if _DISK_HELPERS.get(helper.volume_id) is helper:
+                    if monotonic() - helper.last_used >= helper.idle_seconds:
+                        await _retire_disk_helper(helper.volume_id, helper)
+        except asyncio.CancelledError:
+            return
+
+    helper.idle_task = asyncio.create_task(_reap_after_idle())
+
+
+async def _run_on_volume_helper[T](
+    settings: Settings,
+    *,
+    volume_id: str,
+    volume_type: str,
+    read_only: bool,
+    daytona: AsyncDaytona | None,
+    operation: Callable[[AsyncSandbox], Awaitable[T]],
+) -> T:
+    if volume_type == "bucket":
+        async with _daytona_client_scope(settings, daytona) as client:
+            sandbox = await _create_volume_helper_sandbox(
+                client,
+                settings,
+                volume_id=volume_id,
+                volume_type="bucket",
+                read_only=read_only,
+                idle_expiry_seconds=120,
+            )
+            try:
+                return await operation(sandbox)
+            finally:
+                with suppress(DaytonaError, TimeoutError):
+                    await delete_sandbox(client, sandbox)
+
+    # Disk volumes support single attachment; reuse an idle-reaped helper sandbox under lock.
+    async with _volume_lock():
+        for attempt in range(2):
+            helper = _DISK_HELPERS.get(volume_id)
+            if helper is not None and helper.sandbox.state != "started":
+                await _retire_disk_helper(volume_id, helper)
+                helper = None
+            if helper is None:
+                exit_stack: AsyncExitStack | None = None
+                client = daytona
+                if client is None:
+                    exit_stack = AsyncExitStack()
+                    client = await exit_stack.enter_async_context(make_daytona_client(settings))
+                try:
+                    sandbox = await _create_volume_helper_sandbox(
+                        client,
+                        settings,
+                        volume_id=volume_id,
+                        volume_type="disk",
+                        read_only=False,
+                        idle_expiry_seconds=max(int(_DISK_HELPER_IDLE_SECONDS) + 60, 120),
+                    )
+                except BaseException:
+                    if exit_stack is not None:
+                        with suppress(Exception):
+                            await exit_stack.aclose()
+                    raise
+                helper = _DiskVolumeHelper(
+                    volume_id=volume_id,
+                    sandbox=sandbox,
+                    client=client,
+                    exit_stack=exit_stack,
+                    idle_seconds=_DISK_HELPER_IDLE_SECONDS,
+                    last_used=monotonic(),
+                )
+                _DISK_HELPERS[volume_id] = helper
+            if helper.idle_task is not None:
+                helper.idle_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await helper.idle_task
+                helper.idle_task = None
+            try:
+                result = await operation(helper.sandbox)
+                helper.last_used = monotonic()
+                _schedule_disk_helper_reap(helper)
+                return result
+            except (NotFoundError, SandboxNotRunningError) as error:
+                if isinstance(error, DaytonaFileNotFoundError):
+                    helper.last_used = monotonic()
+                    _schedule_disk_helper_reap(helper)
+                    raise
+                await _retire_disk_helper(volume_id, helper)
+                if attempt == 1:
+                    raise DatasetVolumeError(
+                        "Daytona disk dataset helper sandbox stopped unexpectedly"
+                    ) from error
+            except BaseException:
+                helper.last_used = monotonic()
+                _schedule_disk_helper_reap(helper)
+                raise
+    raise AssertionError("Unreachable disk helper retry state")
+
+
+async def write_volume_dataset(
+    settings: Settings,
+    rel_path: str,
+    content: bytes,
+    *,
+    daytona: AsyncDaytona | None = None,
+) -> tuple[str, str]:
+    """Write dataset bytes to the managed Daytona Volume and return (volume_name, rel_path)."""
+    normalized = _validate_dataset_rel_path(rel_path)
+    volume_id, volume_type = await ensure_dataset_volume(settings, daytona=daytona)
+    remote_path = f"{DATASET_VOLUME_MOUNT}/{normalized}"
+    parent_dir = str(PurePosixPath(remote_path).parent)
+    payload = bytes(content)
+
+    async def _write(sandbox: AsyncSandbox) -> None:
+        if parent_dir != DATASET_VOLUME_MOUNT:
+            with suppress(DaytonaError):
+                await sandbox.fs.mkdir(parent_dir)
+        try:
+            await sandbox.fs.write_bytes(remote_path, payload, atomic=True)
+        except AtomicUploadUnsupportedError:
+            await sandbox.fs.write_bytes(remote_path, payload, atomic=False)
+
+    try:
+        await _run_on_volume_helper(
+            settings,
+            volume_id=volume_id,
+            volume_type=volume_type,
+            read_only=False,
+            daytona=daytona,
+            operation=_write,
+        )
+    except DaytonaError as error:
+        raise DatasetVolumeError(
+            f"Could not write dataset {normalized!r} to Daytona volume"
+        ) from error
+    return settings.daytona_dataset_volume.strip(), normalized
+
+
+async def read_volume_dataset(
+    settings: Settings,
+    rel_path: str,
+    *,
+    daytona: AsyncDaytona | None = None,
+) -> bytes:
+    """Read dataset bytes from the managed Daytona Volume."""
+    normalized = _validate_dataset_rel_path(rel_path)
+    volume_id, volume_type = await ensure_dataset_volume(settings, daytona=daytona)
+    remote_path = f"{DATASET_VOLUME_MOUNT}/{normalized}"
+
+    async def _read(sandbox: AsyncSandbox) -> bytes:
+        try:
+            return await sandbox.fs.read_bytes(remote_path, max_response_bytes=_DATASET_MAX_BYTES)
+        except (DaytonaFileNotFoundError, NotFoundError) as error:
+            raise DatasetVolumeObjectMissing(
+                f"Dataset {normalized!r} was not found in Daytona volume"
+            ) from error
+
+    try:
+        return await _run_on_volume_helper(
+            settings,
+            volume_id=volume_id,
+            volume_type=volume_type,
+            read_only=True,
+            daytona=daytona,
+            operation=_read,
+        )
+    except DatasetVolumeObjectMissing:
+        raise
+    except DaytonaError as error:
+        raise DatasetVolumeError(
+            f"Could not read dataset {normalized!r} from Daytona volume"
+        ) from error
+
+
+async def delete_volume_dataset(
+    settings: Settings,
+    rel_path: str,
+    *,
+    daytona: AsyncDaytona | None = None,
+) -> None:
+    """Delete a dataset file from the managed Daytona Volume (idempotent if already absent)."""
+    normalized = _validate_dataset_rel_path(rel_path)
+    volume_id, volume_type = await ensure_dataset_volume(settings, daytona=daytona)
+    remote_path = f"{DATASET_VOLUME_MOUNT}/{normalized}"
+
+    async def _delete(sandbox: AsyncSandbox) -> None:
+        with suppress(DaytonaFileNotFoundError, NotFoundError):
+            await sandbox.fs.remove(remote_path)
+
+    try:
+        await _run_on_volume_helper(
+            settings,
+            volume_id=volume_id,
+            volume_type=volume_type,
+            read_only=False,
+            daytona=daytona,
+            operation=_delete,
+        )
+    except DaytonaError as error:
+        raise DatasetVolumeError(
+            f"Could not delete dataset {normalized!r} from Daytona volume"
+        ) from error
+
+
+async def close_dataset_volume_helpers() -> None:
+    """Tear down all cached Daytona dataset helper sandboxes and clear volume cache."""
+    async with _volume_lock():
+        volume_ids = list(_DISK_HELPERS)
+        for volume_id in volume_ids:
+            await _retire_disk_helper(volume_id)
+        _DATASET_VOLUME_CACHE.clear()
+    _VOLUME_LOOP_LOCKS.pop(id(asyncio.get_running_loop()), None)

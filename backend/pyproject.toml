@@ -38,6 +38,7 @@ dependencies = [
     "pydantic-settings>=2.16.3",
     "pyyaml>=6.0.2",
     "mlflow>=3.18.0",
+    "cryptography>=50.0.2",
 ]
 
 [project.urls]
@@ -85,8 +86,9 @@ name = "Backend dependency layers"
 type = "layers"
 layers = [
     "fleet_rlm.api | fleet_rlm.optimize",
-    "fleet_rlm.ui_stream",
+    "fleet_rlm.ui_stream | (fleet_rlm.opt_runner)",
     "fleet_rlm.agent | fleet_rlm.skills | fleet_rlm.interpreter | fleet_rlm.db | fleet_rlm.storage",
+    "fleet_rlm.llm_registry | fleet_rlm.opt_datasets",
     "fleet_rlm.config",
 ]
 
@@ -120,6 +122,8 @@ source_modules = [
     "fleet_rlm.skills",
     "fleet_rlm.db",
     "fleet_rlm.storage",
+    "fleet_rlm.llm_registry",
+    "fleet_rlm.opt_datasets",
     "fleet_rlm.config",
 ]
 forbidden_modules = ["daytona"]
@@ -136,6 +140,8 @@ source_modules = [
     "fleet_rlm.interpreter",
     "fleet_rlm.db",
     "fleet_rlm.storage",
+    "fleet_rlm.llm_registry",
+    "fleet_rlm.opt_datasets",
     "fleet_rlm.config",
 ]
 forbidden_modules = ["fastapi"]
@@ -144,8 +150,16 @@ forbidden_modules = ["fastapi"]
 name = "Only storage imports the S3 SDK"
 type = "forbidden"
 source_modules = [
-    "fleet_rlm.api", "fleet_rlm.optimize", "fleet_rlm.ui_stream", "fleet_rlm.agent",
-    "fleet_rlm.skills", "fleet_rlm.interpreter", "fleet_rlm.db", "fleet_rlm.config",
+    "fleet_rlm.api",
+    "fleet_rlm.optimize",
+    "fleet_rlm.ui_stream",
+    "fleet_rlm.agent",
+    "fleet_rlm.skills",
+    "fleet_rlm.interpreter",
+    "fleet_rlm.db",
+    "fleet_rlm.llm_registry",
+    "fleet_rlm.opt_datasets",
+    "fleet_rlm.config",
 ]
 forbidden_modules = ["boto3", "botocore"]
 allow_indirect_imports = true

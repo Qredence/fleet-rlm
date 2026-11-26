@@ -28,6 +28,7 @@ from sqlalchemy import (
     literal,
     select,
     text,
+    tuple_,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH, TSQUERY, TSVECTOR, insert
@@ -49,7 +50,10 @@ _OPT_JOB_LOCK_INDEX = "uq_optimization_jobs_one_active_per_target"
 _ACTIVE_OPT_JOB = text("status IN ('queued', 'running')")
 _OPT_PROMOTION_LOCK_INDEX = "uq_optimization_promotions_one_active_per_target"
 _ACTIVE_OPT_PROMOTION = text("active = true")
+_LLM_PROVIDER_NAME_CONSTRAINT = "uq_llm_providers_name"
+_OPT_DATASET_NAME_CONSTRAINT = "uq_optimization_datasets_name"
 _UPLOAD_LEASE = timedelta(minutes=5)
+_UNSET: Any = object()
 
 
 # Mutations lock the Session before its root Run. Allow foreign-key checks by child inserts.
@@ -199,7 +203,54 @@ class WorkspaceSettings(Base):
 
 type OptimizationTarget = Literal["rlm", "skills", "memory"]
 type OptimizationDatasetSource = Literal["builtin", "custom", "db"]
+type OptimizationStorageBackend = Literal["neon", "daytona_volume"]
 type OptimizationJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+type LLMProviderDialect = Literal[
+    "openai",
+    "openai_compatible",
+    "anthropic",
+    "gemini",
+    "openrouter",
+    "xai",
+    "groq",
+    "deepseek",
+    "ollama",
+    "vllm",
+    "typesafe",
+]
+type LLMProviderApiMode = Literal["auto", "chat", "responses"]
+
+
+class LLMProvider(Base):
+    __tablename__ = "llm_providers"
+    __table_args__ = (
+        CheckConstraint("length(btrim(name)) > 0", name="ck_llm_providers_name_nonempty"),
+        CheckConstraint(
+            "dialect IN ('openai', 'openai_compatible', 'anthropic', 'gemini', "
+            "'openrouter', 'xai', 'groq', 'deepseek', 'ollama', 'vllm', 'typesafe')",
+            name="ck_llm_providers_dialect",
+        ),
+        CheckConstraint(
+            "api_mode IN ('auto', 'chat', 'responses')",
+            name="ck_llm_providers_api_mode",
+        ),
+        UniqueConstraint("name", name=_LLM_PROVIDER_NAME_CONSTRAINT),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
+    name: Mapped[str] = mapped_column(Text)
+    dialect: Mapped[str] = mapped_column(Text)
+    api_mode: Mapped[str] = mapped_column(Text, server_default=text("'auto'"))
+    base_url: Mapped[str | None] = mapped_column(Text)
+    api_key_ciphertext: Mapped[str | None] = mapped_column(Text)
+    api_key_hint: Mapped[str | None] = mapped_column(Text)
+    default_model: Mapped[str | None] = mapped_column(Text)
+    cached_models_json: Mapped[list[JsonObject] | None] = mapped_column(JSONB)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class OptimizationDataset(Base):
@@ -208,12 +259,18 @@ class OptimizationDataset(Base):
         CheckConstraint(
             "target IN ('rlm', 'skills', 'memory')", name="ck_optimization_datasets_target"
         ),
-        UniqueConstraint("name", name="uq_optimization_datasets_name"),
+        CheckConstraint(
+            "storage_backend IN ('neon', 'daytona_volume')",
+            name="ck_optimization_datasets_storage_backend",
+        ),
+        UniqueConstraint("name", name=_OPT_DATASET_NAME_CONSTRAINT),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
     name: Mapped[str] = mapped_column(Text)
     target: Mapped[str] = mapped_column(Text)
+    storage_backend: Mapped[str] = mapped_column(Text, server_default=text("'neon'"))
+    storage_volume: Mapped[str | None] = mapped_column(Text)
     object_key: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(CHAR(64))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
@@ -248,6 +305,13 @@ class OptimizationJob(Base):
     dataset_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("optimization_datasets.id", ondelete="SET NULL")
     )
+    decision_provider_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "llm_providers.id",
+            name="fk_optimization_jobs_decision_provider_id",
+            ondelete="SET NULL",
+        )
+    )
     config_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     progress_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     report_json: Mapped[JsonObject | None] = mapped_column(JSONB)
@@ -268,6 +332,7 @@ class OptimizationJob(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -278,6 +343,11 @@ Index(
     OptimizationJob.target,
     OptimizationJob.created_at.desc(),
     OptimizationJob.id.desc(),
+)
+Index(
+    "idx_optimization_jobs_decision_provider_id",
+    OptimizationJob.decision_provider_id,
+    postgresql_where=OptimizationJob.decision_provider_id.is_not(None),
 )
 
 
@@ -296,6 +366,14 @@ class OptimizationPromotion(Base):
     artifact_sha256: Mapped[str] = mapped_column(CHAR(64))
     artifact_size_bytes: Mapped[int] = mapped_column(BigInteger)
     resolved_decision_model: Mapped[str | None] = mapped_column(Text)
+    decision_provider_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "llm_providers.id",
+            name="fk_optimization_promotions_decision_provider_id",
+            ondelete="SET NULL",
+        )
+    )
+    program_kind: Mapped[str | None] = mapped_column(Text, server_default=text("'rlm'"))
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     promoted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -1074,6 +1152,170 @@ async def reset_workspace_settings_overrides(db: SessionFactory) -> dict[str, An
     return {}
 
 
+def _config_references_provider(config: Any, provider_id_str: str) -> bool:
+    if isinstance(config, dict):
+        for key, value in config.items():
+            if key == "provider_id" and value == provider_id_str:
+                return True
+            if key.endswith("_provider_id") and value == provider_id_str:
+                return True
+            if key == "provider_ids" and isinstance(value, list) and provider_id_str in value:
+                return True
+            if isinstance(value, (dict, list)) and _config_references_provider(
+                value, provider_id_str
+            ):
+                return True
+    elif isinstance(config, list):
+        return any(_config_references_provider(item, provider_id_str) for item in config)
+    return False
+
+
+async def list_llm_providers(db: SessionFactory) -> list[LLMProvider]:
+    async with db() as connection:
+        rows = await connection.scalars(
+            select(LLMProvider).order_by(LLMProvider.name.asc(), LLMProvider.id.asc())
+        )
+        return list(rows)
+
+
+async def get_llm_provider(db: SessionFactory, provider_id: UUID) -> LLMProvider | None:
+    async with db() as connection:
+        return await connection.get(LLMProvider, provider_id)
+
+
+async def get_llm_provider_by_name(db: SessionFactory, name: str) -> LLMProvider | None:
+    async with db() as connection:
+        return await connection.scalar(select(LLMProvider).where(LLMProvider.name == name))
+
+
+async def create_llm_provider(
+    db: SessionFactory,
+    *,
+    name: str,
+    dialect: LLMProviderDialect,
+    api_mode: LLMProviderApiMode = "auto",
+    base_url: str | None = None,
+    api_key_ciphertext: str | None = None,
+    api_key_hint: str | None = None,
+    default_model: str | None = None,
+    cached_models_json: list[JsonObject] | None = None,
+    last_tested_at: datetime | None = None,
+) -> LLMProvider:
+    try:
+        async with db.begin() as connection:
+            provider = LLMProvider(
+                name=name,
+                dialect=dialect,
+                api_mode=api_mode,
+                base_url=base_url,
+                api_key_ciphertext=api_key_ciphertext,
+                api_key_hint=api_key_hint,
+                default_model=default_model,
+                cached_models_json=cached_models_json,
+                last_tested_at=last_tested_at,
+            )
+            connection.add(provider)
+        return provider
+    except IntegrityError as exc:
+        if (
+            getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            == _LLM_PROVIDER_NAME_CONSTRAINT
+        ):
+            raise OptimizationConflictError(
+                f"An LLM provider named '{name}' already exists"
+            ) from exc
+        raise
+
+
+async def update_llm_provider(
+    db: SessionFactory,
+    provider_id: UUID,
+    *,
+    name: str = _UNSET,
+    dialect: LLMProviderDialect = _UNSET,
+    api_mode: LLMProviderApiMode = _UNSET,
+    base_url: str | None = _UNSET,
+    api_key_ciphertext: str | None = _UNSET,
+    api_key_hint: str | None = _UNSET,
+    default_model: str | None = _UNSET,
+    cached_models_json: list[JsonObject] | None = _UNSET,
+    last_tested_at: datetime | None = _UNSET,
+) -> LLMProvider | None:
+    values: dict[str, Any] = {}
+    if name is not _UNSET:
+        values["name"] = name
+    if dialect is not _UNSET:
+        values["dialect"] = dialect
+    if api_mode is not _UNSET:
+        values["api_mode"] = api_mode
+    if base_url is not _UNSET:
+        values["base_url"] = base_url
+    if api_key_ciphertext is not _UNSET:
+        values["api_key_ciphertext"] = api_key_ciphertext
+    if api_key_hint is not _UNSET:
+        values["api_key_hint"] = api_key_hint
+    if default_model is not _UNSET:
+        values["default_model"] = default_model
+    if cached_models_json is not _UNSET:
+        values["cached_models_json"] = cached_models_json
+    if last_tested_at is not _UNSET:
+        values["last_tested_at"] = last_tested_at
+    if not values:
+        return await get_llm_provider(db, provider_id)
+    values["updated_at"] = func.now()
+    try:
+        async with db.begin() as connection:
+            return await connection.scalar(
+                update(LLMProvider)
+                .where(LLMProvider.id == provider_id)
+                .values(**values)
+                .returning(LLMProvider)
+            )
+    except IntegrityError as exc:
+        if (
+            getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            == _LLM_PROVIDER_NAME_CONSTRAINT
+        ):
+            raise OptimizationConflictError(
+                f"An LLM provider named '{name}' already exists"
+            ) from exc
+        raise
+
+
+async def delete_llm_provider(db: SessionFactory, provider_id: UUID) -> LLMProvider | None:
+    async with db.begin() as connection:
+        provider = await connection.get(LLMProvider, provider_id, with_for_update=True)
+        if provider is None:
+            return None
+        active_promo = await connection.scalar(
+            select(OptimizationPromotion.id)
+            .where(
+                OptimizationPromotion.decision_provider_id == provider_id,
+                OptimizationPromotion.active.is_(True),
+            )
+            .limit(1)
+        )
+        if active_promo is not None:
+            raise OptimizationConflictError(
+                "LLM provider is currently referenced by an active optimization promotion"
+            )
+        active_jobs = (
+            await connection.scalars(
+                select(OptimizationJob).where(OptimizationJob.status.in_(("queued", "running")))
+            )
+        ).all()
+        provider_id_str = str(provider_id)
+        for job in active_jobs:
+            if job.decision_provider_id == provider_id or _config_references_provider(
+                job.config_json, provider_id_str
+            ):
+                raise OptimizationConflictError(
+                    "LLM provider is currently in use by an active optimization job"
+                )
+        await connection.delete(provider)
+        return provider
+
+
 async def create_optimization_dataset(
     db: SessionFactory,
     *,
@@ -1084,6 +1326,8 @@ async def create_optimization_dataset(
     size_bytes: int,
     row_count: int,
     summary_json: JsonObject,
+    storage_backend: OptimizationStorageBackend = "neon",
+    storage_volume: str | None = None,
     dataset_id: UUID | None = None,
 ) -> OptimizationDataset:
     async with db.begin() as connection:
@@ -1091,6 +1335,8 @@ async def create_optimization_dataset(
             **({"id": dataset_id} if dataset_id is not None else {}),
             name=name,
             target=target,
+            storage_backend=storage_backend,
+            storage_volume=storage_volume,
             object_key=object_key,
             sha256=sha256,
             size_bytes=size_bytes,
@@ -1116,6 +1362,15 @@ async def get_optimization_dataset(
 ) -> OptimizationDataset | None:
     async with db() as connection:
         return await connection.get(OptimizationDataset, dataset_id)
+
+
+async def get_optimization_dataset_by_name(
+    db: SessionFactory, name: str
+) -> OptimizationDataset | None:
+    async with db() as connection:
+        return await connection.scalar(
+            select(OptimizationDataset).where(OptimizationDataset.name == name)
+        )
 
 
 async def delete_optimization_dataset(
@@ -1147,9 +1402,26 @@ async def create_optimization_job(
     dataset_id: UUID | None,
     config_json: JsonObject,
     mlflow_experiment: str | None,
+    decision_provider_id: UUID | None = None,
 ) -> OptimizationJob:
     try:
         async with db.begin() as connection:
+            if dataset_id is not None:
+                dataset = await connection.get(
+                    OptimizationDataset,
+                    dataset_id,
+                    with_for_update={"key_share": True},
+                )
+                if dataset is None:
+                    raise LookupError(f"Optimization dataset {dataset_id} does not exist")
+            if decision_provider_id is not None:
+                provider = await connection.get(
+                    LLMProvider,
+                    decision_provider_id,
+                    with_for_update={"key_share": True},
+                )
+                if provider is None:
+                    raise LookupError(f"LLM provider {decision_provider_id} does not exist")
             job = OptimizationJob(
                 target=target,
                 program_kind=program_kind,
@@ -1158,6 +1430,7 @@ async def create_optimization_job(
                 dataset_source=dataset_source,
                 dataset_name=dataset_name,
                 dataset_id=dataset_id,
+                decision_provider_id=decision_provider_id,
                 config_json=config_json,
                 progress_json={},
                 mlflow_experiment=mlflow_experiment,
@@ -1172,6 +1445,20 @@ async def create_optimization_job(
         raise
 
 
+async def touch_optimization_job_heartbeat(db: SessionFactory, job_id: UUID) -> bool:
+    """Refresh heartbeat_at for an active optimization job."""
+    async with db.begin() as connection:
+        result = await connection.execute(
+            update(OptimizationJob)
+            .where(
+                OptimizationJob.id == job_id,
+                OptimizationJob.status.in_(("queued", "running")),
+            )
+            .values(heartbeat_at=func.now())
+        )
+        return max(getattr(result, "rowcount", 0) or 0, 0) > 0
+
+
 async def update_optimization_job_progress(
     db: SessionFactory,
     job_id: UUID,
@@ -1182,7 +1469,7 @@ async def update_optimization_job_progress(
     log_tail: str | None = None,
     started_at: datetime | None = None,
 ) -> OptimizationJob | None:
-    values: dict[str, Any] = {}
+    values: dict[str, Any] = {"heartbeat_at": func.now()}
     if status is not None:
         values["status"] = status
     if stage is not None:
@@ -1193,8 +1480,6 @@ async def update_optimization_job_progress(
         values["log_tail"] = log_tail
     if started_at is not None:
         values["started_at"] = started_at
-    if not values:
-        return await get_optimization_job(db, job_id)
     async with db.begin() as connection:
         return await connection.scalar(
             update(OptimizationJob)
@@ -1226,6 +1511,7 @@ async def finish_optimization_job(
     artifact_sha256: str | None = None,
     artifact_size_bytes: int | None = None,
     resolved_decision_model: str | None = None,
+    decision_provider_id: UUID | None = None,
     mlflow_run_id: str | None = None,
     mlflow_experiment: str | None = None,
     error: str | None = None,
@@ -1233,6 +1519,7 @@ async def finish_optimization_job(
     values: dict[str, Any] = {
         "status": status,
         "stage": stage,
+        "heartbeat_at": func.now(),
         "finished_at": func.now(),
     }
     if saved is not None:
@@ -1261,6 +1548,8 @@ async def finish_optimization_job(
         values["artifact_size_bytes"] = artifact_size_bytes
     if resolved_decision_model is not None:
         values["resolved_decision_model"] = resolved_decision_model
+    if decision_provider_id is not None:
+        values["decision_provider_id"] = decision_provider_id
     if mlflow_run_id is not None:
         values["mlflow_run_id"] = mlflow_run_id
     if mlflow_experiment is not None:
@@ -1302,7 +1591,12 @@ async def is_optimization_job_cancel_requested(db: SessionFactory, job_id: UUID)
 
 
 async def reap_stale_optimization_jobs(db: SessionFactory, timeout_seconds: int) -> int:
-    cutoff = datetime.now(UTC) - timedelta(seconds=timeout_seconds)
+    cutoff = func.now() - timedelta(seconds=timeout_seconds)
+    last_activity = func.coalesce(
+        OptimizationJob.heartbeat_at,
+        OptimizationJob.started_at,
+        OptimizationJob.created_at,
+    )
     async with db.begin() as connection:
         if connection is None:
             return 0
@@ -1310,7 +1604,7 @@ async def reap_stale_optimization_jobs(db: SessionFactory, timeout_seconds: int)
             update(OptimizationJob)
             .where(
                 OptimizationJob.status.in_(("queued", "running")),
-                func.coalesce(OptimizationJob.started_at, OptimizationJob.created_at) < cutoff,
+                last_activity < cutoff,
             )
             .values(
                 status="failed",
@@ -1357,28 +1651,58 @@ async def promote_optimization_artifact(
     artifact_sha256: str,
     artifact_size_bytes: int,
     resolved_decision_model: str | None,
+    decision_provider_id: UUID | None = None,
+    program_kind: str | None = None,
 ) -> OptimizationPromotion:
-    async with db.begin() as connection:
-        await connection.execute(
-            update(OptimizationPromotion)
-            .where(
-                OptimizationPromotion.target == target,
-                OptimizationPromotion.active.is_(True),
+    try:
+        async with db.begin() as connection:
+            if decision_provider_id is not None:
+                provider = await connection.get(
+                    LLMProvider,
+                    decision_provider_id,
+                    with_for_update={"key_share": True},
+                )
+                if provider is None:
+                    raise LookupError(f"LLM provider {decision_provider_id} does not exist")
+            active_rows = (
+                await connection.scalars(
+                    select(OptimizationPromotion)
+                    .where(
+                        OptimizationPromotion.target == target,
+                        OptimizationPromotion.active.is_(True),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+            for current in active_rows:
+                current.active = False
+                current.rolled_back_at = func.now()
+            await connection.flush()
+            effective_program_kind = (
+                program_kind if program_kind is not None else ("rlm" if target == "rlm" else None)
             )
-            .values(active=False, rolled_back_at=func.now())
-        )
-        await connection.flush()
-        promotion = OptimizationPromotion(
-            target=target,
-            job_id=job_id,
-            artifact_object_key=artifact_object_key,
-            artifact_sha256=artifact_sha256,
-            artifact_size_bytes=artifact_size_bytes,
-            resolved_decision_model=resolved_decision_model,
-            active=True,
-        )
-        connection.add(promotion)
-        return promotion
+            promotion = OptimizationPromotion(
+                target=target,
+                job_id=job_id,
+                artifact_object_key=artifact_object_key,
+                artifact_sha256=artifact_sha256,
+                artifact_size_bytes=artifact_size_bytes,
+                resolved_decision_model=resolved_decision_model,
+                decision_provider_id=decision_provider_id,
+                program_kind=effective_program_kind,
+                active=True,
+            )
+            connection.add(promotion)
+            return promotion
+    except IntegrityError as exc:
+        if (
+            getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            == _OPT_PROMOTION_LOCK_INDEX
+        ):
+            raise OptimizationConflictError(
+                f"Target '{target}' has a concurrent promotion in progress"
+            ) from exc
+        raise
 
 
 async def rollback_optimization_target(
@@ -1387,38 +1711,49 @@ async def rollback_optimization_target(
     *,
     mode: Literal["previous", "env"] = "previous",
 ) -> OptimizationPromotion | None:
-    async with db.begin() as connection:
-        current = await connection.scalar(
-            select(OptimizationPromotion)
-            .where(
-                OptimizationPromotion.target == target,
-                OptimizationPromotion.active.is_(True),
+    try:
+        async with db.begin() as connection:
+            current = await connection.scalar(
+                select(OptimizationPromotion)
+                .where(
+                    OptimizationPromotion.target == target,
+                    OptimizationPromotion.active.is_(True),
+                )
+                .with_for_update()
             )
-            .with_for_update()
-        )
-        if current is None:
-            return None
-        current.active = False
-        current.rolled_back_at = func.now()
-        await connection.flush()
-        if mode != "previous":
-            return None
-        previous = await connection.scalar(
-            select(OptimizationPromotion)
-            .where(
-                OptimizationPromotion.target == target,
-                OptimizationPromotion.id != current.id,
-                OptimizationPromotion.active.is_(False),
+            if current is None:
+                return None
+            current.active = False
+            current.rolled_back_at = func.now()
+            await connection.flush()
+            if mode != "previous":
+                return None
+            previous = await connection.scalar(
+                select(OptimizationPromotion)
+                .where(
+                    OptimizationPromotion.target == target,
+                    OptimizationPromotion.active.is_(False),
+                    tuple_(OptimizationPromotion.promoted_at, OptimizationPromotion.id)
+                    < tuple_(current.promoted_at, current.id),
+                )
+                .order_by(OptimizationPromotion.promoted_at.desc(), OptimizationPromotion.id.desc())
+                .limit(1)
+                .with_for_update()
             )
-            .order_by(OptimizationPromotion.promoted_at.desc(), OptimizationPromotion.id.desc())
-            .limit(1)
-            .with_for_update()
-        )
-        if previous is None:
-            return None
-        previous.active = True
-        previous.rolled_back_at = None
-        return previous
+            if previous is None:
+                return None
+            previous.active = True
+            previous.rolled_back_at = None
+            return previous
+    except IntegrityError as exc:
+        if (
+            getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            == _OPT_PROMOTION_LOCK_INDEX
+        ):
+            raise OptimizationConflictError(
+                f"Target '{target}' has a concurrent promotion or rollback in progress"
+            ) from exc
+        raise
 
 
 async def list_active_optimization_promotions(

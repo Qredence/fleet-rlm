@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     daytona_optimize_spot: bool = False
     daytona_otel_enabled: bool = False
     daytona_exec_timeout_seconds: int = Field(default=120, ge=5, le=600)
+    daytona_dataset_volume: str = Field(default="fleet-eval-datasets", min_length=1)
 
     tavily_api_key: SecretStr | None = Field(
         default=None, validation_alias="TAVILY_API_KEY", repr=False
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: SecretStr
     decision_model: str = "typesafe:jev-latest"
+    credentials_encryption_key: SecretStr | None = Field(default=None, repr=False)
+    allow_private_llm_endpoints: bool = False
+    allow_local_interpreter: bool = False
 
     rlm_max_iters: int = Field(default=20, ge=1, le=100)
     rlm_max_llm_calls: int = Field(default=50, ge=1, le=500)
@@ -69,6 +73,7 @@ class Settings(BaseSettings):
     neon_project_id: str | None = None
     neon_parent_branch_id: str | None = None
     optimization_stale_timeout_seconds: int = Field(default=3600, ge=60, le=86_400)
+    optimization_heartbeat_stale_seconds: int = Field(default=300, ge=30, le=86_400)
     eval_datasets_dir: Path = Path("eval_datasets")
     artifact_cache_dir: Path | None = None
 
@@ -97,3 +102,19 @@ class Settings(BaseSettings):
         if not raw.startswith("postgresql+psycopg://"):
             raise ValueError("Expected a PostgreSQL URL using psycopg")
         return SecretStr(raw)
+
+    @field_validator("credentials_encryption_key")
+    @classmethod
+    def normalize_encryption_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        raw = value.get_secret_value().strip()
+        return SecretStr(raw) if raw else None
+
+    @field_validator("daytona_dataset_volume")
+    @classmethod
+    def validate_dataset_volume(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("daytona_dataset_volume must not be empty")
+        return cleaned
