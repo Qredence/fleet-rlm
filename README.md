@@ -8,7 +8,7 @@
 
 - **Programmatic Long Context:** Upload CSV/Parquet datasets, multi-sheet Excel workbooks, PDFs, or code (up to 100 MiB) into `/workspace/files`. The agent inspects and transforms data using `pandas`, `pyarrow`, `openpyxl`, `pypdf`, `scipy`, `matplotlib`, and `pillow`, then saves downloadable Artifacts to `/workspace/artifacts`.
 - **Recursive Reasoning & Live Traces:** Complex Tasks decompose dynamically into concurrent `llm_query_batched` map-reduce calls and isolated recursive `spawn_agent` Subagent Runs under configurable Recursion Depth and Call Budget limits, streamed natively via AI SDK v1 SSE into nested UI traces.
-- **Progressive-Disclosure Skills (`@skill`).** The Daytona image includes seven read-only `SKILL.md` Skills (`data-analysis`, `spreadsheet-audit`, `document-extraction`, `chart-visualization`, `scientific-computing`, `recursive-synthesis`, and `skill-creator`). TypeSafe Jev (`Noul` + `Choice`) scores them per turn. You can also pin them with `@skill`.
+- **Progressive-Disclosure Skills (`@skill`).** The Daytona image includes eight read-only `SKILL.md` Skills (`data-analysis`, `spreadsheet-audit`, `document-extraction`, `chart-visualization`, `scientific-computing`, `recursive-synthesis`, `skill-creator`, and `web-research`). TypeSafe Jev (`Noul` + `Choice`) scores them per turn. You can also pin them with `@skill`.
   Open a generated `SKILL.md` in the Artifacts preview and choose **Install skill** to make it available in the Skills picker across sessions. Installs are stored under `FLEET_SKILLS_DIR/.installed`. Backend instances that should share installs need the same persistent skills directory.
 - **4-Tier Memory with Human Review:** Pairs ephemeral per-Run Execution Contexts and bounded Episode History with Neon full-text searchable Session/Global Memories (`tsvector` GIN) consolidated after each Turn (high-confidence facts auto-approved; lower-confidence candidates queued in the UI for review) and versioned offline Compiled Programs / Calibrated Gates.
 - **Stateless Workers, Durable State:** Any FastAPI worker can handle a Turn. Postgres stores the session, run tree, and file manifest. Private Neon Object Storage retains uploads and published artifacts across Daytona VM replacement. Scratch files and checkouts stay on the current VM.
@@ -35,7 +35,7 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    cd backend && uv sync --python 3.13 && uv run alembic upgrade head
    cd ../frontend && pnpm install --frozen-lockfile
    ```
-   For an existing v0 deployment, rehearse the Alembic upgrade through `0006_workspace_recovery` on an isolated branch. Revision `0004_daytona_v2_cutover` clears old sandbox bindings and file manifests. Conversations and memories are retained. Users re-upload any files they want in the new workspace. Keep the old Volume and the pre-cutover database restore point for the migration window. [Migration plan](./docs/daytona-v2-migration-plan.md)
+   For an existing v0 deployment, rehearse the Alembic upgrade through `0006_workspace_recovery` on an isolated branch. Revision `0004_daytona_v2_cutover` clears old sandbox bindings and file manifests. Conversations and memories are retained. Users re-upload any files they want in the new workspace. Keep the old Volume and the pre-cutover database restore point for the migration window. [Migration runbook](./docs/daytona-v2-migration.md)
 
 3. **Start external MLflow *(optional — port `5001` avoids macOS AirPlay on `5000`)*:**
    ```bash
@@ -116,7 +116,7 @@ make check
 Runs backend checks (`ruff check`, `ruff format --check`, `lint-imports`, `ty check src`, `pytest`) and frontend checks (`pnpm lint`, `pnpm typecheck`, Vitest `pnpm test`, `pnpm build`).
 
 - [GLOSSARY.md](./GLOSSARY.md) — Canonical domain vocabulary (`Session`, `Workspace`, `Artifact`, `Turn`, `Run`, `Deployment Settings`, `Compiled Program`, `Calibrated Gate`)
-- [docs/PRD.md](./docs/PRD.md) — Architecture specification and non-negotiable engineering guardrails
+- [docs/architecture.md](./docs/architecture.md) — Architecture specification and non-negotiable engineering guardrails
 - [AGENTS.md](./AGENTS.md) — Developer guide, module boundaries, and verification commands
 - [frontend/README.md](./frontend/README.md) — Frontend development notes
 - [CHANGELOG.md](./CHANGELOG.md) — Release history and migration notes

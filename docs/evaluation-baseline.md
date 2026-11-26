@@ -1,5 +1,7 @@
 # Fleet DSPy evaluation baseline
 
+Localhost MLflow links and local environment promotion below record the measured workstation runs. Deployment qualification requires its own evidence.
+
 The baseline starts from checkpoint `75120dc1dc7f78af210fbd56e75156da82a8753f` on `checkpoint/fleet-runtime-state`. Run the scripts from `backend/` using the existing Fleet configuration and a local MLflow server. The scripts use reviewed synthetic cases from local traces. Keep row-level JSON, sandbox fixtures, and trace payloads in a private output directory outside Git.
 
 ```sh
