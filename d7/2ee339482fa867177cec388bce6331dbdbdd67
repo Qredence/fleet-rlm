@@ -1,0 +1,19 @@
+backend/src/fleet_rlm/opt_runner.py
+  s_4c5656a3b33387::t_ab7dd387bba51b 1289-1317,1568-1570,1640-1642,1646-1648,1651
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d72ee339482fa867177cec388bce6331dbdbdd67",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
