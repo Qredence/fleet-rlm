@@ -1,0 +1,88 @@
+backend/alembic/versions/0008_optimization_jobs.py
+  h_f276322eb5eb9f 1-226
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 4,7,10-11,13,16,19,75-81,101-106,123-198,203,206-208,225-226,229,241,243,246-259,692-695,715-729,1499,1667,1764,1950-3479
+backend/src/fleet_rlm/config.py
+  h_f276322eb5eb9f 67-74,86-99
+backend/src/fleet_rlm/db.py
+  h_f276322eb5eb9f 12,16,19,48-51,200-319,332-335,1075-1444
+backend/src/fleet_rlm/optimize.py
+  h_f276322eb5eb9f 16,24,27,95,99-139,295-349,2682,2692-2693,2736,2744-2799,2801,2803-2809,2829,2832,2836-2842,2846,2852,2874-2881,2885-2886,2888-2895,2903-2904,2920-2927,2937-2938,2942-2943,3023-3032,3042,3262,3282,3284-3303,3308,3310-3315,3317,3337-3347,3373-3384,3389-3397,3402,3408-3410,3456-3469,3480-3481,3499,3502-3503,3531,3548,3551-3552,3572,3702-3713,3732,3734-3743,3769,3784,3799,3802,3805-3819
+backend/src/fleet_rlm/storage.py
+  h_f276322eb5eb9f 92-111
+backend/tests/test_optimization_ui_api.py
+  h_f276322eb5eb9f 1-750
+backend/tests/test_phase5_optimize.py
+  h_f276322eb5eb9f 2589-2691
+frontend/components.json
+  h_f276322eb5eb9f 25-26
+frontend/src/components/fluid-hover-highlight.tsx
+  h_f276322eb5eb9f 1,5-28,32-39,42-53,60,62-63,66-68
+frontend/src/components/optimization/ActiveRunBanner.tsx
+  h_f276322eb5eb9f 1-325
+frontend/src/components/optimization/CliReferenceSection.tsx
+  h_f276322eb5eb9f 1-122
+frontend/src/components/optimization/DatasetsSection.tsx
+  h_f276322eb5eb9f 1-433
+frontend/src/components/optimization/LaunchOptimizationDialog.tsx
+  h_f276322eb5eb9f 1-454
+frontend/src/components/optimization/RunHistorySection.tsx
+  h_f276322eb5eb9f 1-283
+frontend/src/components/optimization/RunInspectorPanel.tsx
+  h_f276322eb5eb9f 1-426
+frontend/src/components/optimization/TargetSummaryGrid.tsx
+  h_f276322eb5eb9f 1-317
+frontend/src/components/ui/banner.tsx
+  h_f276322eb5eb9f 1-698
+frontend/src/components/ui/scroll-area.tsx
+  h_f276322eb5eb9f 6,9,18-21
+frontend/src/components/ui/select.tsx
+  h_f276322eb5eb9f 1-834
+frontend/src/components/ui/sheet.tsx
+  h_f276322eb5eb9f 31,58
+frontend/src/components/ui/switch.tsx
+  h_f276322eb5eb9f 1-381
+frontend/src/components/ui/table.tsx
+  h_f276322eb5eb9f 1-637
+frontend/src/components/ui/thinking-indicator.tsx
+  h_f276322eb5eb9f 1-145
+frontend/src/components/ui/thinking-steps.tsx
+  h_f276322eb5eb9f 1-730
+frontend/src/hooks/use-keyboard-nav-gate.ts
+  h_f276322eb5eb9f 1-37
+frontend/src/hooks/use-media-query.ts
+  h_f276322eb5eb9f 10-14
+frontend/src/hooks/use-merge-split.tsx
+  h_f276322eb5eb9f 1-456
+frontend/src/hooks/use-optimizations.ts
+  h_f276322eb5eb9f 1-289
+frontend/src/hooks/use-touch-primary.tsx
+  h_f276322eb5eb9f 1-35
+frontend/src/index.css
+  h_f276322eb5eb9f 4-5,68-217,292-369,425-432,450-466,513-526,577-953
+frontend/src/lib/api.ts
+  h_f276322eb5eb9f 97-244,261,264,379-423
+frontend/src/lib/key-cap.tsx
+  h_f276322eb5eb9f 1-83
+frontend/src/lib/omit.ts
+  h_f276322eb5eb9f 1-8
+frontend/src/lib/popup.ts
+  h_f276322eb5eb9f 1-172
+frontend/src/main.tsx
+  h_f276322eb5eb9f 1,11-17
+frontend/src/pages/OptimizationPage.test.tsx
+  h_f276322eb5eb9f 1-331
+frontend/src/pages/OptimizationPage.tsx
+  h_f276322eb5eb9f 1-2,4-12,15,17-18,20-24,27-96,100-127,129-171,173-237,241-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4e0b25758a5e723e88c54ac04a093880fcd2313",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
