@@ -573,6 +573,18 @@ async def create_child_run(
     return child
 
 
+def transcript_value(value: Any) -> Any:
+    """Represent NUL in transcript text visibly. Postgres text and JSONB reject U+0000."""
+    if isinstance(value, str):
+        return value.replace("\x00", "␀")
+    if isinstance(value, list):
+        return [transcript_value(item) for item in value]
+    if isinstance(value, dict):
+        # Keep field names intact. Invalid object keys must fail rather than collide.
+        return {key: transcript_value(item) for key, item in value.items()}
+    return value
+
+
 async def finish_run(
     db: SessionFactory,
     run_id: UUID,
@@ -601,9 +613,9 @@ async def finish_run(
             .where(Run.id == run_id, Run.status == "running")
             .values(
                 status=status,
-                answer=answer,
-                ui_parts=[] if ui_parts is None else ui_parts,
-                error=error,
+                answer=transcript_value(answer),
+                ui_parts=transcript_value(ui_parts or []),
+                error=transcript_value(error),
                 finished_at=func.now(),
             )
             .returning(Run.session_id, Run.parent_run_id)
@@ -615,7 +627,7 @@ async def finish_run(
             await connection.execute(
                 update(Session)
                 .where(Session.id == row.session_id)
-                .values(history_json=history_json)
+                .values(history_json=transcript_value(history_json))
             )
         if row.parent_run_id is None and retire_sandbox_id is not None:
             await connection.execute(

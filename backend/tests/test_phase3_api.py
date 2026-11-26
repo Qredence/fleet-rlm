@@ -1543,6 +1543,27 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     offline.memory.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_rejected_transcript_releases_run_and_retires_vm(offline, monkeypatch):
+    async def reject_once(*args, **kwargs):
+        offline.finish.side_effect = offline.store.finish
+        raise api.SQLAlchemyError("rejected transcript")
+
+    async def interrupt(*_args, **_kwargs):
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(api.agent, "run_workspace_task", interrupt)
+    offline.finish.side_effect = reject_once
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.text.endswith("data: [DONE]\n\n")
+    terminal = offline.finish.await_args.kwargs
+    assert terminal["status"] == "failed"
+    assert [part["type"] for part in terminal["ui_parts"]] == ["data-turn-details"]
+    assert terminal["retire_sandbox_id"] == "test-sandbox"
+    assert not offline.store.active
+    offline.daytona.v2.delete.assert_awaited_once_with("test-sandbox", timeout=30)
+
+
 @pytest.mark.parametrize(
     ("status", "retry"), [("failed", False), ("failed", True), ("cancelled", False)]
 )

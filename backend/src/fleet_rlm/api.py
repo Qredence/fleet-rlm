@@ -1295,7 +1295,9 @@ async def _finish_root(
         async with sessionmaker() as db, db.begin():
             for child_id, parts in (child_snapshots or {}).items():
                 await db.execute(
-                    running_children.where(store.Run.id == UUID(child_id)).values(ui_parts=parts)
+                    running_children.where(store.Run.id == UUID(child_id)).values(
+                        ui_parts=store.transcript_value(parts)
+                    )
                 )
             # A child-start transaction can commit before its interrupted callback returns.
             await db.execute(running_children)
@@ -1557,6 +1559,27 @@ async def _persist_turn_outcome(
         ui_parts=stream.snapshot(str(turn.run_id)),
         error=error,
         **persisted,
+    )
+
+
+async def _persist_failed_finalization(
+    sessionmaker: store.SessionFactory,
+    turn: Turn,
+    status: store.TerminalStatus,
+    sandbox: AsyncSandbox | None,
+    error: Exception,
+    failed_details: dict,
+    parts: list[dict],
+) -> bool:
+    if sandbox is not None:
+        turn.sandbox_for_cleanup = sandbox.id
+    # A rejected payload must not invalidate the terminal-state retry.
+    return await _finish_root(
+        sessionmaker,
+        turn,
+        "cancelled" if status == "cancelled" else "failed",
+        error="Could not persist turn",
+        ui_parts=[failed_details] if isinstance(error, SQLAlchemyError) else parts,
     )
 
 
@@ -1852,12 +1875,14 @@ async def _execute_turn(
                     if failure_parts is not None:
                         failure_parts.append(failed_details)
                     terminal_frames[:] = [*interruption_frames, failed_details]
-                    fence_committed = await _finish_root(
+                    fence_committed = await _persist_failed_finalization(
                         sessionmaker,
                         turn,
-                        "cancelled" if status == "cancelled" else "failed",
-                        error="Could not persist turn",
-                        ui_parts=failure_parts or stream.snapshot(root_id),
+                        status,
+                        sandbox,
+                        error,
+                        failed_details,
+                        failure_parts or stream.snapshot(root_id),
                     )
                 status = "failed"
                 committed = False

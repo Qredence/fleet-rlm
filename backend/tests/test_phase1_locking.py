@@ -222,6 +222,24 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
         next_root = await acquire_root_run(db, session.id, "Next turn")
         assert next_root.id != root.id
         assert next_root.status == "running"
+        binary_output = "PDF stream\x00bytes and literal " + r"\u0000"
+        visible = binary_output.replace("\x00", "␀")
+        assert await finish_run(
+            db,
+            next_root.id,
+            status="completed",
+            answer=binary_output,
+            ui_parts=[{"type": "text", "text": binary_output}],
+            history_json={"messages": [{"answer": binary_output}]},
+        )
+        assert (await get_session_or_raise(db, session.id)).history_json == {
+            "messages": [{"answer": visible}]
+        }
+        assert (await get_session_ui_messages(db, session.id))[-1]["parts"] == [
+            {"type": "text", "text": visible}
+        ]
+        await acquire_root_run(db, session.id, "After binary output")
+
     finally:
         async with db.begin() as connection:
             await connection.execute(delete(Session).where(Session.id == session.id))
