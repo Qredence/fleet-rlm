@@ -33,7 +33,7 @@ _SECRET_SCAN_RE = re.compile(
     r"|tvly-[A-Za-z0-9_-]{12,}"
     r"|napi_[A-Za-z0-9_-]{12,}"
     r"|xai-[A-Za-z0-9_-]{12,}"
-    r"|gsk_[A-Za-z0-9_-]{12,}"
+    r"|gsk_[A-Za-z0-9_-]{16,}"
     r"|AIza[0-9A-Za-z_-]{20,}"
     r"|gh[pousr]_[A-Za-z0-9]{20,}"
     r"|github_pat_[A-Za-z0-9_]{20,}"
@@ -42,12 +42,17 @@ _SECRET_SCAN_RE = re.compile(
     r"|postgres(?:ql)?(?:\+psycopg)?://[^\s\"'<>]+"
     r"|https?://[^/\s\"'@:]+:[^/\s\"'@]+@[^\s\"'<>]+"
     r"|Bearer\s+[A-Za-z0-9._~+/-]{16,}=*"
-    r"|(?:api[_-]?key|token|secret|password)=[^\s&\"']{6,}"
     r"|[?&](?:api_?key|access_?token|auth_?token|token|secret|password|key)=[^\s&\"'#<>]+"
     r")",
     re.IGNORECASE,
 )
 SECRET_SCAN_RE = _SECRET_SCAN_RE
+# Logs also contain CLI-style assignments that are valid text inside a dataset.
+_LOG_SECRET_RE = re.compile(
+    _SECRET_SCAN_RE.pattern + r"|gsk_[A-Za-z0-9_-]{12,}"
+    r"|(?:api[_-]?key|token|secret|password)=[^\s&\"']{6,}",
+    re.IGNORECASE,
+)
 
 
 class DatasetValidationError(ValueError):
@@ -82,7 +87,7 @@ def scrub_secrets(value: Any, extra_secrets: Sequence[str] = ()) -> Any:
 
 
 def _scrub_string(text: str, ordered_extras: Sequence[str]) -> str:
-    cleaned = _SECRET_SCAN_RE.sub("[REDACTED]", text)
+    cleaned = _LOG_SECRET_RE.sub("[REDACTED]", text)
     for secret in ordered_extras:
         cleaned = cleaned.replace(secret, "[REDACTED]")
     return cleaned

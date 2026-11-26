@@ -13,6 +13,7 @@ cd "$smoke_dir"
 import os
 from importlib.metadata import version
 
+from fleet_rlm import optimize
 from fleet_rlm.api import app
 from fleet_rlm.config import Settings
 from fleet_rlm.opt_runner import resolve_eval_datasets_dir
@@ -26,6 +27,10 @@ assert "web-research" in {skill.name for skill in registry.skills}
 datasets = resolve_eval_datasets_dir(settings)
 assert load_skills_dataset(datasets / "skills.jsonl", registry)
 assert load_memory_dataset(datasets / "memory.jsonl")
-assert load_rlm_dataset(datasets / "rlm.jsonl", settings=settings, registry=registry)
+examples = load_rlm_dataset(datasets / "rlm.jsonl", settings=settings, registry=registry)
+specs, _, _ = optimize._build_case_spec_tables(examples)
+fixture = next(spec for spec in specs.values() if spec.fixture_id)
+files, web = optimize._resolve_case_fixtures(fixture)
+assert files or web
 assert "/healthz" in app.openapi()["paths"]
 PY

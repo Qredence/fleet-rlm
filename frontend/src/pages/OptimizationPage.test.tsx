@@ -772,6 +772,26 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(nonJevReanchorHtml).toContain('TypeSafe Jev System One')
   })
 
+  it.each([
+    ['memory', '0.0%'], ['skills', '0.0%'], ['rlm', '0.00%'],
+  ] as const)('renders legacy %s holdout scores in both reports', (target, zero) => {
+    const job = { ...MOCK_REANCHOR_JOB, target, baseline_score: 0, optimized_score: 1, report_json: {} }
+    const inspector = renderToStaticMarkup(
+      <TooltipProvider>
+        <RunInspectorPanel job={job} loading={false} activePromotionJobId={null}
+          onPromote={async () => {}} onRerun={() => {}} onOpenFullDiff={() => {}} />
+      </TooltipProvider>,
+    )
+    const diff = renderToStaticMarkup(
+      <TooltipProvider><RunFullDiffContent job={job} initialTab={0} /></TooltipProvider>,
+    )
+    for (const html of [inspector, diff]) {
+      expect(html).toContain('Holdout score improved over baseline')
+      expect(html).toContain(zero)
+      expect(html).toContain(target === 'rlm' ? '1.00%' : '100.0%')
+    }
+  })
+
   it('renders RunInspectorPanel executive summary, gate checklist, Flex disabled reason, and RunFullDiffContent tabs for ReAnchor & GEPA', () => {
     const inspectorHtml = renderToStaticMarkup(
       <TooltipProvider>
