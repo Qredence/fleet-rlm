@@ -7,6 +7,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import secrets
 import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -280,7 +281,7 @@ def encryption_configured(settings: Settings | SecretStr | str | None) -> bool:
     return _extract_raw_key(settings) is not None
 
 
-def _build_fernet(source: Settings | SecretStr | str | None) -> Fernet:
+def _build_fernet(source: Settings | SecretStr | str | None, salt: bytes) -> Fernet:
     raw = _extract_raw_key(source)
     if not raw:
         raise CredentialEncryptionError(
@@ -289,12 +290,13 @@ def _build_fernet(source: Settings | SecretStr | str | None) -> Fernet:
     try:
         return Fernet(raw.encode("ascii"))
     except (ValueError, UnicodeEncodeError):
-        if len(raw) < 16:
+        if not salt or len(raw) < 16:
             raise CredentialEncryptionError(
                 "FLEET_CREDENTIALS_ENCRYPTION_KEY must be a valid Fernet key "
                 "or a passphrase of at least 16 characters"
             ) from None
-        derived = base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest())
+        key = hashlib.pbkdf2_hmac("sha256", raw.encode("utf-8"), salt, 600_000, dklen=32)
+        derived = base64.urlsafe_b64encode(key)
         return Fernet(derived)
 
 
@@ -303,8 +305,10 @@ def encrypt_secret(plaintext: str, key_source: Settings | SecretStr | str | None
     cleaned = plaintext.strip()
     if not cleaned:
         raise CredentialEncryptionError("Cannot encrypt an empty secret")
-    fernet = _build_fernet(key_source)
-    return fernet.encrypt(cleaned.encode("utf-8")).decode("ascii")
+    salt = secrets.token_bytes(16)
+    fernet = _build_fernet(key_source, salt)
+    token = fernet.encrypt(cleaned.encode("utf-8")).decode("ascii")
+    return f"v1.{salt.hex()}.{token}"
 
 
 def decrypt_secret(ciphertext: str, key_source: Settings | SecretStr | str | None) -> str:
@@ -312,8 +316,14 @@ def decrypt_secret(ciphertext: str, key_source: Settings | SecretStr | str | Non
     cleaned = ciphertext.strip()
     if not cleaned:
         raise CredentialEncryptionError("Stored ciphertext is empty")
-    fernet = _build_fernet(key_source)
     try:
+        salt = b""
+        if cleaned.startswith("v1."):
+            _, salt_hex, cleaned = cleaned.split(".", 2)
+            salt = bytes.fromhex(salt_hex)
+            if len(salt) != 16:
+                raise ValueError("Invalid credential salt")
+        fernet = _build_fernet(key_source, salt)
         return fernet.decrypt(cleaned.encode("ascii")).decode("utf-8")
     except (InvalidToken, ValueError, UnicodeDecodeError) as error:
         raise CredentialEncryptionError(

@@ -350,7 +350,7 @@ export function ActiveRunBanner({
                   </ThinkingStepsHeader>
                   <ThinkingStepsContent>
                     {stages.map((item, idx) => {
-                      let stepStatus: 'complete' | 'active' | 'upcoming' | 'error' = 'upcoming'
+                      let stepStatus: 'complete' | 'active' | 'upcoming' | 'error'
                       if (job.status === 'completed' || currentStageKey === 'completed') {
                         stepStatus = 'complete'
                       } else if (job.status === 'failed' || job.status === 'cancelled') {

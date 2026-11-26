@@ -74,8 +74,15 @@ def test_fernet_encryption_roundtrip_and_errors() -> None:
     assert ct != "sk-proj-secret-value-9876"
     assert decrypt_secret(ct, settings_key) == "sk-proj-secret-value-9876"
 
+    legacy = Fernet(fernet_key.encode()).encrypt(b"existing").decode()
+    assert decrypt_secret(legacy, settings_key) == "existing"
+
     ct2 = encrypt_secret("sk-ant-another-key-1234", settings_passphrase)
     assert decrypt_secret(ct2, settings_passphrase) == "sk-ant-another-key-1234"
+
+    assert ct2.split(".")[1] != encrypt_secret("same key", settings_passphrase).split(".")[1]
+    with pytest.raises(CredentialEncryptionError):
+        decrypt_secret("v1.00.invalid", settings_passphrase)
 
     with pytest.raises(CredentialEncryptionError):
         encrypt_secret("sk-test-1234567890", settings_none)
