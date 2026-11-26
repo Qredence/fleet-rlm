@@ -207,7 +207,7 @@ def build_program(
             max_chars=settings.history_max_chars,
         ),
     )
-    runtime_tool_docs = program._format_tool_docs(program._user_tools)
+    runtime_tool_docs = program._format_tool_docs(program.tools)
     loaded = False
     if optimized_state is not None:
         program.load_state(deepcopy(optimized_state))

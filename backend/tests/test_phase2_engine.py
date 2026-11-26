@@ -2397,6 +2397,7 @@ def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings,
 
     # Artifact compiled with stale tools strips stale tool docs and re-appends only current tools.
     stale_program = build_program(settings, [stale_tool, web_search])
+    stale_program.generate_action.lm = dspy.LM("openai/compiled-model", api_key="fixture")
     stale_base = strip_dynamic_tool_docs(stale_program.generate_action.signature.instructions)
     stale_path = tmp_path / "stale_optimized.json"
     stale_program.save(stale_path)
@@ -2405,7 +2406,9 @@ def test_build_program_syncs_dynamic_tool_docs_on_optimized_state_load(settings,
     refreshed = build_program(settings, [spawn_agent], optimized_state=stale_state)
     refreshed_instructions = refreshed.generate_action.signature.instructions
     assert refreshed_instructions.count(_TOOL_DOCS_HEADER) == 1
-    assert "spawn_agent(task: string)" in refreshed_instructions
+    assert refreshed_instructions.count("spawn_agent(task: string)") == 1
+    assert set(refreshed.tools) == {"spawn_agent"}
+    assert all(predictor.lm is None for predictor in refreshed.predictors())
     assert "stale_tool" not in refreshed_instructions
     assert "web_search" not in refreshed_instructions
     assert strip_dynamic_tool_docs(refreshed_instructions) == stale_base

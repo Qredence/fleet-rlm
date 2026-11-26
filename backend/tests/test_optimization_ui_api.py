@@ -1291,7 +1291,12 @@ async def test_credentials_file_allowlisted_env_scrubbing_and_stale_reap_before_
     # Consume SSE until completion
     sse = await client.get(f"/api/optimizations/jobs/{job_id}/events", headers=_AUTH)
     assert sse.status_code == 200
-    assert "event: done" in sse.text
+    events = [
+        line.removeprefix("event: ") for line in sse.text.splitlines() if line.startswith("event: ")
+    ]
+    assert events[0] == "snapshot" and events[-1] == "done"
+    assert set(events[1:-1]) <= {"update"}
+    assert "[DONE]" not in sse.text
 
     # Verify 0600 private files & deletion in finally:
     assert captured["db_file_mode"] == 0o600
