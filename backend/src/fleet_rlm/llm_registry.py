@@ -420,6 +420,19 @@ def _resolve_and_check_host(hostname: str, port: int, *, allow_private: bool) ->
         _check_ip_allowed(ip, allow_private=allow_private)
 
 
+def _endpoint_scheme(raw_scheme: str, hostname: str | None, schemes: Sequence[str]) -> str:
+    allowed_schemes = {scheme.lower() for scheme in schemes}
+    if hostname not in {"localhost", "127.0.0.1", "::1"}:
+        allowed_schemes.discard("http")
+    scheme = raw_scheme.lower()
+    if scheme not in allowed_schemes:
+        allowed_text = ", ".join(sorted(allowed_schemes))
+        raise EndpointValidationError(
+            f"Unsupported URL scheme {raw_scheme!r} (allowed: {allowed_text})"
+        )
+    return scheme
+
+
 def validate_endpoint_url(
     url: str,
     *,
@@ -439,13 +452,7 @@ def validate_endpoint_url(
     except ValueError as error:
         raise EndpointValidationError(f"Malformed endpoint URL: {error}") from error
 
-    allowed_schemes = {scheme.lower() for scheme in schemes}
-    scheme = parsed.scheme.lower()
-    if scheme not in allowed_schemes:
-        allowed_text = ", ".join(sorted(allowed_schemes))
-        raise EndpointValidationError(
-            f"Unsupported URL scheme {parsed.scheme!r} (allowed: {allowed_text})"
-        )
+    scheme = _endpoint_scheme(parsed.scheme, parsed.hostname, schemes)
     if parsed.username is not None or parsed.password is not None:
         raise EndpointValidationError("Endpoint URL must not embed credentials")
     if parsed.query or parsed.fragment:
@@ -458,7 +465,7 @@ def validate_endpoint_url(
         port = parsed.port
     except ValueError as error:
         raise EndpointValidationError("Endpoint URL contains an invalid port") from error
-    if port is not None and not (1 <= port <= 65535):
+    if port == 0:
         raise EndpointValidationError("Endpoint URL port is out of range")
 
     effective_port = port if port is not None else (443 if scheme == "https" else 80)
@@ -494,7 +501,7 @@ def validate_database_url(url: str, *, allow_private: bool = False) -> str:
         port = parsed.port
     except ValueError as error:
         raise EndpointValidationError("Database URL contains an invalid port") from error
-    if port is not None and not (1 <= port <= 65535):
+    if port == 0:
         raise EndpointValidationError("Database URL port is out of range")
 
     effective_port = port if port is not None else 5432

@@ -44,6 +44,7 @@ interface SessionWorkspaceProps {
   filesDocked: boolean
   setFilesDocked: (value: boolean) => void
   onActivity: (id: string | null) => void
+  onTurnAccepted: () => void
   onTurnComplete: () => void
   onFilesUploaded: () => void
   onSkillInstalled: (skill: Skill) => void
@@ -52,7 +53,7 @@ interface SessionWorkspaceProps {
 
 export function SessionWorkspace({
   api, token, session, skills, skillsError, visible, recentStops, filesDocked, setFilesDocked,
-  onActivity, onTurnComplete, onFilesUploaded, onSkillInstalled, onModelChange,
+  onActivity, onTurnAccepted, onTurnComplete, onFilesUploaded, onSkillInstalled, onModelChange,
 }: SessionWorkspaceProps) {
   const [initialMessages, setInitialMessages] = useState<FleetMessage[] | null>(null)
   const [transcriptError, setTranscriptError] = useState('')
@@ -97,6 +98,7 @@ export function SessionWorkspace({
 
   const chat = useSessionChat({
     id: session.id, token, initialMessages, recentStops,
+    onAccepted: onTurnAccepted,
     onComplete: () => {
       refresh()
       onTurnComplete()
@@ -293,7 +295,13 @@ export function SessionWorkspace({
             </Deferred>}
             <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-3 pb-3 sm:px-6 sm:pb-5">
               {(modelError || sendError || error || skillsError) && (
-                <Alert variant="destructive"><AlertDescription>{modelError || sendError || error?.message || skillsError}</AlertDescription></Alert>
+                <Alert variant="destructive"><AlertDescription>{modelError || sendError || error?.message || skillsError}
+                  {(sendError || error?.message)?.includes('Choose another model and retry') && latestPromptIndex >= 0 && (
+                    <Button variant="outline" size="sm" disabled={active || modelSaving} onClick={() => {
+                      const text = messages[latestPromptIndex].parts.flatMap(part => part.type === 'text' ? [part.text] : []).join(' ')
+                      void submit(text)
+                    }}>Retry last request with selected model</Button>
+                  )}</AlertDescription></Alert>
               )}
               {active && (
                 <p role="status" className="px-1 text-xs text-muted-foreground">

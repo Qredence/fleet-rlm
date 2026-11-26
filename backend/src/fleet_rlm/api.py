@@ -246,9 +246,40 @@ def require_auth(
     if (
         scheme.lower() != "bearer"
         or not token
-        or not secrets.compare_digest(token.encode(), expected.get_secret_value().encode())
+        or not any(
+            secrets.compare_digest(token.encode(), item.get_secret_value().encode())
+            for item in (expected, runtime.settings.provider_admin_token)
+            if item
+        )
     ):
         raise HTTPException(401, "Invalid bearer token", headers={"WWW-Authenticate": "Bearer"})
+
+
+def require_provider_admin(request: Request, runtime: RuntimeDep) -> None:
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+    local = (
+        request.client is not None
+        and request.client.host in local_hosts
+        and request.url.hostname in local_hosts
+        and not request.headers.get("x-forwarded-for")
+        and not request.headers.get("forwarded")
+        and (
+            not request.headers.get("origin")
+            or urlsplit(request.headers["origin"]).hostname in local_hosts
+        )
+    )
+    if local and not (runtime.settings.provider_admin_token or runtime.settings.api_bearer_token):
+        return
+    if request.url.scheme != "https" and not local:
+        raise HTTPException(403, "Provider administration requires HTTPS")
+    admin = runtime.settings.provider_admin_token
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if (
+        not admin
+        or scheme.lower() != "bearer"
+        or not secrets.compare_digest(token.encode(), admin.get_secret_value().encode())
+    ):
+        raise HTTPException(403, "Provider administration requires the administrator token")
 
 
 async def get_db(runtime: RuntimeDep) -> AsyncIterator[AsyncSession]:
@@ -591,6 +622,10 @@ async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> Ses
         override = payload.model_override.strip() if payload.model_override is not None else ""
         changes["model_override"] = override or None
     async with db.begin():
+        try:
+            await store.lock_model_providers(db, (changes.get("model_override"),))
+        except store.OptimizationConflictError as error:
+            raise HTTPException(409, str(error)) from error
         session = await db.scalar(
             update(store.Session)
             .where(store.Session.id == session_id, store.Session.deleting.is_(False))
@@ -685,13 +720,90 @@ def _request_root_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
     return runtime.lm
 
 
+async def _chat_model(runtime: Runtime, effective: Settings, override: str | None):
+    selected = override or effective.llm_model
+    if not selected.startswith("provider/"):
+        endpoint = urlsplit(effective.llm_base_url or "").hostname or "workspace provider"
+        return override or _request_root_lm(
+            runtime, effective
+        ), f"{endpoint} · {override or effective.llm_model}"
+    return await _registered_chat_model(runtime, effective, selected)
+
+
+def _registered_model_reference(selected: str) -> tuple[UUID, str]:
+    try:
+        _, provider_id, name = selected.split("/", 2)
+        if name.strip():
+            return UUID(provider_id), name
+    except ValueError:
+        pass
+    raise ValueError("Select a valid provider and model")
+
+
+async def _registered_model(runtime: Runtime, selected: str) -> tuple[store.LLMProvider, str]:
+    provider_id, name = _registered_model_reference(selected)
+    provider = await store.get_llm_provider(runtime.sessionmaker, provider_id)
+    if provider is None:
+        raise ValueError("Selected provider or model is unavailable")
+    return provider, name
+
+
+async def _registered_chat_model(runtime: Runtime, effective: Settings, selected: str):
+    provider, name = await _registered_model(runtime, selected)
+    base = provider.base_url
+    if base:
+        base = await asyncio.to_thread(
+            llm_registry.validate_endpoint_url,
+            base,
+            allow_private=effective.allow_private_llm_endpoints,
+        )
+    # Explicit keyless credentials prevent SDK fallback to a host environment key.
+    key = (
+        llm_registry.decrypt_secret(provider.api_key_ciphertext, effective)
+        if provider.api_key_ciphertext
+        else "fleet-keyless"
+    )
+    lm = llm_registry.build_dspy_lm(
+        cast(llm_registry.ProviderDialect, provider.dialect),
+        cast(llm_registry.ProviderApiMode, provider.api_mode),
+        name,
+        key,
+        base,
+    )
+    return lm, f"{provider.name} · {name}"
+
+
 def _request_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
     if effective.sub_llm_model != runtime.settings.sub_llm_model:
         return agent._model(effective, effective.sub_llm_model)
     return runtime.sub_lm
 
 
-def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+async def _workspace_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+    if effective.sub_llm_model.startswith("provider/"):
+        lm, _ = await _registered_chat_model(runtime, effective, effective.sub_llm_model)
+        return lm
+    return _request_sub_lm(runtime, effective)
+
+
+def _is_jev_model(model: str) -> bool:
+    return re.fullmatch(r"(?:typesafe[:/])?jev(?:-[^\s/]+)?", model) is not None
+
+
+async def _validate_decision_model(runtime: Runtime, selection: str) -> None:
+    if selection.startswith("typesafe:") and _is_jev_model(selection):
+        return
+    if selection.startswith("provider/"):
+        provider, model = await _registered_model(runtime, selection)
+        if provider.dialect == "typesafe" and _is_jev_model(model):
+            return
+    raise ValueError("Select a compatible TypeSafe Jev decision model")
+
+
+async def _request_decision_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
+    if effective.decision_model.startswith("provider/"):
+        lm, _ = await _registered_chat_model(runtime, effective, effective.decision_model)
+        return lm
     if effective.decision_model != runtime.settings.decision_model:
         return dspy.LM(effective.decision_model)
     return runtime.decision_lm
@@ -740,18 +852,29 @@ async def _gateway_model_labels(base_url: str, api_key: str) -> list[str]:
 async def list_models(runtime: RuntimeDep, response: Response) -> ModelCatalog:
     effective = await _effective_settings(runtime)
     response.headers["Cache-Control"] = "private, no-store"
-    if not effective.llm_base_url:
-        return ModelCatalog(workspace_default=effective.llm_model, catalog_status="unconfigured")
-    try:
-        labels = await _gateway_model_labels(
-            effective.llm_base_url, effective.llm_api_key.get_secret_value()
-        )
-    except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, ValueError):
-        return ModelCatalog(workspace_default=effective.llm_model, catalog_status="unavailable")
+    models = []
+    for provider in await store.list_llm_providers(runtime.sessionmaker):
+        names = [model.id for model in _provider_view(provider).cached_models]
+        if provider.default_model:
+            names.append(provider.default_model)
+        for name in dict.fromkeys(names):
+            models.append(
+                CatalogModel(id=f"provider/{provider.id}/{name}", label=f"{provider.name} · {name}")
+            )
+    status: Literal["ready", "unavailable", "unconfigured"] = "unconfigured"
+    if effective.llm_base_url:
+        try:
+            labels = await _gateway_model_labels(
+                effective.llm_base_url, effective.llm_api_key.get_secret_value()
+            )
+            models.extend(CatalogModel(id=f"openai/{label}", label=label) for label in labels)
+            status = "ready"
+        except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, ValueError):
+            status = "unavailable"
     return ModelCatalog(
         workspace_default=effective.llm_model,
-        catalog_status="ready",
-        models=[CatalogModel(id=f"openai/{label}", label=label) for label in labels],
+        catalog_status="ready" if models else status,
+        models=models,
     )
 
 
@@ -766,8 +889,18 @@ async def patch_settings(
     payload: WorkspaceSettingsPatch, runtime: RuntimeDep
 ) -> WorkspaceSettingsView:
     changes = {field: getattr(payload, field) for field in payload.model_fields_set}
+    if payload.decision_model is not None:
+        try:
+            await _validate_decision_model(runtime, payload.decision_model)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
     if changes:
-        overrides = await store.update_workspace_settings_overrides(runtime.sessionmaker, changes)
+        try:
+            overrides = await store.update_workspace_settings_overrides(
+                runtime.sessionmaker, changes
+            )
+        except store.OptimizationConflictError as error:
+            raise HTTPException(409, str(error)) from error
     else:
         overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
     return await _workspace_settings_view(runtime, overrides)
@@ -1189,7 +1322,7 @@ async def refine_turn(session_id: UUID, run_id: UUID, runtime: RuntimeDep) -> Re
     try:
         async with asyncio.timeout(30):
             lesson = await agent.refine_turn(
-                run.prompt, skills, observations, lm=_request_sub_lm(runtime, effective)
+                run.prompt, skills, observations, lm=await _workspace_sub_lm(runtime, effective)
             )
     except TimeoutError as error:
         raise HTTPException(504, "Refinement timed out. Try again.") from error
@@ -1219,9 +1352,9 @@ async def list_skills(runtime: RuntimeDep) -> list[SkillView]:
 @app.get("/api/skills/{name}", dependencies=[Depends(require_auth)])
 async def get_skill(name: str, runtime: RuntimeDep) -> SkillDetail:
     registry = await _skill_registry(runtime)
-    for skill in registry.available_skills(runtime.settings):
-        if skill.name == name:
-            return SkillDetail.model_validate(skill)
+    skill = registry.pin_names().get(name)
+    if skill and not skill.unavailable_reason(runtime.settings):
+        return SkillDetail.model_validate(skill)
     raise HTTPException(404, "Skill not found")
 
 
@@ -1321,15 +1454,15 @@ async def _prepare_turn(
 ) -> AsyncIterator[Turn]:
     prompt = payload.latest_prompt()
     registry = await _skill_registry(runtime)
+    skills_by_name = registry.pin_names()
     mentioned = [
-        skill.name
-        for skill in registry.skills
-        if re.search(rf"(?<![\w@])@{re.escape(skill.name)}(?![\w-])", prompt)
+        name
+        for name in skills_by_name
+        if re.search(rf"(?<![\w@])@{re.escape(name)}(?![\w-])", prompt)
     ]
     pinned = list(
         dict.fromkeys([*(name.removeprefix("@") for name in payload.pinned_skills), *mentioned])
     )
-    skills_by_name = {skill.name: skill for skill in registry.skills}
     if set(pinned) - skills_by_name.keys():
         raise HTTPException(422, "Unknown pinned Skill")
     for name in pinned:
@@ -1449,7 +1582,7 @@ async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list
         effective = await _effective_settings(runtime)
         active_artifacts = await opt_runner.resolve_active_artifacts(runtime, effective)
         effective = active_artifacts.settings
-        decision_lm = active_artifacts.memory_decision_lm or _request_decision_lm(
+        decision_lm = active_artifacts.memory_decision_lm or await _request_decision_lm(
             runtime, effective
         )
         candidates = await store.search_memories(
@@ -1585,7 +1718,19 @@ async def _persist_failed_finalization(
     )
 
 
-def _turn_failure_message(error: Exception) -> str:
+def _turn_failure_message(
+    error: Exception, billing_model: tuple[Literal["primary", "decision"], str] | None
+) -> str:
+    if type(error.__cause__ or error).__name__ in {"BillingError", "LMBillingError"}:
+        if billing_model is None:
+            return "Model billing failed. Check the workspace model settings."
+        role, label = billing_model
+        if role == "decision":
+            return (
+                f"Billing failed while using the Decision Model ({label}). "
+                "Update it in Settings → Models."
+            )
+        return f"Billing failed while using {label}. Choose another model and retry."
     if isinstance(error, TimeoutError):
         return "Turn timed out"
     if isinstance(error, SandboxStartupError):
@@ -1606,6 +1751,7 @@ async def _execute_turn(
     root_id = str(turn.run_id)
     status: store.TerminalStatus = "failed"
     error_text = None
+    billing_model: tuple[Literal["primary", "decision"], str] | None = None
     result = None
     terminal_frames: list[dict] = []
     artifacts: list[store.StagedFile] = []
@@ -1706,8 +1852,12 @@ async def _execute_turn(
                     runtime, sandbox, files, effective.daytona_exec_timeout_seconds
                 )
             hydrated = True
-            decision_lm = active_artifacts.skills_decision_lm or _request_decision_lm(
+            decision_lm = active_artifacts.skills_decision_lm or await _request_decision_lm(
                 runtime, effective
+            )
+            billing_model = (
+                "decision",
+                getattr(decision_lm, "model", None) or effective.decision_model,
             )
             selection = await asyncio.to_thread(
                 select_skills,
@@ -1718,10 +1868,18 @@ async def _execute_turn(
                 prior_turns=prior_turns,
                 decision_lm=decision_lm,
             )
+            billing_model = None
             records = await store.search_memories(sessionmaker, turn.session_id, turn.prompt)
             selected_skill_names = [skill.name for skill in selection.active_skills]
             procedures = await store.recall_procedures(
-                sessionmaker, turn.session_id, turn.prompt, selected_skill_names
+                sessionmaker,
+                turn.session_id,
+                turn.prompt,
+                [
+                    name
+                    for name, skill in turn.skills.pin_names().items()
+                    if skill.name in selected_skill_names
+                ],
             )
             task_memories = records
             if "skill-creator" in selected_skill_names:
@@ -1754,6 +1912,9 @@ async def _execute_turn(
                     )
                     await stream.files(run_id, manifest)
 
+            root_model, model_label = await _chat_model(runtime, effective, session.model_override)
+            sub_lm = await _workspace_sub_lm(runtime, effective)
+            billing_model = ("primary", model_label)
             result = await agent.run_workspace_task(
                 effective,
                 task=turn.prompt,
@@ -1775,12 +1936,13 @@ async def _execute_turn(
                 prior_turns=prior_turns,
                 selection=selection,
                 host_tools=load_host_tools(runtime.skills, selection, effective),
-                model_override=session.model_override or _request_root_lm(runtime, effective),
-                sub_lm=_request_sub_lm(runtime, effective),
+                model_override=root_model,
+                sub_lm=sub_lm,
                 optimized_state=optimized_program_state,
                 callbacks=agent.ChildCallbacks(start_child, finish_child),
                 telemetry=telemetry,
             )
+            billing_model = None
             with (
                 workspace_span("fleet.workspace.publish") as publication,
                 TemporaryDirectory(prefix="fleet-publish-") as temporary,
@@ -1843,7 +2005,7 @@ async def _execute_turn(
         if current_task is not None and current_task.cancelling():
             status = "cancelled"
             raise asyncio.CancelledError from error
-        error_text = _turn_failure_message(error)
+        error_text = _turn_failure_message(error, billing_model)
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
@@ -2638,7 +2800,11 @@ async def list_optimization_providers(runtime: RuntimeDep) -> LLMProviderListRes
     )
 
 
-@app.post("/api/optimizations/providers", status_code=201, dependencies=[Depends(require_auth)])
+@app.post(
+    "/api/optimizations/providers",
+    status_code=201,
+    dependencies=[Depends(require_auth), Depends(require_provider_admin)],
+)
 async def create_optimization_provider(
     payload: LLMProviderCreate,
     runtime: RuntimeDep,
@@ -2705,7 +2871,10 @@ def _provider_endpoint_changed(
     return (provider.base_url or default).rstrip("/") != (base_url or default).rstrip("/")
 
 
-@app.patch("/api/optimizations/providers/{provider_id}", dependencies=[Depends(require_auth)])
+@app.patch(
+    "/api/optimizations/providers/{provider_id}",
+    dependencies=[Depends(require_auth), Depends(require_provider_admin)],
+)
 async def update_optimization_provider(
     provider_id: UUID,
     payload: LLMProviderUpdate,
@@ -2813,7 +2982,7 @@ async def update_optimization_provider(
 @app.delete(
     "/api/optimizations/providers/{provider_id}",
     status_code=204,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(require_provider_admin)],
 )
 async def delete_optimization_provider(provider_id: UUID, runtime: RuntimeDep) -> None:
     try:
@@ -2824,7 +2993,10 @@ async def delete_optimization_provider(provider_id: UUID, runtime: RuntimeDep) -
         raise HTTPException(404, "LLM provider not found")
 
 
-@app.post("/api/optimizations/providers/probe", dependencies=[Depends(require_auth)])
+@app.post(
+    "/api/optimizations/providers/probe",
+    dependencies=[Depends(require_auth), Depends(require_provider_admin)],
+)
 async def probe_optimization_provider(
     payload: LLMProviderProbeRequest,
     runtime: RuntimeDep,
@@ -2883,7 +3055,10 @@ async def probe_optimization_provider(
     return LLMProviderProbeResponse(ok=True, models=models, count=len(models), error=None)
 
 
-@app.post("/api/optimizations/providers/{provider_id}/models", dependencies=[Depends(require_auth)])
+@app.post(
+    "/api/optimizations/providers/{provider_id}/models",
+    dependencies=[Depends(require_auth), Depends(require_provider_admin)],
+)
 async def refresh_optimization_provider_models(
     provider_id: UUID,
     runtime: RuntimeDep,
@@ -2938,12 +3113,32 @@ async def refresh_optimization_provider_models(
 # ---------------------------------------------------------------------------
 
 
+def _optimization_role_selection(
+    selection: LMRoleSelection | None, fallback_model: str
+) -> LMRoleSelection | None:
+    if selection and selection.provider_id is not None:
+        return selection
+    model = (selection.model or "").strip() if selection else ""
+    reference = model or fallback_model
+    if not reference.startswith("provider/"):
+        return selection
+    try:
+        provider_id, model = _registered_model_reference(reference)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return LMRoleSelection(
+        provider_id=provider_id,
+        model=model,
+        reasoning_effort=selection.reasoning_effort if selection else None,
+    )
+
+
 async def _resolve_role_credentials(
     runtime: Runtime,
     effective: Settings,
     payload: OptimizationJobCreate,
 ) -> tuple[dict[opt_runner.RoleName, opt_runner.ResolvedRoleCredential], UUID | None]:
-    role_inputs: list[tuple[opt_runner.RoleName, LMRoleSelection | None]]
+    role_inputs: list[tuple[opt_runner.RoleName, LMRoleSelection | None, str]]
     if payload.target == "rlm":
         reflection_sel = payload.reflection_lm_config or (
             LMRoleSelection(model=payload.reflection_lm)
@@ -2956,19 +3151,20 @@ async def _resolve_role_credentials(
             else None
         )
         role_inputs = [
-            ("root_lm", payload.root_lm),
-            ("sub_lm", payload.sub_lm),
-            ("reflection_lm", reflection_sel),
-            ("judge_lm", judge_sel),
+            ("root_lm", payload.root_lm, effective.llm_model),
+            ("sub_lm", payload.sub_lm, effective.sub_llm_model),
+            ("reflection_lm", reflection_sel, effective.llm_model),
+            ("judge_lm", judge_sel, effective.llm_model),
         ]
     else:
-        role_inputs = [("decision_lm", payload.decision_lm)]
+        role_inputs = [("decision_lm", payload.decision_lm, effective.decision_model)]
 
     provider_cache: dict[UUID, store.LLMProvider] = {}
     resolved: dict[opt_runner.RoleName, opt_runner.ResolvedRoleCredential] = {}
     decision_provider_id: UUID | None = None
 
-    for role, selection in role_inputs:
+    for role, requested, fallback_model in role_inputs:
+        selection = _optimization_role_selection(requested, fallback_model)
         if selection is None:
             continue
         cleaned_model = (selection.model or "").strip() or None

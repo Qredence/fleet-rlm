@@ -336,6 +336,7 @@ class PythonExecStartedEvent:
 class PythonExecCompletedEvent:
     execution_id: int
     output: Any
+    submission: bool = False
 
 
 @dataclass(frozen=True)
@@ -679,7 +680,9 @@ async def run_workspace_task(
             await emit(
                 current_run_id,
                 PythonExecCompletedEvent(
-                    execution_id, output.output if isinstance(output, FinalOutput) else output
+                    execution_id,
+                    output.output if isinstance(output, FinalOutput) else output,
+                    submission=isinstance(output, FinalOutput),
                 ),
             )
             return output

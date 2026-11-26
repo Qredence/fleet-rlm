@@ -335,8 +335,13 @@ export function LaunchOptimizationFormBody({
       return !explicitModel.toLowerCase().startsWith('typesafe:')
     }
     const wsModel = capabilities?.decision_model ?? ''
+    if (wsModel.startsWith('provider/')) {
+      return !localProviders.some(provider =>
+        provider.dialect === 'typesafe' && wsModel.startsWith(`provider/${provider.id}/`),
+      )
+    }
     return Boolean(wsModel) && !wsModel.toLowerCase().startsWith('typesafe:')
-  }, [capabilities?.decision_model, decisionLm.model, selectedDecisionProvider, target])
+  }, [capabilities?.decision_model, decisionLm.model, localProviders, selectedDecisionProvider, target])
 
   const handleTargetChange = (nextTarget: OptimizationTarget) => {
     setTarget(nextTarget)

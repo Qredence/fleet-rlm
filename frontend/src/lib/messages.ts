@@ -39,6 +39,7 @@ type FleetData = {
   'file-tree': { files: WorkspaceFileEntry[] }
   'web-call': WebCall
   'turn-details': TurnDetails
+  'python-submission': { tool_call_id: string }
 }
 
 type FleetTools = {

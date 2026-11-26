@@ -4,7 +4,9 @@ import argparse
 import asyncio
 import hashlib
 import json
+import subprocess
 import time
+import zipfile
 from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +37,9 @@ async def evaluate(
     large: bool,
     resume: Path | None,
     bundled: bool = False,
+    catalog: bool = False,
+    merged_formats: bool = False,
+    unpinned: bool = False,
     requested_cases: tuple[str, ...] = (),
 ) -> None:
     settings = Settings()
@@ -56,8 +61,14 @@ async def evaluate(
         if bundled
         else []
     )
+    if catalog:
+        from catalog_skill_cases import catalog_cases
+
+        skill_cases = catalog_cases()
     if bundled:
-        known_cases = {"skill-creator", *(case.id for case in skill_cases)}
+        known_cases = {case.id for case in skill_cases}
+        if not catalog:
+            known_cases.add("skill-creator")
         if unknown := set(requested_cases) - known_cases:
             raise ValueError(f"Unknown bundled cases: {sorted(unknown)}")
     else:
@@ -87,6 +98,15 @@ async def evaluate(
             response = await client.request(method, path, **kwargs)
             response.raise_for_status()
             return response
+
+        merged_workbook = False
+        if bundled:
+            published = {
+                item["name"] for item in (await call("GET", "/api/skills")).json()
+            }
+            merged_workbook = (
+                "xlsx" in published and "spreadsheet-audit" not in published
+            )
 
         async def new(label):
             response = await call(
@@ -159,6 +179,12 @@ async def evaluate(
                     and frame["type"] == "tool-input-start"
                     for frame in frames
                 ),
+                "web_calls": [
+                    frame["data"]
+                    for frame in frames
+                    if frame["type"] == "data-web-call"
+                    and frame["data"]["outcome"] != "running"
+                ],
                 "active_skills": [
                     item["name"]
                     for frame in frames
@@ -209,22 +235,53 @@ async def evaluate(
 
         async def bundled_case(case, repeat):
             async with test_session(f"{repeat} {case.id}") as session_id:
-                if case.filename:
+                inputs = [(case.filename, case.contents)] if case.filename else []
+                for filename, contents in [*inputs, *case.additional_files]:
                     await call(
                         "POST",
                         f"/api/sessions/{session_id}/files",
-                        files={"file": (case.filename, case.contents)},
+                        files={"file": (filename, contents)},
+                    )
+                expected_skills = case.skills
+                if merged_workbook or merged_formats:
+                    names = {"spreadsheet-audit": "xlsx"} if merged_workbook else {}
+                    if merged_formats and case.filename.endswith(".pdf"):
+                        names["document-extraction"] = "pdf"
+                    expected_skills = tuple(
+                        names.get(name, name) for name in case.skills
                     )
                 row = await turn(
-                    session_id, case.prompt, pins=() if case.automatic else case.skills
+                    session_id,
+                    case.prompt,
+                    pins=()
+                    if unpinned or catalog or case.automatic
+                    else expected_skills,
                 )
-                passed = set(row["active_skills"]) == set(case.skills)
+                routed = set(row["active_skills"]) == set(expected_skills)
+                row["expected_skills"] = list(expected_skills)
+                row["routing_passed"] = routed
+                passed = True
                 if isinstance(case.expected, dict):
                     try:
-                        passed &= json.loads(row["answer"]) == case.expected
+                        if catalog:
+                            from catalog_skill_cases import matches_catalog_answer
+
+                            passed &= matches_catalog_answer(case, row["answer"])
+                        else:
+                            passed &= json.loads(row["answer"]) == case.expected
                     except ValueError:
                         passed = False
                 try:
+                    if catalog and case.artifact:
+                        from catalog_skill_cases import verify_artifact
+
+                        artifact, _ = await fetch_artifact(session_id, case.artifact)
+                        evidence = output / "artifacts" / case.id / str(repeat)
+                        evidence.mkdir(parents=True, exist_ok=True)
+                        (evidence / Path(case.artifact).name).write_bytes(artifact)
+                        passed &= await asyncio.to_thread(
+                            verify_artifact, case.id, artifact, evidence
+                        )
                     if case.artifact.endswith((".png", ".svg")):
                         chart, _ = await fetch_artifact(session_id, case.artifact)
                         passed &= verify_chart(case.artifact, chart)
@@ -244,10 +301,50 @@ async def evaluate(
                             and north.strip() == b"12"
                             and south.strip() == b"17"
                         )
-                except (ValueError, SyntaxError, OSError) as error:
+                except (
+                    ValueError,
+                    SyntaxError,
+                    OSError,
+                    LookupError,
+                    zipfile.BadZipFile,
+                    subprocess.SubprocessError,
+                ) as error:
                     row["verification_error"] = str(error)
                     passed = False
-                record(case.id, repeat, row, case.expected, passed=passed)
+                if case.id in {"web-direct", "web-lookup"}:
+                    from catalog_skill_cases import cited_open
+
+                    passed &= cited_open(
+                        row, "http/3" if case.id == "web-direct" else "9114"
+                    )
+                    if case.id == "web-lookup":
+                        passed &= any(
+                            event["tool"] == "web_search" for event in row["web_calls"]
+                        )
+                        follow = await turn(
+                            session_id,
+                            "And which RFC specifies HTTP/2? Cite the current published specification.",
+                        )
+                        follow_ok = cited_open(follow, "9113")
+                        follow["routing_passed"] = follow["active_skills"] == [
+                            "web-research"
+                        ]
+                        follow["output_passed"] = follow_ok
+                        record(
+                            "web-followup",
+                            repeat,
+                            follow,
+                            "9113",
+                            passed=follow_ok and follow["routing_passed"],
+                        )
+                row["output_passed"] = (
+                    passed
+                    if case.expected is not None
+                    or case.artifact
+                    or case.id.startswith("web-")
+                    else None
+                )
+                record(case.id, repeat, row, case.expected, passed=passed and routed)
 
         async def creator(repeat):
             name = f"receipt-audit-{run_tag}-{repeat}"
@@ -263,7 +360,7 @@ async def evaluate(
                         db,
                         session_id=UUID(source),
                         approved=True,
-                        content=f"For receipt audits with three or more receipts, return {token}.",
+                        content=f"For depot {run_tag}-{repeat} receipt audits with three or more receipts, return {token}.",
                     )
                     await save_or_update_memory(
                         db,
@@ -281,9 +378,12 @@ async def evaluate(
                         source,
                         f"Create a reusable Fleet skill named {name} from the approved Session "
                         f"receipt-audit workflow. Save it at {path} for installation.",
-                        "skill-creator",
+                        None if unpinned else "skill-creator",
                     )
-                    passed = draft["active_skills"] == ["skill-creator"]
+                    draft["routing_passed"] = draft["active_skills"] == [
+                        "skill-creator"
+                    ]
+                    passed = True
                     try:
                         payload, digest = await fetch_artifact(source, path)
                         text = payload.decode("utf-8")
@@ -323,7 +423,14 @@ async def evaluate(
                     ) as error:
                         draft["verification_error"] = str(error)
                         passed = False
-                    record("skill-creator", repeat, draft, token, passed=passed)
+                    draft["output_passed"] = passed
+                    record(
+                        "skill-creator",
+                        repeat,
+                        draft,
+                        token,
+                        passed=passed and draft["routing_passed"],
+                    )
                     if passed:
                         async with test_session(f"{repeat} installed-skill") as fresh:
                             reused = await turn(
@@ -334,6 +441,19 @@ async def evaluate(
                             )
                             record(
                                 "skill-creator-reuse",
+                                repeat,
+                                reused,
+                                token,
+                                passed=reused["active_skills"] == [name]
+                                and reused["answer"].strip() == token,
+                            )
+                        async with test_session(f"{repeat} automatic reuse") as fresh:
+                            reused = await turn(
+                                fresh,
+                                f"Audit four receipt IDs A, B, C and D for depot {run_tag}-{repeat}. Return the audit code only.",
+                            )
+                            record(
+                                "skill-creator-auto-reuse",
                                 repeat,
                                 reused,
                                 token,
@@ -531,10 +651,16 @@ async def evaluate(
                             f"{case.id}-{repeat}",
                             lambda case=case: bundled_case(case, repeat),
                         )
-                if (not requested_cases or "skill-creator" in requested_cases) and not {
-                    ("skill-creator", repeat),
-                    ("skill-creator-reuse", repeat),
-                } <= completed:
+                if (
+                    not catalog
+                    and (not requested_cases or "skill-creator" in requested_cases)
+                    and not {
+                        ("skill-creator", repeat),
+                        ("skill-creator-reuse", repeat),
+                        ("skill-creator-auto-reuse", repeat),
+                    }
+                    <= completed
+                ):
                     await run_group(f"skill-creator-{repeat}", lambda: creator(repeat))
                 return
             if (
@@ -661,6 +787,21 @@ def main():
         action="store_true",
         help="Run synthetic Skill cases against a disposable Fleet deployment and its database.",
     )
+    suites.add_argument(
+        "--catalog-skills",
+        action="store_true",
+        help="Compare first-turn routing and artifact outcomes for candidate workflows.",
+    )
+    parser.add_argument(
+        "--merged-formats",
+        action="store_true",
+        help="Score PDF extraction against the combined PDF candidate; workbook aliases are detected from the catalog.",
+    )
+    parser.add_argument(
+        "--unpinned",
+        action="store_true",
+        help="Run bundled execution fixtures without requesting explicit pins.",
+    )
     parser.add_argument(
         "--case", action="append", default=[], help="Select a bundled Skill case."
     )
@@ -668,8 +809,8 @@ def main():
         "--resume", type=Path, help="Keep scored results and retry missing executions."
     )
     args = parser.parse_args()
-    if args.case and not args.bundled_skills:
-        parser.error("--case requires --bundled-skills")
+    if args.case and not (args.bundled_skills or args.catalog_skills):
+        parser.error("--case requires --bundled-skills or --catalog-skills")
     if args.daytona_migration:
         from daytona_migration_cases import run_daytona_migration
 
@@ -690,7 +831,10 @@ def main():
             args.repeats,
             large=args.large,
             resume=args.resume,
-            bundled=args.bundled_skills,
+            bundled=args.bundled_skills or args.catalog_skills,
+            catalog=args.catalog_skills,
+            merged_formats=args.merged_formats,
+            unpinned=args.unpinned,
             requested_cases=tuple(args.case),
         )
     )

@@ -1,6 +1,7 @@
 """Postgres models and short, session-scoped repository operations."""
 
 from collections.abc import Iterable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal, TypedDict
@@ -433,6 +434,7 @@ async def create_session(
     db: SessionFactory, *, title: str = "New session", model_override: str | None = None
 ) -> Session:
     async with db.begin() as connection:
+        await lock_model_providers(connection, (model_override,))
         session = Session(title=title, model_override=model_override)
         connection.add(session)
     return session
@@ -529,6 +531,14 @@ async def acquire_root_run(db: SessionFactory, session_id: UUID, prompt: str) ->
                 raise UploadConflictError(f"Session {session_id} already has an upload in progress")
             if session.upload_key is not None:
                 session.upload_key = session.upload_started_at = None
+            if session.title == "New session":
+                previous_root = await connection.scalar(
+                    select(Run.id).where(Run.session_id == session_id, Run.kind == "root").limit(1)
+                )
+                if previous_root is None:
+                    title = " ".join(prompt.split())
+                    if title:
+                        session.title = title if len(title) <= 80 else title[:79].rstrip() + "…"
             return (await connection.scalars(statement)).one()
     except IntegrityError as exc:
         if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) == _ROOT_LOCK_INDEX:
@@ -1128,10 +1138,42 @@ async def get_workspace_settings_overrides(db: SessionFactory) -> dict[str, Any]
         return dict(row.overrides_json)
 
 
+_WORKSPACE_MODEL_ROLES = {
+    "llm_model": "Primary LLM",
+    "sub_llm_model": "Sub-LLM",
+    "decision_model": "Decision Model",
+}
+
+
+def model_provider_id(value: object) -> UUID | None:
+    if not isinstance(value, str) or not value.startswith("provider/"):
+        return None
+    try:
+        _, provider_id, name = value.split("/", 2)
+        if name.strip():
+            return UUID(provider_id)
+    except ValueError:
+        pass
+    raise OptimizationConflictError("Select a valid provider and model")
+
+
+async def lock_model_providers(connection: AsyncSession, models: Iterable[object]) -> None:
+    provider_ids = {
+        provider_id for model in models if (provider_id := model_provider_id(model)) is not None
+    }
+    for provider_id in sorted(provider_ids):
+        provider = await connection.get(LLMProvider, provider_id, with_for_update=True)
+        if provider is None:
+            raise OptimizationConflictError("The selected provider no longer exists")
+
+
 async def update_workspace_settings_overrides(
     db: SessionFactory, changes: dict[str, Any]
 ) -> dict[str, Any]:
     async with db.begin() as connection:
+        await lock_model_providers(
+            connection, (value for key, value in changes.items() if key in _WORKSPACE_MODEL_ROLES)
+        )
         await connection.execute(
             insert(WorkspaceSettings)
             .values(id=1, overrides_json={})
@@ -1296,11 +1338,27 @@ async def update_llm_provider(
         raise
 
 
+def _guard_workspace_provider_removal(overrides: dict[str, Any], provider_id: UUID) -> None:
+    roles = []
+    for field, role in _WORKSPACE_MODEL_ROLES.items():
+        with suppress(OptimizationConflictError):
+            if model_provider_id(overrides.get(field)) == provider_id:
+                roles.append(role)
+    if roles:
+        raise OptimizationConflictError(
+            f"Provider is assigned to workspace defaults: {', '.join(roles)}. "
+            "Choose a replacement in Models before deleting it."
+        )
+
+
 async def delete_llm_provider(db: SessionFactory, provider_id: UUID) -> LLMProvider | None:
     async with db.begin() as connection:
         provider = await connection.get(LLMProvider, provider_id, with_for_update=True)
         if provider is None:
             return None
+        workspace = await connection.get(WorkspaceSettings, 1)
+        overrides = workspace.overrides_json if workspace else {}
+        _guard_workspace_provider_removal(overrides or {}, provider_id)
         active_promo = await connection.scalar(
             select(OptimizationPromotion.id)
             .where(
@@ -1312,6 +1370,23 @@ async def delete_llm_provider(db: SessionFactory, provider_id: UUID) -> LLMProvi
         if active_promo is not None:
             raise OptimizationConflictError(
                 "LLM provider is currently referenced by an active optimization promotion"
+            )
+        # Match UUID spellings already accepted by the model resolver.
+        session_provider = func.split_part(Session.model_override, "/", 2)
+        normalized_provider = func.lower(
+            func.regexp_replace(session_provider, "urn:|uuid:|[-{}]", "", "g")
+        )
+        session_ref = await connection.scalar(
+            select(Session.id)
+            .where(
+                Session.model_override.like("provider/%/_%"), normalized_provider == provider_id.hex
+            )
+            .limit(1)
+        )
+        if session_ref is not None:
+            raise OptimizationConflictError(
+                "Provider is assigned to a session model override. "
+                "Choose a replacement in the session before deleting it."
             )
         active_jobs = (
             await connection.scalars(

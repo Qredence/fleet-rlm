@@ -1644,7 +1644,7 @@ async def test_live_two_turn_csv(tmp_path):
         (
             "Audit workbook formulas and analyze sales data with charts.",
             None,
-            ["chart-visualization", "spreadsheet-audit"],
+            ["chart-visualization", "xlsx"],
         ),
         (
             "Analyze this sales data and create an SVG bar chart.",
@@ -1664,7 +1664,7 @@ def test_compound_analysis_and_chart_selection(settings, monkeypatch, prompt, pi
                 probabilities={
                     "chart-visualization": 0.96,
                     "data-analysis": 0.03,
-                    "spreadsheet-audit": 0.9 if "formulas" in prompt else 0.01,
+                    "xlsx": 0.9 if "formulas" in prompt else 0.01,
                 },
             ),
         )
@@ -1696,13 +1696,19 @@ async def test_production_skills_catalog_and_choice_selection(settings, tmp_path
         "chart-visualization",
         "data-analysis",
         "document-extraction",
+        "pdf",
         "recursive-synthesis",
+        "report-writing",
         "scientific-computing",
         "skill-creator",
-        "spreadsheet-audit",
         "web-research",
+        "xlsx",
     )
     assert tuple(skill.name for skill in registry.skills) == expected_names
+    pinned = select_skills(
+        settings, registry, "repair the workbook", ["@spreadsheet-audit", "xlsx"]
+    )
+    assert [skill.name for skill in pinned.active_skills] == ["xlsx"]
 
     selector = build_skill_selector(registry.skills)
     assert set(selector.signature.output_fields) == {"needs_skill", "primary_skill"}
@@ -1722,7 +1728,7 @@ async def test_production_skills_catalog_and_choice_selection(settings, tmp_path
                     "recursive-synthesis": 0.0,
                     "scientific-computing": 0.0,
                     "skill-creator": 0.0,
-                    "spreadsheet-audit": 0.0,
+                    "xlsx": 0.0,
                 },
             ),
         )
@@ -2079,7 +2085,7 @@ async def test_live_skill_selection_and_ab_results():
             ),
         ),
         (
-            "spreadsheet-audit",
+            "xlsx",
             (
                 "Audit the multi-sheet financial_model.xlsx workbook with openpyxl, check formula "
                 "cells vs cached values, and reconcile sheet subtotals."

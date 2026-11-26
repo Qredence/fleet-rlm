@@ -8,7 +8,7 @@
 
 - **Programmatic Long Context:** Upload CSV/Parquet datasets, multi-sheet Excel workbooks, PDFs, or code (up to 100 MiB) into `/workspace/files`. The agent inspects and transforms data using `pandas`, `pyarrow`, `openpyxl`, `pypdf`, `scipy`, `matplotlib`, and `pillow`, then saves downloadable Artifacts to `/workspace/artifacts`.
 - **Recursive Reasoning & Live Traces:** Complex Tasks decompose dynamically into concurrent `llm_query_batched` map-reduce calls and isolated recursive `spawn_agent` Subagent Runs under configurable Recursion Depth and Call Budget limits, streamed natively via AI SDK v1 SSE into nested UI traces.
-- **Progressive-Disclosure Skills (`@skill`).** The Daytona image includes eight read-only `SKILL.md` Skills (`data-analysis`, `spreadsheet-audit`, `document-extraction`, `chart-visualization`, `scientific-computing`, `recursive-synthesis`, `skill-creator`, and `web-research`). TypeSafe Jev (`Noul` + `Choice`) scores them per turn. You can also pin them with `@skill`.
+- **Progressive-Disclosure Skills (`@skill`).** Fleet selects workflows for data analysis, charts, scientific computing, document extraction, evidence reconciliation, web research and skill creation. For file deliverables it offers `@pdf`, `@xlsx` and `@report-writing`. TypeSafe Jev (`Noul` + `Choice`) scores the catalog per turn. You can also pin a skill explicitly. Existing `@spreadsheet-audit` pins resolve to `@xlsx`.
   Open a generated `SKILL.md` in the Artifacts preview and choose **Install skill** to make it available in the Skills picker across sessions. Installs are stored under `FLEET_SKILLS_DIR/.installed`. Backend instances that should share installs need the same persistent skills directory.
 - **4-Tier Memory with Human Review:** Pairs ephemeral per-Run Execution Contexts and bounded Episode History with Neon full-text searchable Session/Global Memories (`tsvector` GIN) consolidated after each Turn (high-confidence facts auto-approved; lower-confidence candidates queued in the UI for review) and versioned offline Compiled Programs / Calibrated Gates.
 - **Stateless Workers, Durable State:** Any FastAPI worker can handle a Turn. Postgres stores the session, run tree, and file manifest. Private Neon Object Storage retains uploads and published artifacts across Daytona VM replacement. Scratch files and checkouts stay on the current VM.
@@ -48,6 +48,12 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    make dev-backend   # FastAPI on http://127.0.0.1:8000
    make dev-frontend  # Vite SPA on http://localhost:5173 (proxies /api, /healthz, /readyz)
    ```
+
+### Manage model providers
+
+Open **Settings → Models → Add provider** to register an endpoint and a key. Fleet stores encrypted provider keys in Neon Postgres. Configure `FLEET_CREDENTIALS_ENCRYPTION_KEY` on every backend worker. Shared deployments require HTTPS, `FLEET_API_BEARER_TOKEN` for workspace access, and a separate `FLEET_PROVIDER_ADMIN_TOKEN` for provider administration. Enter the administrator bearer in Settings → General while managing credentials. Configure reverse proxies to preserve the public host and scheme. Only expose unauthenticated development servers on loopback.
+
+Fetch the provider's models or specify its default model. In **Settings → Models → Global Workspace Models**, select the primary and sub-LLM independently and save. Each selection uses that provider’s endpoint and credentials. The composer can override the primary model for an individual session.
 
 ### Build and roll out the sandbox image
 

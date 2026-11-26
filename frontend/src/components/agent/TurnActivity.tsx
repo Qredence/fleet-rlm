@@ -2,6 +2,7 @@ import { Globe, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
+import { CodeBlock, CodeBlockContent, CodeBlockHeader, CodeBlockTitle } from '@/components/ui/code-block'
 import { errorMessage, type Memory } from '@/lib/api'
 import type { TurnDetails, WebCall } from '@/lib/messages'
 import {
@@ -69,14 +70,15 @@ export function WebResearchActivity({ calls, live }: { calls: WebCall[]; live: b
   )
 }
 
-export function TurnDetailsActivity({ details, refine }: {
-  details: TurnDetails
+export function TurnDetailsActivity({ details, submissions = [], refine }: {
+  details?: TurnDetails
+  submissions?: unknown[]
   refine?: () => Promise<Memory | null>
 }) {
   const [lesson, setLesson] = useState<Memory | null>()
   const [refining, setRefining] = useState(false)
   const [error, setError] = useState('')
-  const canRefine = refine && details.runtime === 'dspy.RLM'
+  const canRefine = refine && details?.runtime === 'dspy.RLM'
     && ['submit', 'iteration_limit', 'unknown'].includes(details.completion)
 
   async function requestRefinement() {
@@ -101,7 +103,7 @@ export function TurnDetailsActivity({ details, refine }: {
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+        {details && <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted-foreground">Runtime</dt>
           <dd>{details.runtime ?? 'RLM did not start'}</dd>
           <dt className="text-muted-foreground">Root actions</dt><dd>{details.root_actions}</dd>
@@ -111,9 +113,17 @@ export function TurnDetailsActivity({ details, refine }: {
             <dt className="text-muted-foreground">RLM elapsed</dt><dd>{elapsed(details.elapsed_ms)}</dd>
           </>}
           <dt className="text-muted-foreground">Completion</dt><dd>{completionLabels[details.completion]}</dd>
-        </dl>
+        </dl>}
+        {submissions.map((submission, index) => (
+          <CodeBlock key={index} size="sm" className="mt-2">
+            <CodeBlockHeader><CodeBlockTitle>Submission</CodeBlockTitle></CodeBlockHeader>
+            <CodeBlockContent wrap className="max-h-80">
+              {typeof submission === 'string' ? submission : JSON.stringify(submission, null, 2)}
+            </CodeBlockContent>
+          </CodeBlock>
+        ))}
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          {details.trace_url && /^https?:\/\//i.test(details.trace_url) && (
+          {details?.trace_url && /^https?:\/\//i.test(details.trace_url) && (
             <a className="text-sm underline" href={details.trace_url} target="_blank" rel="noreferrer">
               Open in MLflow
             </a>

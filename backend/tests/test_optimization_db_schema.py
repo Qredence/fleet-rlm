@@ -350,7 +350,8 @@ async def test_llm_provider_delete_conflict_checks_and_crud() -> None:
     # 1. Blocked by active promotion
     class PromoRefConn:
         async def get(self, model: Any, identity: UUID, *, with_for_update: Any = None):
-            assert with_for_update is True
+            if model is db.LLMProvider:
+                assert with_for_update is True
             return provider if model is db.LLMProvider and identity == provider_id else None
 
         async def scalar(self, _stmt: Any):

@@ -163,7 +163,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
               skillsError={skillsError ? `Skills: ${skillsError}` : ''}
               visible={Boolean(chatRoute)} recentStops={recentStops}
               filesDocked={filesDocked} setFilesDocked={setFilesDocked}
-              onActivity={setRunning} onTurnComplete={onTurnComplete}
+              onActivity={setRunning} onTurnAccepted={refreshSessions} onTurnComplete={onTurnComplete}
               onFilesUploaded={refreshSessions} onSkillInstalled={addInstalledSkill}
               onModelChange={(model) => sessions.update(session.id, { model_override: model })}
             />

@@ -7,11 +7,12 @@ import type { FleetMessage } from '@/lib/messages'
 type StreamingChat = ReturnType<typeof createStreamingChat>
 type PendingSend = { chat?: StreamingChat }
 
-export function useSessionChat({ id, token, initialMessages, recentStops, onComplete }: {
+export function useSessionChat({ id, token, initialMessages, recentStops, onAccepted, onComplete }: {
   id: string
   token: string
   initialMessages: FleetMessage[] | null
   recentStops: RefObject<Map<string, number>>
+  onAccepted: () => void
   onComplete: () => void
 }) {
   const [stream, setStream] = useState<{ chat: StreamingChat; Observer: typeof ChatObserver }>()
@@ -55,7 +56,7 @@ export function useSessionChat({ id, token, initialMessages, recentStops, onComp
         // The import can finish after Stop or after switching sessions.
         if (pending.current !== request) return
         chat = createStreamingChat({
-          id, token, messages: initialMessages, onComplete,
+          id, token, messages: initialMessages, onAccepted, onComplete,
           consumeRecentStop: () => {
             const stoppedAt = recentStops.current.get(id)
             recentStops.current.delete(id)

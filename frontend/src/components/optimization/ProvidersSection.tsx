@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { ModelCombobox } from '@/components/optimization/ModelCombobox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -216,7 +216,7 @@ interface ProviderFormBodyProps {
   encryptionConfigured: boolean
   allowPrivateEndpoints: boolean
   onCancel: () => void
-  onSaved: (saved: LLMProviderView, isEdit: boolean) => void
+  onSaved: (saved: LLMProviderView, isEdit: boolean, refreshError?: string) => void
 }
 
 function ProviderFormBody({
@@ -242,6 +242,8 @@ function ProviderFormBody({
   const [clearSavedKey, setClearSavedKey] = useState(false)
   const [defaultModel, setDefaultModel] = useState(editing?.default_model ?? '')
 
+  const [testedConnection, setTestedConnection] = useState<string | null>(null)
+  const connection = JSON.stringify([dialect, apiMode, baseUrl.trim(), apiKey.trim(), clearSavedKey])
   const [probing, setProbing] = useState(false)
   const [probeModels, setProbeModels] = useState<LLMProviderModelItem[]>(
     editing?.cached_models ?? [],
@@ -282,6 +284,7 @@ function ProviderFormBody({
       return
     }
 
+    setTestedConnection(null)
     setProbing(true)
     try {
       const result = await api.probeOptimizationProvider({
@@ -295,6 +298,7 @@ function ProviderFormBody({
         setProbeError(result.error || 'Provider endpoint test failed.')
       } else {
         setProbeModels(result.models)
+        if (result.models.length) setTestedConnection(connection)
         setProbeMessage(
           `Connected — discovered ${result.count} model${result.count === 1 ? '' : 's'} from /models.`,
         )
@@ -376,7 +380,16 @@ function ProviderFormBody({
           default_model: trimmedModel || null,
         })
       }
-      onSaved(saved, Boolean(editing))
+      let refreshError: string | undefined
+      if (connection === testedConnection) {
+        try {
+          await api.refreshOptimizationProviderModels(saved.id)
+        } catch (failure) {
+          refreshError = errorMessage(failure)
+        }
+      }
+      setApiKey('')
+      onSaved(saved, Boolean(editing), refreshError)
     } catch (failure) {
       setFormError(errorMessage(failure))
     } finally {
@@ -398,6 +411,7 @@ function ProviderFormBody({
           id={formId}
           onSubmit={(event) => {
             event.preventDefault()
+            event.stopPropagation()
             void handleSubmit()
           }}
           className="flex flex-col gap-3.5 p-0.5"
@@ -506,7 +520,7 @@ function ProviderFormBody({
                 id={`${formId}-api-key`}
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
-                disabled={clearSavedKey}
+                disabled={clearSavedKey || !encryptionConfigured || !window.isSecureContext}
                 onChange={(event) => {
                   setApiKey(event.target.value)
                   if (invalidField === 'api_key') setInvalidField(null)
@@ -528,7 +542,7 @@ function ProviderFormBody({
                       <InputGroupButton
                         type="button"
                         size="icon-xs"
-                        disabled={clearSavedKey}
+                        disabled={clearSavedKey || !encryptionConfigured || !window.isSecureContext}
                         aria-label={showKey ? 'Hide API key' : 'Show API key'}
                         onClick={() => setShowKey((prev) => !prev)}
                       />
@@ -547,7 +561,7 @@ function ProviderFormBody({
               </InputGroupAddon>
             </InputGroup>
             <FieldDescription>
-              Write-only: encrypted at rest with Fernet AEAD and never returned to the browser.
+              Write-only: encrypted on the host with Fernet and never returned to the browser.
             </FieldDescription>
           </Field>
 
@@ -669,6 +683,10 @@ function ProviderFormBody({
   )
 }
 
+function ProviderEntry({ rows, ...props }: React.ComponentProps<'div'> & { rows: boolean }) {
+  return rows ? <div {...props} /> : <Elevated offset={1} shadowLevel={2} {...props} />
+}
+
 export function ProvidersSection({
   loadError,
   onRetry,
@@ -678,6 +696,8 @@ export function ProvidersSection({
   allowPrivateEndpoints,
   loading,
   onChanged,
+  onOpenModels,
+  layout = 'cards',
 }: {
   api: FleetApi
   loadError: string | null
@@ -686,8 +706,18 @@ export function ProvidersSection({
   encryptionConfigured: boolean
   allowPrivateEndpoints: boolean
   loading: boolean
+  onOpenModels?: () => void
+  layout?: 'cards' | 'rows'
   onChanged: (announcement?: string) => Promise<void> | void
 }) {
+  const rows = layout === 'rows'
+  const providerListClass = rows
+    ? '@container min-w-0 divide-y divide-border/60'
+    : 'grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4'
+  const providerEntryClass = rows
+    ? 'flex min-w-0 flex-col gap-3 py-4 @lg:flex-row @lg:items-center @lg:justify-between'
+    : 'flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10'
+  const editorTrigger = useRef<HTMLButtonElement | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogSession, setDialogSession] = useState(0)
   const [editingProvider, setEditingProvider] = useState<LLMProviderView | null>(null)
@@ -699,13 +729,15 @@ export function ProvidersSection({
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
-  function openCreateDialog() {
+  function openCreateDialog(event: React.MouseEvent<HTMLButtonElement>) {
+    editorTrigger.current = event.currentTarget
     setEditingProvider(null)
     setDialogSession((prev) => prev + 1)
     setDialogOpen(true)
   }
 
-  function openEditDialog(provider: LLMProviderView) {
+  function openEditDialog(provider: LLMProviderView, event: React.MouseEvent<HTMLButtonElement>) {
+    editorTrigger.current = event.currentTarget
     setEditingProvider(provider)
     setDialogSession((prev) => prev + 1)
     setDialogOpen(true)
@@ -747,8 +779,7 @@ export function ProvidersSection({
             LLM Providers
           </h2>
           <p className={`${typeClass('body')} text-muted-foreground`}>
-            Register API endpoints and fetch live <code>/models</code> catalogs for per-role
-            optimizer selection (Root, Sub, Reflection, Judge, and ReAnchor Decision models).
+            Register API endpoints and fetch live <code>/models</code> catalogs for chat and optimization.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -811,30 +842,29 @@ export function ProvidersSection({
         </div>
       )}
 
-      {/* Provider Cards Grid */}
       {loadError !== null ? (
         <Alert variant="destructive">
           <AlertDescription>Unable to load providers. {loadError}</AlertDescription>
           <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>
         </Alert>
       ) : loading && !providers ? (
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4" role="status" aria-label="Loading providers">
+        <div className={providerListClass} role="status" aria-label="Loading providers">
           {[0, 1, 2].map((idx) => (
-            <Elevated
+            <ProviderEntry
               key={idx}
-              offset={1}
-              shadowLevel={2}
-              className="flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10"
+              rows={rows}
+              className={providerEntryClass}
             >
-              <Skeleton className="h-5 w-36 bg-hover motion-reduce:animate-none" />
-              <Skeleton className="h-10 w-full bg-hover motion-reduce:animate-none" />
-              <Skeleton className="h-8 w-full bg-hover motion-reduce:animate-none" />
-              <Skeleton className="h-8 w-40 bg-hover motion-reduce:animate-none" />
-            </Elevated>
+              <div className="grid min-w-0 flex-1 gap-2">
+                <Skeleton className="h-5 w-36 bg-hover motion-reduce:animate-none" />
+                <Skeleton className="h-4 w-full max-w-64 bg-hover motion-reduce:animate-none" />
+              </div>
+              <Skeleton className="h-7 w-40 bg-hover motion-reduce:animate-none" />
+            </ProviderEntry>
           ))}
         </div>
       ) : !providers || providers.length === 0 ? (
-        <div className="flex flex-col items-start gap-3 rounded-xl border bg-card p-5">
+        <div className={rows ? "flex flex-col items-start gap-3 py-4" : "flex flex-col items-start gap-3 rounded-xl border bg-card p-5"}>
           <div className="flex items-center gap-2">
             <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" />
             <h3 className={typeClass('subtitle')} style={{ fontVariationSettings: fontWeights.semibold }}>
@@ -852,7 +882,7 @@ export function ProvidersSection({
           </Button>
         </div>
       ) : (
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4" role="region" aria-label="Registered LLM providers">
+        <div className={providerListClass} role="region" aria-label="Registered LLM providers">
           {providers.map((provider) => {
             const preset = DIALECT_MAP[provider.dialect]
             const isRefreshing = refreshingId === provider.id
@@ -861,73 +891,69 @@ export function ProvidersSection({
               provider.dialect === 'openai' || provider.dialect === 'openai_compatible'
 
             return (
-              <Elevated
+              <ProviderEntry
                 key={provider.id}
-                offset={1}
-                shadowLevel={2}
-                data-testid={`provider-card-${provider.id}`}
-                className="flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10"
+                rows={rows}
+                data-testid={`provider-${rows ? "row" : "card"}-${provider.id}`}
+                className={providerEntryClass}
               >
-                {/* Subgrid Row 1: Name & dialect/mode badges */}
-                <div className="flex min-w-0 flex-col items-start gap-2">
-                  <div className="min-w-0">
-                    <h3
-                      className={`${typeClass('subtitle')} [overflow-wrap:anywhere] text-foreground`}
-                      style={{ fontVariationSettings: fontWeights.semibold }}
-                      title={provider.name}
-                    >
-                      {provider.name}
-                    </h3>
-                    <p className={`${typeClass('caption')} mt-0.5 [overflow-wrap:anywhere] font-mono text-muted-foreground`}>
-                      {provider.base_url || preset?.defaultBaseUrl || 'Provider default endpoint'}
-                    </p>
+                <div className="flex min-w-0 flex-col gap-3">
+                  <div className="flex min-w-0 flex-col items-start gap-2">
+                    <div className="min-w-0">
+                      <h3
+                        className={`${typeClass('subtitle')} [overflow-wrap:anywhere] text-foreground`}
+                        style={{ fontVariationSettings: fontWeights.semibold }}
+                        title={provider.name}
+                      >
+                        {provider.name}
+                      </h3>
+                      <p className={`${typeClass('caption')} mt-0.5 [overflow-wrap:anywhere] font-mono text-muted-foreground`}>
+                        {provider.base_url || preset?.defaultBaseUrl || 'Provider default endpoint'}
+                      </p>
+                    </div>
+                    <div className="flex max-w-full flex-wrap gap-1">
+                      <Badge variant="secondary">{preset?.label ?? provider.dialect}</Badge>
+                      {showModeBadge && (
+                        <Badge variant="outline">{API_MODE_LABEL[provider.api_mode]}</Badge>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex max-w-full flex-wrap gap-1">
-                    <Badge variant="secondary">{preset?.label ?? provider.dialect}</Badge>
-                    {showModeBadge && (
-                      <Badge variant="outline">{API_MODE_LABEL[provider.api_mode]}</Badge>
+
+                  <dl className={rows ? "flex flex-wrap gap-x-4 gap-y-2" : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2 border-t border-border/60 pt-2.5"}>
+                    <div className="min-w-0">
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>API key</dt>
+                      <dd className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}>
+                        {provider.has_api_key ? (provider.api_key_hint ?? 'Saved') : 'No API key'}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>Default model</dt>
+                      <dd
+                        className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}
+                        title={provider.default_model ?? undefined}
+                      >
+                        {provider.default_model || '—'}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div className={rows ? "flex min-w-0 flex-col gap-1.5" : "flex min-w-0 flex-col gap-1.5 border-t border-border/60 pt-2.5"}>
+                    <p className={`${typeClass('caption')} tabular-nums text-muted-foreground`}>
+                      {provider.cached_models.length} cached model
+                      {provider.cached_models.length === 1 ? '' : 's'} ·{' '}
+                      {formatTimestamp(provider.last_tested_at)}
+                    </p>
+                    {notice && (
+                      <p
+                        role={notice.ok ? 'status' : 'alert'}
+                        className={`${typeClass('caption')} [overflow-wrap:anywhere] ${notice.ok ? 'text-foreground' : 'text-destructive'}`}
+                      >
+                        {notice.text}
+                      </p>
                     )}
                   </div>
                 </div>
-
-                {/* Subgrid Row 2: Key hint & default model */}
-                <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2 border-t border-border/60 pt-2.5">
-                  <div className="min-w-0">
-                    <dt className={`${typeClass('caption')} text-muted-foreground`}>API key</dt>
-                    <dd className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}>
-                      {provider.has_api_key ? (provider.api_key_hint ?? 'Saved') : 'No API key'}
-                    </dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className={`${typeClass('caption')} text-muted-foreground`}>Default model</dt>
-                    <dd
-                      className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}
-                      title={provider.default_model ?? undefined}
-                    >
-                      {provider.default_model || '—'}
-                    </dd>
-                  </div>
-                </dl>
-
-                {/* Subgrid Row 3: Cached models & last tested */}
-                <div className="flex min-w-0 flex-col gap-1.5 border-t border-border/60 pt-2.5">
-                  <p className={`${typeClass('caption')} tabular-nums text-muted-foreground`}>
-                    {provider.cached_models.length} cached model
-                    {provider.cached_models.length === 1 ? '' : 's'} ·{' '}
-                    {formatTimestamp(provider.last_tested_at)}
-                  </p>
-                  {notice && (
-                    <p
-                      role={notice.ok ? 'status' : 'alert'}
-                      className={`${typeClass('caption')} [overflow-wrap:anywhere] ${notice.ok ? 'text-foreground' : 'text-destructive'}`}
-                    >
-                      {notice.text}
-                    </p>
-                  )}
-                </div>
-
-                {/* Subgrid Row 4: Actions */}
-                <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
+                <div className={rows ? "flex shrink-0 flex-wrap items-center gap-2 @lg:justify-end" : "mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5"}>
                   <Button
                     type="button"
                     size="sm"
@@ -943,7 +969,12 @@ export function ProvidersSection({
                     {isRefreshing ? 'Fetching…' : 'Fetch /models'}
                   </Button>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {onOpenModels && (provider.default_model || provider.cached_models.length > 0) && (
+                      <Button type="button" variant="ghost" size="sm" onClick={onOpenModels}>
+                        Open Models
+                      </Button>
+                    )}
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -952,7 +983,7 @@ export function ProvidersSection({
                             size="icon-sm"
                             variant="ghost"
                             aria-label={`Edit provider ${provider.name}`}
-                            onClick={() => openEditDialog(provider)}
+                            onClick={(event) => openEditDialog(provider, event)}
                             data-testid={`edit-provider-${provider.id}`}
                           />
                         }
@@ -984,7 +1015,7 @@ export function ProvidersSection({
                     </Tooltip>
                   </div>
                 </div>
-              </Elevated>
+              </ProviderEntry>
             )
           })}
         </div>
@@ -992,7 +1023,7 @@ export function ProvidersSection({
 
       {/* Add / Edit Provider Dialog (remounted per open session) */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[min(760px,calc(100dvh-4rem))] flex-col gap-0 p-0 sm:max-w-lg">
+        <DialogContent finalFocus={editorTrigger} className="flex max-h-[min(760px,calc(100dvh-4rem))] flex-col gap-0 p-0 sm:max-w-lg">
           {dialogOpen && (
             <ProviderFormBody
               key={`${dialogSession}:${editingProvider?.id ?? 'new'}`}
@@ -1001,7 +1032,12 @@ export function ProvidersSection({
               encryptionConfigured={encryptionConfigured}
               allowPrivateEndpoints={allowPrivateEndpoints}
               onCancel={() => setDialogOpen(false)}
-              onSaved={(saved, isEdit) => {
+              onSaved={(saved, isEdit, refreshError) => {
+                if (refreshError) {
+                  setCardNotice(current => ({
+                    ...current, [saved.id]: { ok: false, text: `Provider saved. Could not fetch models. ${refreshError}` },
+                  }))
+                }
                 setDialogOpen(false)
                 void onChanged(
                   isEdit ? `Updated provider ${saved.name}.` : `Added provider ${saved.name}.`,
@@ -1038,6 +1074,12 @@ export function ProvidersSection({
           )}
 
           <AlertDialogFooter>
+            {onOpenModels && deleteError.includes('workspace defaults') && (
+              <Button type="button" variant="outline" disabled={deleting} onClick={() => {
+                setDeleteTarget(null)
+                onOpenModels()
+              }}>Open Models</Button>
+            )}
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={deleting}

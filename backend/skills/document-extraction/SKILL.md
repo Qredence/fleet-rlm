@@ -1,7 +1,9 @@
 ---
 name: document-extraction
-description: Extract passages, numerical values, illustrations, or tables with page or section citations from PDFs and text documents.
+description: Extract a passage, table or figure from a PDF or text document and cite its page or section. Read scanned text or identify pages requiring OCR.
 ---
+
+For plain text, cite the section or line that contains the supporting passage. Preserve the exact source wording alongside its location.
 
 When reporting a quantity, its source is the page where the quantity can be read in context. A “figure” can mean a numerical value. A request for a count and the source page for that figure asks where the count was stated. A request for the location of an illustration asks where the illustration was drawn. Keep those questions distinct.
 
@@ -25,6 +27,31 @@ assert passage in (reader.pages[page_number - 1].extract_text() or "")
 
 Use these computed variables when serializing the requested result. Avoid retyping a page number from memory. Apply the same binding to table cells and visually read values, recording the cell or visible passage on its physical page.
 
-Keep the list of pages needing OCR separate from citations. When only that list is requested, identify pages with unresolved image text and stop. PDF pages can share resources; a referenced image is located on a page by its drawing operations or by rendering the page. Use visual inspection when the answer depends on visual evidence. Keep raw bytes out of tool output.
+## Scanned pages
 
-For plain text, cite the section or line that contains the supporting passage.
+Inspect any page without usable extracted text. A scanned passage needs OCR; an illustration without text does not. If transcription is requested and Tesseract is available, render the physical page with pdftoppm and run tesseract on that image. Inspect uncertain characters against the image. Keep the list of pages needing OCR separate from citations. When only that list is requested, identify pages with unresolved image text and stop. PDF pages can share resources; a referenced image is located on a page by its drawing operations or by rendering the page. Use visual inspection when the answer depends on visual evidence. Keep raw bytes out of tool output.
+
+For example, with a one-based page number and a PDF path:
+
+```python
+import subprocess
+
+page = str(page_number)
+image = subprocess.run(
+    ["pdftoppm", "-f", page, "-l", page, "-r", "200", "-singlefile", "-png", str(source)],
+    capture_output=True,
+    check=True,
+).stdout
+text = (
+    subprocess.run(
+        ["tesseract", "stdin", "stdout"],
+        input=image,
+        capture_output=True,
+        check=True,
+    )
+    .stdout.decode()
+    .strip()
+)
+```
+
+Use the rendered page and recognized passage to classify it. An empty text layer alone is insufficient. For short identifiers, compare uncertain punctuation and digits at a second resolution or against a tightly cropped image. Carry the verified string and page together into the answer.

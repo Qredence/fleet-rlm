@@ -67,17 +67,21 @@ describe('chatFetch', () => {
     vi.stubGlobal('fetch', fetchMock)
     const setWaiting = vi.fn()
 
-    const wrapped = chatFetch(() => true, setWaiting)
+    const onAccepted = vi.fn()
+    const wrapped = chatFetch(() => true, setWaiting, onAccepted)
     const pending = wrapped('/api/sessions/1/chat', { method: 'POST' })
 
     await vi.advanceTimersByTimeAsync(300)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(setWaiting).toHaveBeenCalledWith(true)
+    expect(onAccepted).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(600)
     const response = await pending
 
     expect(response).toBe(okResponse)
+    expect(response.bodyUsed).toBe(false)
+    expect(onAccepted).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(setWaiting.mock.calls).toEqual([[true], [false]])
   })

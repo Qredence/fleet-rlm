@@ -173,29 +173,17 @@ def _build_pdf(pages: Sequence[PdfPage]) -> bytes:
     objects: dict[int, bytes] = {}
     objects[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
 
-    # 4x4 checkerboard grayscale image (16 raw bytes) for scanned pages without a text layer.
-    scan_pixels = bytes(
-        [
-            40,
-            220,
-            40,
-            220,
-            220,
-            40,
-            220,
-            40,
-            40,
-            220,
-            40,
-            220,
-            220,
-            40,
-            220,
-            40,
-        ]
+    # Raster lettering gives the OCR cases real text without an extractable text layer.
+    glyphs = (
+        ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),  # S
+        ("01111", "10000", "10000", "10000", "10000", "10000", "01111"),  # C
+        ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),  # A
+        ("10001", "11001", "11001", "10101", "10011", "10011", "10001"),  # N
     )
+    rows = ["0" * 26, *("0" + "0".join(row) + "00" for row in zip(*glyphs, strict=True)), "0" * 26]
+    scan_pixels = bytes(0 if bit == "1" else 255 for row in rows for bit in row)
     objects[4] = (
-        b"<< /Type /XObject /Subtype /Image /Width 4 /Height 4 "
+        b"<< /Type /XObject /Subtype /Image /Width 26 /Height 9 "
         b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Length "
         + str(len(scan_pixels)).encode("ascii")
         + b" >>\nstream\n"
@@ -229,7 +217,7 @@ def _build_pdf(pages: Sequence[PdfPage]) -> bytes:
                 + f"/Contents {content_id} 0 R >>".encode("ascii")
             )
         else:
-            stream_data = b"q 180 0 0 180 72 540 cm /Im1 Do Q"
+            stream_data = b"q 260 0 0 90 72 540 cm /Im1 Do Q"
             objects[content_id] = (
                 f"<< /Length {len(stream_data)} >>\nstream\n".encode("ascii")
                 + stream_data

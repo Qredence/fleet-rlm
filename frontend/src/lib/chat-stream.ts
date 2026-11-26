@@ -11,14 +11,17 @@ export type ChatSnapshot = {
   error: Error | undefined
 }
 
-export function createStreamingChat({ id, token, messages, consumeRecentStop, onWaitingForStop, onComplete }: {
+export function createStreamingChat({ id, token, messages, consumeRecentStop, onWaitingForStop, onAccepted, onComplete }: {
   id: string
   token: string
   messages: FleetMessage[]
   consumeRecentStop: () => boolean
   onWaitingForStop: (waiting: boolean) => void
+  onAccepted: () => void
   onComplete: () => void
 }) {
+  let firstTurnPending = messages.length === 0
+
   return new Chat<FleetMessage>({
     id,
     messages,
@@ -34,11 +37,13 @@ export function createStreamingChat({ id, token, messages, consumeRecentStop, on
           },
         }
       },
-      fetch: chatFetch(consumeRecentStop, onWaitingForStop),
+      fetch: chatFetch(consumeRecentStop, onWaitingForStop, () => {
+        if (!firstTurnPending) return
+        firstTurnPending = false
+        onAccepted()
+      }),
     }),
-    onFinish: ({ isAbort, isDisconnect, isError }) => {
-      if (!isAbort && !isDisconnect && !isError) onComplete()
-    },
+    onFinish: onComplete,
   })
 }
 

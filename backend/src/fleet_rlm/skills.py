@@ -65,6 +65,13 @@ class SkillRegistry:
             raise ValueError(f"Duplicate Skill names in {skills_dir}")
         return cls(tuple(sorted(skills, key=lambda skill: skill.name)))
 
+    def pin_names(self) -> dict[str, SkillDefinition]:
+        by_name = {skill.name: skill for skill in self.skills}
+        workbook = by_name.get("xlsx")
+        if workbook and workbook.path.parent.parent.resolve() == _bundled_skills_dir().resolve():
+            by_name.setdefault("spreadsheet-audit", workbook)
+        return by_name
+
     def available_skills(self, settings: Settings) -> tuple[SkillDefinition, ...]:
         return tuple(skill for skill in self.skills if skill.unavailable_reason(settings) is None)
 
@@ -78,7 +85,7 @@ class SkillRegistry:
 
     def install(self, skills_dir: Path, content: bytes) -> SkillDefinition:
         skill = _parse_skill(content, Path("SKILL.md"), strict=True)
-        if any(existing.name == skill.name for existing in self.skills):
+        if skill.name in self.pin_names():
             raise FileExistsError(f"Skill '{skill.name}' already exists")
 
         directory = skills_dir / _INSTALL_DIR
@@ -407,11 +414,12 @@ def select_skills(
 ) -> SkillSelection:
     """Resolve explicit pins or select up to two skills using Jev evidence."""
     if pinned_skills:
-        by_name = {skill.name: skill for skill in registry.skills}
+        by_name = registry.pin_names()
         names = tuple(dict.fromkeys(name.removeprefix("@") for name in pinned_skills))
         if unknown := set(names) - by_name.keys():
             raise ValueError(f"Unknown pinned Skills: {', '.join(sorted(unknown))}")
-        return _selection(tuple(by_name[name] for name in names), dict.fromkeys(names, 1.0))
+        active = tuple(dict.fromkeys(by_name[name] for name in names))
+        return _selection(active, {skill.name: 1.0 for skill in active})
 
     available = registry.available_skills(settings)
     # Include web research for direct URLs and route any accompanying work through the selector.

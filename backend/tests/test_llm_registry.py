@@ -152,10 +152,10 @@ def test_ssrf_private_and_loopback_respects_allow_private(
 ) -> None:
     _mock_dns(monkeypatch, [private_ip])
     with pytest.raises(EndpointValidationError):
-        validate_endpoint_url("http://local-llm.internal:11434/v1", allow_private=False)
+        validate_endpoint_url("https://local-llm.internal:11434/v1", allow_private=False)
     assert (
-        validate_endpoint_url("http://local-llm.internal:11434/v1/", allow_private=True)
-        == "http://local-llm.internal:11434/v1"
+        validate_endpoint_url("https://local-llm.internal:11434/v1/", allow_private=True)
+        == "https://local-llm.internal:11434/v1"
     )
     with pytest.raises(EndpointValidationError):
         validate_database_url("postgresql://u:p@local-db.internal/neondb", allow_private=False)

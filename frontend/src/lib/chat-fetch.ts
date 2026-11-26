@@ -22,6 +22,7 @@ function wait(ms: number, signal?: AbortSignal | null) {
 export function chatFetch(
   canRetryAfterStop: () => boolean,
   setWaiting: (waiting: boolean) => void,
+  onAccepted?: () => void,
 ): typeof fetch {
   return async (input, options) => {
     const canRetry = options?.method === 'POST' && canRetryAfterStop()
@@ -39,6 +40,7 @@ export function chatFetch(
         }
       }
       if (!response.ok) throw await responseError(response)
+      if (options?.method === 'POST') onAccepted?.()
       return response
     } finally {
       if (waiting) setWaiting(false)

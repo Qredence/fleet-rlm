@@ -2,6 +2,7 @@ import { MotionConfig } from 'motion/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ModelSelector } from '@/components/agent/ModelSelector'
 import { ActiveRunBanner } from '@/components/optimization/ActiveRunBanner'
 import { CliReferenceSection } from '@/components/optimization/CliReferenceSection'
 import { DatasetsSection } from '@/components/optimization/DatasetsSection'
@@ -661,6 +662,17 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(cliHtml).toContain('uv run python -m fleet_rlm.optimize')
   })
 
+  it('shows the short model name in the closed selector', () => {
+    const html = renderToStaticMarkup(
+      <ModelSelector api={createApi('token')} model="provider/prov-openai/gpt-5"
+        disabled={false} saving={false} onChange={() => {}} />,
+    )
+    expect(html).toContain('Model: GPT-5')
+    expect(html).toContain('>GPT-5</span>')
+    expect(html).not.toContain('Model ·')
+    expect(html).not.toContain('prov-openai')
+  })
+
   it('renders ProvidersSection cards, masked hints, keyless local provider, and encryption warning banner', () => {
     const api = createApi('token')
     const html = renderToStaticMarkup(
@@ -685,6 +697,22 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(html).toContain('Local Ollama')
     expect(html).toContain('No API key')
     expect(html).toContain('Fetch /models')
+    expect(html).toContain('provider-card-prov-openai')
+
+    const rows = renderToStaticMarkup(
+      <TooltipProvider>
+        <ProvidersSection api={api} providers={MOCK_PROVIDERS} layout="rows"
+          encryptionConfigured allowPrivateEndpoints={false} loading={false}
+          loadError={null} onRetry={() => {}} onChanged={() => {}} onOpenModels={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(rows).toContain('provider-row-prov-openai')
+    expect(rows).not.toContain('provider-card-')
+    expect(rows).toContain('sk-...9a4f')
+    expect(rows).toContain('Fetch /models')
+    expect(rows).toContain('Open Models')
+    expect(rows).toContain('Edit provider OpenAI Prod')
+    expect(rows).toContain('Delete provider OpenAI Prod')
   })
 
   it('shows provider fetch errors with a retry action instead of an empty registry', () => {
