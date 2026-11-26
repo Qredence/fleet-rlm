@@ -53,7 +53,16 @@ jobs:
       - run:
           name: Check repository contracts
           command: |
-            git fetch origin main:refs/remotes/origin/main
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+              git fetch --unshallow origin
+            fi
+            if [ "$CIRCLE_BRANCH" = main ]; then
+              FLEET_HYGIENE_BASE=$(git rev-parse HEAD^)
+            else
+              git fetch origin main:refs/remotes/origin/main
+              FLEET_HYGIENE_BASE=$(git merge-base HEAD origin/main)
+            fi
+            export FLEET_HYGIENE_BASE
             make check-hygiene
       - run:
           name: Verify installed wheel resources

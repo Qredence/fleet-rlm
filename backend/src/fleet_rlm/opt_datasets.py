@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Collection, Mapping, Sequence
+from pathlib import Path
 from typing import Any, Literal, overload
 from urllib.parse import urlsplit
 
@@ -46,6 +47,12 @@ _SECRET_SCAN_RE = re.compile(
     re.IGNORECASE,
 )
 SECRET_SCAN_RE = _SECRET_SCAN_RE
+# Logs also contain CLI-style assignments that are valid text inside a dataset.
+_LOG_SECRET_RE = re.compile(
+    _SECRET_SCAN_RE.pattern + r"|gsk_[A-Za-z0-9_-]{12,}"
+    r"|(?:api[_-]?key|token|secret|password)=[^\s&\"']{6,}",
+    re.IGNORECASE,
+)
 
 
 class DatasetValidationError(ValueError):
@@ -80,7 +87,7 @@ def scrub_secrets(value: Any, extra_secrets: Sequence[str] = ()) -> Any:
 
 
 def _scrub_string(text: str, ordered_extras: Sequence[str]) -> str:
-    cleaned = _SECRET_SCAN_RE.sub("[REDACTED]", text)
+    cleaned = _LOG_SECRET_RE.sub("[REDACTED]", text)
     for secret in ordered_extras:
         cleaned = cleaned.replace(secret, "[REDACTED]")
     return cleaned
@@ -196,6 +203,21 @@ def _validate_skill_list(
             raise DatasetValidationError(
                 f"Line {line_no}: unknown skill {cleaned!r} in '{field_name}'"
             )
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Dataset file not found: {path}")
+    rows: list[dict[str, Any]] = []
+    for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{path}:{line_no}: expected a JSON object")
+        rows.append(parsed)
+    return rows
 
 
 def validate_and_summarize_jsonl(

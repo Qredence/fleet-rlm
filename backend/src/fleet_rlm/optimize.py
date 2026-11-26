@@ -44,6 +44,7 @@ from sqlalchemy import select
 
 from . import agent, db, interpreter, skills
 from .config import Settings
+from .opt_datasets import VALID_SPLITS, VALID_VERIFIER_TYPES, read_jsonl, scrub_secrets
 
 _LOG = logging.getLogger(__name__)
 
@@ -60,8 +61,7 @@ DEFAULT_OUTPUTS: dict[TargetKind, Path] = {
 }
 DEFAULT_MAX_METRIC_CALLS = 80
 DEFAULT_HOLDOUT_REPEATS = 3
-_VALID_SPLITS = frozenset({"train", "val", "holdout"})
-_VALID_VERIFIER_TYPES = frozenset({"exact", "json", "fact_checklist", "artifact", "rubric"})
+
 _AUTO_APPROVE_THRESHOLD = 0.90
 _MAX_CASE_DELTAS = 50
 _MAX_CANDIDATE_HISTORY = 100
@@ -79,33 +79,6 @@ _OPENAI_COMPAT_DIALECTS: frozenset[str] = frozenset(
     {"openai_compatible", "openai-compatible", "openai-chat"}
 )
 _TERMINAL_STAGES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
-
-_SECRET_SCAN_RE = re.compile(
-    r"(?:"
-    r"sk-(?:proj-|ant-|or-)?[A-Za-z0-9_-]{16,}"
-    r"|dtn_[A-Za-z0-9_-]{12,}"
-    r"|tvly-[A-Za-z0-9_-]{12,}"
-    r"|napi_[A-Za-z0-9_-]{12,}"
-    r"|xai-[A-Za-z0-9_-]{12,}"
-    r"|gsk_[A-Za-z0-9_-]{12,}"
-    r"|AIza[0-9A-Za-z_-]{20,}"
-    r"|ghp_[A-Za-z0-9]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
-    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|postgres(?:ql)?(?:\+psycopg)?://[^\s\"']+"
-    r"|https?://[^/\s:@\"'<>]+:[^/\s@\"'<>]+@[^\s\"']+"
-    r"|Bearer\s+[A-Za-z0-9._-]{16,}"
-    r"|(?:(?i:api[_-]?key|token|secret|password))=[^\s&\"']{6,}"
-    r")"
-)
-
-
-def _scrub_secrets(text: str, extra_secrets: Sequence[str] = ()) -> str:
-    cleaned = _SECRET_SCAN_RE.sub("[REDACTED]", text)
-    for secret in extra_secrets:
-        if secret:
-            cleaned = cleaned.replace(secret, "[REDACTED]")
-    return cleaned
 
 
 def _collect_settings_secrets(
@@ -284,9 +257,9 @@ def _role_provenance(
 ) -> dict[str, Any]:
     """Return non-secret model/provider provenance safe for report_json."""
     resolved_dialect = (dialect or "").strip().lower() or _infer_dialect(model)
-    safe_model = _scrub_secrets(model.strip(), extra_secrets)
+    safe_model = scrub_secrets(model.strip(), extra_secrets)
     safe_provider = (
-        _scrub_secrets(provider_name.strip(), extra_secrets)
+        scrub_secrets(provider_name.strip(), extra_secrets)
         if isinstance(provider_name, str) and provider_name.strip()
         else None
     )
@@ -544,7 +517,7 @@ class _ProgressEmitter:
             if best_score is not None:
                 self._last_best_score = best_score
             safe_message = (
-                _scrub_secrets(message, self._extra_secrets) if message is not None else None
+                scrub_secrets(message, self._extra_secrets) if message is not None else None
             )
             stage_timeline = self._update_timeline_locked(stage, label, status, now_iso, now_mono)
             payload = {
@@ -982,7 +955,7 @@ def _extract_gepa_candidate_history(
             and isinstance(reflections[idx], str)
             and reflections[idx].strip()
         ):
-            reflection_summary = _scrub_secrets(reflections[idx].strip(), extra_secrets)[:300]
+            reflection_summary = scrub_secrets(reflections[idx].strip(), extra_secrets)[:300]
         elif idx == 0:
             reflection_summary = "Baseline seed candidate"
         elif parent_idx is not None and cand_instructions[idx] and cand_instructions[parent_idx]:
@@ -1361,26 +1334,11 @@ def _mlflow_tracking(settings: Settings, target: TargetKind) -> Generator[bool]:
         mlflow.dspy.autolog(disable=True)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        raise FileNotFoundError(f"Dataset file not found: {path}")
-    rows: list[dict[str, Any]] = []
-    for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        parsed = json.loads(stripped)
-        if not isinstance(parsed, dict):
-            raise ValueError(f"{path}:{line_no}: expected a JSON object")
-        rows.append(parsed)
-    return rows
-
-
 def _optional_split(row: Mapping[str, Any], *, path: Path, index: int) -> SplitKind | None:
     raw = row.get("split")
     if raw is None or raw == "":
         return None
-    if not isinstance(raw, str) or raw.strip() not in _VALID_SPLITS:
+    if not isinstance(raw, str) or raw.strip() not in VALID_SPLITS:
         raise ValueError(
             f"{path}:{index}: invalid split {raw!r} (expected 'train', 'val', or 'holdout')"
         )
@@ -1875,17 +1833,17 @@ def load_rlm_dataset(
         return resolved_registry
 
     examples: list[dspy.Example] = []
-    for index, row in enumerate(_read_jsonl(path), 1):
+    for index, row in enumerate(read_jsonl(path), 1):
         task = row.get("task")
         verifier = row.get("verifier")
         answer = row.get("answer", "") if verifier is not None else row.get("answer")
         if not isinstance(task, str) or not task.strip() or not isinstance(answer, str):
             raise ValueError(f"{path}:{index}: RLM rows require string 'task' and 'answer'")
         if verifier is not None:
-            if not isinstance(verifier, dict) or verifier.get("type") not in _VALID_VERIFIER_TYPES:
+            if not isinstance(verifier, dict) or verifier.get("type") not in VALID_VERIFIER_TYPES:
                 raise ValueError(
                     f"{path}:{index}: invalid verifier {verifier!r} "
-                    f"(expected type in {sorted(_VALID_VERIFIER_TYPES)})"
+                    f"(expected type in {sorted(VALID_VERIFIER_TYPES)})"
                 )
 
         raw_id = row.get("id")
@@ -2071,7 +2029,7 @@ def load_skills_dataset(
             )
 
     examples: list[dspy.Example] = []
-    for index, row in enumerate(_read_jsonl(path), 1):
+    for index, row in enumerate(read_jsonl(path), 1):
         task = row.get("task")
         if not isinstance(task, str) or not task.strip():
             raise ValueError(f"{path}:{index}: Skill rows require a nonempty 'task'")
@@ -2156,7 +2114,7 @@ def _normalize_existing_memories(raw: Any, *, path: Path, index: int) -> list[di
 def load_memory_dataset(path: Path) -> list[dspy.Example]:
     """Load labeled (turn_exchange, should_save, action, scope) rows from JSONL."""
     examples: list[dspy.Example] = []
-    for index, row in enumerate(_read_jsonl(path), 1):
+    for index, row in enumerate(read_jsonl(path), 1):
         exchange = row.get("turn_exchange")
         if "task" in row or "answer" in row:
             task = str(row.get("task") or "").strip()
@@ -2385,6 +2343,31 @@ def _legacy_token_f1(expected_raw: str, actual_raw: str) -> tuple[float, bool, s
     )
 
 
+def _verify_json_answer(
+    verifier: Mapping[str, Any], expected_raw: str, actual_raw: str
+) -> tuple[float, bool, str]:
+    strict_json = bool(verifier.get("strict_json", False))
+    abs_tol = float(verifier.get("abs_tol", 0.0))
+    expected_obj = verifier.get("expected")
+    if expected_obj is None:
+        expected_obj = json.loads(expected_raw)
+    candidate_text = actual_raw if strict_json else _strip_json_fences(actual_raw)
+    try:
+        actual_obj = json.loads(candidate_text)
+    except json.JSONDecodeError as error:
+        mode = "strict JSON" if strict_json else "JSON"
+        return (
+            0.0,
+            False,
+            f"Expected valid {mode} answer, failed to parse ({error.msg}).",
+        )
+    diffs = _json_equal(actual_obj, expected_obj, abs_tol=abs_tol)
+    if not diffs:
+        return 1.0, True, "JSON verification passed."
+    summary = "; ".join(diffs[:6])
+    return 0.0, False, f"JSON verification failed: {summary}."
+
+
 def _evaluate_verifier(
     gold: dspy.Example,
     pred: Any,
@@ -2409,26 +2392,7 @@ def _evaluate_verifier(
         return 0.0, False, f"Exact match failed: expected {expected!r}, got {actual_raw!r}."
 
     if vtype == "json":
-        strict_json = bool(verifier.get("strict_json", False))
-        abs_tol = float(verifier.get("abs_tol", 0.0))
-        expected_obj = verifier.get("expected")
-        if expected_obj is None:
-            expected_obj = json.loads(expected_raw)
-        candidate_text = actual_raw if strict_json else _strip_json_fences(actual_raw)
-        try:
-            actual_obj = json.loads(candidate_text)
-        except json.JSONDecodeError as error:
-            mode = "strict JSON" if strict_json else "JSON"
-            return (
-                0.0,
-                False,
-                f"Expected valid {mode} answer, failed to parse ({error.msg}).",
-            )
-        diffs = _json_equal(actual_obj, expected_obj, abs_tol=abs_tol)
-        if not diffs:
-            return 1.0, True, "JSON verification passed."
-        summary = "; ".join(diffs[:6])
-        return 0.0, False, f"JSON verification failed: {summary}."
+        return _verify_json_answer(verifier, expected_raw, actual_raw)
 
     if vtype == "fact_checklist":
         required = list(verifier.get("required_patterns") or ())
@@ -5205,7 +5169,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
         print("Optimization cancelled", file=sys.stderr)
         return 130
     except Exception as error:
-        safe_err = _scrub_secrets(str(error) or type(error).__name__, extra_secrets)
+        safe_err = scrub_secrets(str(error) or type(error).__name__, extra_secrets)
         progress.emit("failed", "Optimization failed", status="failed", message=safe_err)
         raise RuntimeError(safe_err) from None
     finally:

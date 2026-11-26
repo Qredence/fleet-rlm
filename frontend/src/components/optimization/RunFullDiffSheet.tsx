@@ -322,7 +322,7 @@ interface CalibrationRow {
   before: number | null
   after: number | null
   lowerBetter: boolean
-  isCount?: boolean
+  unit?: 'count' | 'percent' | 'fraction'
 }
 
 function buildCalibrationMatrix(
@@ -336,6 +336,7 @@ function buildCalibrationMatrix(
     return [
       {
         label: 'Holdout score',
+        unit: 'percent' as const,
         before: asNumber(metrics.baseline_holdout_score) ?? job.baseline_score,
         after: asNumber(metrics.optimized_holdout_score) ?? job.optimized_score,
         lowerBetter: false,
@@ -357,14 +358,14 @@ function buildCalibrationMatrix(
         before: asNumber(metrics.baseline_mean_actions),
         after: asNumber(metrics.optimized_mean_actions),
         lowerBetter: true,
-        isCount: true,
+        unit: 'count' as const,
       },
       {
         label: 'Python errors',
         before: asNumber(metrics.baseline_py_errors),
         after: asNumber(metrics.optimized_py_errors),
         lowerBetter: true,
-        isCount: true,
+        unit: 'count' as const,
       },
     ].filter((row) => row.before !== null || row.after !== null)
   }
@@ -408,32 +409,29 @@ function buildCalibrationMatrix(
       before: asNumber(before[item.key] ?? item.fallbackBefore),
       after: asNumber(after[item.key] ?? item.fallbackAfter),
       lowerBetter: item.lowerBetter,
-      isCount: item.isCount,
+      unit: item.isCount ? 'count' : 'fraction',
     }))
     .filter((row) => row.before !== null || row.after !== null)
 }
 
-function formatMatrixValue(value: number | null, isCount?: boolean): string {
+function formatMatrixValue(value: number | null, unit: CalibrationRow['unit']): string {
   if (value === null) return '—'
-  if (isCount) return Number.isInteger(value) ? String(value) : value.toFixed(2)
-  const pct = value > 1.0001 ? value : value * 100
+  if (unit === 'count') return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  const pct = unit === 'percent' ? value : value * 100
   return `${pct.toFixed(1)}%`
 }
 
 function formatMatrixDelta(
-  before: number | null,
-  after: number | null,
-  lowerBetter: boolean,
-  isCount?: boolean,
+  { before, after, lowerBetter, unit }: CalibrationRow,
 ): { text: string; tone: 'good' | 'bad' | 'neutral' } {
   if (before === null || after === null) return { text: '—', tone: 'neutral' }
   const diff = after - before
   if (Math.abs(diff) < 1e-6) return { text: '0.0', tone: 'neutral' }
   const improved = lowerBetter ? diff < 0 : diff > 0
   const sign = diff > 0 ? '+' : ''
-  const text = isCount
+  const text = unit === 'count'
     ? `${sign}${Number.isInteger(diff) ? diff : diff.toFixed(2)}`
-    : `${sign}${((Math.abs(before) > 1.0001 || Math.abs(after) > 1.0001 ? diff : diff * 100)).toFixed(1)} pts`
+    : `${sign}${(unit === 'percent' ? diff : diff * 100).toFixed(1)} pts`
   return { text, tone: improved ? 'good' : 'bad' }
 }
 
@@ -825,22 +823,17 @@ export function RunFullDiffContent({
                       </thead>
                       <tbody className="divide-y">
                         {calibrationRows.map((row) => {
-                          const d = formatMatrixDelta(
-                            row.before,
-                            row.after,
-                            row.lowerBetter,
-                            row.isCount,
-                          )
+                          const d = formatMatrixDelta(row)
                           return (
                             <tr key={row.label}>
                               <td className={`${typeClass('body')} px-3 py-2 text-foreground`}>
                                 {row.label}
                               </td>
                               <td className={`${typeClass('body')} px-3 py-2 text-right font-mono tabular-nums text-muted-foreground`}>
-                                {formatMatrixValue(row.before, row.isCount)}
+                                {formatMatrixValue(row.before, row.unit)}
                               </td>
                               <td className={`${typeClass('body')} px-3 py-2 text-right font-mono tabular-nums text-foreground`}>
-                                {formatMatrixValue(row.after, row.isCount)}
+                                {formatMatrixValue(row.after, row.unit)}
                               </td>
                               <td className="px-3 py-2 text-right font-mono tabular-nums">
                                 <span

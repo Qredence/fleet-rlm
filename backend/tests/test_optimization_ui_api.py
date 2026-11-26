@@ -1415,6 +1415,22 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     assert terminate_calls == 1
     assert mem_store.jobs[UUID(job_id)].status == "cancelled"
 
+    proc_started.clear()
+    shutdown_job = await client.post(
+        "/api/optimizations/jobs",
+        headers=_AUTH,
+        json={"target": "skills", "branch_mode": "configured_branch"},
+    )
+    shutdown_job.raise_for_status()
+    shutdown_id = UUID(shutdown_job.json()["id"])
+    await asyncio.wait_for(proc_started.wait(), timeout=2.0)
+    runtime = api.app.state.runtime
+    await opt_runner.shutdown_optimization_runtime(runtime)
+    assert mem_store.jobs[shutdown_id].status == "cancelled"
+    assert terminate_calls == 2
+    assert not runtime.optimization_tasks and not runtime.optimization_procs
+    assert not runtime.optimization_cancel_events
+
     # 2. Pre-spawn cancellation: cancel requested BEFORE supervisor starts -> no branch/subprocess!
     branch_spy = AsyncMock(return_value=("br-should-not-run", "postgresql://u:p@h/db"))
     exec_spy = AsyncMock()
@@ -1814,3 +1830,40 @@ async def test_neon_branch_cleanup_progress_partial_lines_mlflow_url_and_s3_fall
         active = await opt_runner.resolve_active_artifacts(api.app.state.runtime, opt_app.settings)
     assert active.settings.memory_gate_path is None
     assert any("falling back to env/default" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_job_stream_serializes_idle_ping_update_and_terminal_event(opt_app, monkeypatch):
+    job = await opt_app.store.create_job(
+        None,
+        target="memory",
+        program_kind="rlm",
+        dataset_source="builtin",
+        dataset_name="memory.jsonl",
+        dataset_id=None,
+        config_json={},
+        mlflow_experiment="offline",
+    )
+    ticks = 0
+
+    async def tick():
+        nonlocal ticks
+        ticks += 1
+        if ticks == 31:
+            job.stage = "evaluating"
+        elif ticks == 32:
+            job.status = "completed"
+
+    monkeypatch.setattr(api.app.state.runtime.shutdown_event, "wait", tick)
+    response = await opt_app.client.get(f"/api/optimizations/jobs/{job.id}/events", headers=_AUTH)
+    response.raise_for_status()
+    lines = response.text.splitlines()
+    assert [line for line in lines if line.startswith("event: ")] == [
+        "event: snapshot",
+        "event: update",
+        "event: done",
+    ]
+    assert ": ping" in lines
+    assert [line for line in lines if line.startswith("id: ")] == [
+        f"id: {job.id}:{index}" for index in range(3)
+    ]

@@ -119,7 +119,9 @@ export function parseGateChecks(job: OptimizationJobDetail): GateCheckRow[] {
 export function buildModelsProvenance(
   job: OptimizationJobDetail,
 ): ProvenanceModel[] {
-  const modelsRec = asRecord(asRecord(job.report_json)?.models)
+  const cfg = asRecord(job.config_json)
+  const configured = asRecord(cfg?.models)
+  const reported = asRecord(asRecord(job.report_json)?.models)
   const roles: Array<[string, string]> = [
     ['root_lm', 'Root LM'],
     ['sub_lm', 'Sub LM'],
@@ -128,9 +130,9 @@ export function buildModelsProvenance(
     ['decision_lm', 'Decision LM'],
   ]
   const rows: ProvenanceModel[] = []
-  if (modelsRec) {
+  if (reported || configured) {
     for (const [key, label] of roles) {
-      const entry = asRecord(modelsRec[key])
+      const entry = asRecord(reported?.[key]) ?? asRecord(configured?.[key])
       if (!entry || typeof entry.model !== 'string' || !entry.model) continue
       rows.push({
         role: label,
@@ -142,7 +144,6 @@ export function buildModelsProvenance(
   }
   if (rows.length === 0) {
     // Fallback to config_json provenance or resolved_decision_model.
-    const cfg = asRecord(job.config_json)
     for (const [key, label] of [
       ['root_lm', 'Root LM'],
       ['reflection_lm_config', 'Reflection LM'],

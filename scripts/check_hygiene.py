@@ -1,7 +1,8 @@
-"""Run offline repository checks from the repository root with the locked backend tools."""
+"""Check the working tree against its merge base or an explicitly selected baseline."""
 
 import ast
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -59,12 +60,7 @@ def scores(root: Path) -> dict[tuple[Path, str], int]:
     return scores_by_name
 
 
-def check_complexity():
-    base = subprocess.check_output(
-        ["git", "merge-base", "HEAD", "origin/main"], text=True
-    ).strip()
-    if base == subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip():
-        base += "^"
+def check_complexity(base: str):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         names = subprocess.check_output(
@@ -97,13 +93,26 @@ def check_files():
                 owner = OWNERS.get(module.split(".")[0])
                 if owner and path != SRC / owner:
                     yield f"{path}:{node.lineno} {module} belongs in {owner}"
-    for path in [
-        Path("README.md"),
-        Path("AGENTS.md"),
-        Path("GLOSSARY.md"),
-        Path("frontend/README.md"),
-        *Path("docs").rglob("*.md"),
-    ]:
+    markdown = subprocess.check_output(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "README.md",
+            "AGENTS.md",
+            "GLOSSARY.md",
+            "frontend/README.md",
+            "docs/*.md",
+        ]
+    )
+    for name in markdown.split(b"\0")[:-1]:
+        path = Path(os.fsdecode(name))
+        if not path.is_file():
+            continue
         for target in re.findall(r"\]\(([^()\s]+)\)", path.read_text()):
             url = urlsplit(target)
             if (
@@ -117,7 +126,19 @@ def check_files():
         compile(path.read_bytes(), str(path), "exec")
 
 
+def complexity_base() -> str:
+    if base := os.environ.get("FLEET_HYGIENE_BASE"):
+        return base
+    result = subprocess.run(
+        ["git", "merge-base", "HEAD", "origin/main"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else "HEAD"
+
+
 if __name__ == "__main__":
-    problems = [*check_files(), *check_complexity()]
+    problems = [*check_files(), *check_complexity(complexity_base())]
     if problems:
         raise SystemExit("\n".join(problems))
