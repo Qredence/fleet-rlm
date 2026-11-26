@@ -1,0 +1,19 @@
+backend/src/fleet_rlm/optimize.py
+  s_4c5656a3b33387::t_c0f78ab4a4acc4 406-411,720,5198-5199,5210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8beca331b075f0d8a2ef09d4e3ca6af93001ca9",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
