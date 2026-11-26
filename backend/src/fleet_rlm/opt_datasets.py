@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Collection, Mapping, Sequence
+from pathlib import Path
 from typing import Any, Literal, overload
 from urllib.parse import urlsplit
 
@@ -32,7 +33,7 @@ _SECRET_SCAN_RE = re.compile(
     r"|tvly-[A-Za-z0-9_-]{12,}"
     r"|napi_[A-Za-z0-9_-]{12,}"
     r"|xai-[A-Za-z0-9_-]{12,}"
-    r"|gsk_[A-Za-z0-9_-]{16,}"
+    r"|gsk_[A-Za-z0-9_-]{12,}"
     r"|AIza[0-9A-Za-z_-]{20,}"
     r"|gh[pousr]_[A-Za-z0-9]{20,}"
     r"|github_pat_[A-Za-z0-9_]{20,}"
@@ -41,6 +42,7 @@ _SECRET_SCAN_RE = re.compile(
     r"|postgres(?:ql)?(?:\+psycopg)?://[^\s\"'<>]+"
     r"|https?://[^/\s\"'@:]+:[^/\s\"'@]+@[^\s\"'<>]+"
     r"|Bearer\s+[A-Za-z0-9._~+/-]{16,}=*"
+    r"|(?:api[_-]?key|token|secret|password)=[^\s&\"']{6,}"
     r"|[?&](?:api_?key|access_?token|auth_?token|token|secret|password|key)=[^\s&\"'#<>]+"
     r")",
     re.IGNORECASE,
@@ -196,6 +198,21 @@ def _validate_skill_list(
             raise DatasetValidationError(
                 f"Line {line_no}: unknown skill {cleaned!r} in '{field_name}'"
             )
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Dataset file not found: {path}")
+    rows: list[dict[str, Any]] = []
+    for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{path}:{line_no}: expected a JSON object")
+        rows.append(parsed)
+    return rows
 
 
 def validate_and_summarize_jsonl(
