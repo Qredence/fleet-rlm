@@ -254,16 +254,22 @@ class ObjectStorage:
     async def delete_session(self, session_id: UUID) -> None:
         def delete() -> None:
             prefix = self.prefix(session_id)
-            while uploads := self._client.list_multipart_uploads(
-                Bucket=self.bucket, Prefix=prefix, MaxUploads=1000
-            ).get("Uploads"):
-                for upload in uploads:
-                    self._abort_upload(upload["Key"], upload["UploadId"])
-            while True:
-                page = self._client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=1000)
-                keys = [{"Key": item["Key"]} for item in page.get("Contents", ())]
+            scope = {"Bucket": self.bucket, "Prefix": prefix}
+            uploads = self._client.get_paginator("list_multipart_uploads")
+            for page in uploads.paginate(**scope):
+                for upload in page.get("Uploads", ()):
+                    # The provider can return uploads belonging to sibling sessions.
+                    if upload["Key"].startswith(prefix):
+                        self._abort_upload(upload["Key"], upload["UploadId"])
+            objects = self._client.get_paginator("list_objects_v2")
+            for page in objects.paginate(**scope):
+                keys = [
+                    {"Key": item["Key"]}
+                    for item in page.get("Contents", ())
+                    if item["Key"].startswith(prefix)
+                ]
                 if not keys:
-                    return
+                    continue
                 result = self._client.delete_objects(
                     Bucket=self.bucket, Delete={"Objects": keys, "Quiet": True}
                 )

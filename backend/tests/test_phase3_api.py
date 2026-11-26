@@ -789,6 +789,49 @@ async def test_download_requires_a_safe_registered_path(offline):
 
 
 @pytest.mark.asyncio
+async def test_session_cleanup_filters_each_provider_page(offline, monkeypatch):
+    session = uuid4()
+    owned = ObjectStorage.new_key(session)
+    foreign = ObjectStorage.new_key(uuid4())
+    uploads = Mock()
+    uploads.paginate.return_value = [
+        {"Uploads": [{"Key": foreign, "UploadId": "sibling"}]},
+        {"Uploads": [{"Key": owned, "UploadId": token} for token in ("first", "second")]},
+    ]
+    objects = Mock()
+    objects.paginate.return_value = [
+        {"Contents": [{"Key": foreign}]},
+        {"Contents": [{"Key": owned}, {"Key": foreign}]},
+    ]
+    sdk = Mock()
+    sdk.get_paginator.side_effect = {
+        "list_multipart_uploads": uploads,
+        "list_objects_v2": objects,
+    }.__getitem__
+    sdk.delete_objects.return_value = {}
+    monkeypatch.setattr("fleet_rlm.storage.boto3.client", Mock(return_value=sdk))
+    settings = offline.settings.model_copy(
+        update={
+            "s3_endpoint_url": "https://storage.example.test",
+            "s3_access_key_id": SecretStr("offline"),
+            "s3_secret_access_key": SecretStr("offline"),
+        }
+    )
+    storage = ObjectStorage(settings)
+    await storage.delete_session(session)
+    for paginator in (uploads, objects):
+        paginator.paginate.assert_called_once_with(
+            Bucket=storage.bucket, Prefix=storage.prefix(session)
+        )
+    assert [call.kwargs for call in sdk.abort_multipart_upload.call_args_list] == [
+        {"Bucket": storage.bucket, "Key": owned, "UploadId": token} for token in ("first", "second")
+    ]
+    sdk.delete_objects.assert_called_once_with(
+        Bucket=storage.bucket, Delete={"Objects": [{"Key": owned}], "Quiet": True}
+    )
+
+
+@pytest.mark.asyncio
 async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monkeypatch, tmp_path):
     content = b"verified workspace file"
     digest = hashlib.sha256(content).hexdigest()
