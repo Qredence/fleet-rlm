@@ -1,0 +1,23 @@
+frontend/src/components/optimization/RunFullDiffSheet.tsx
+  s_4c5656a3b33387::t_454cd320271fa5 1,556
+frontend/src/components/optimization/RunInspectorPanel.tsx
+  s_4c5656a3b33387::t_5dbfeed317979d 1,93-94,97-98
+frontend/src/components/optimization/optimization-report.ts
+  s_4c5656a3b33387::t_c7a4a0a6355a20 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "adce3e5c26d5ed17415cf77375f09277740ce58e",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
