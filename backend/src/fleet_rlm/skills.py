@@ -285,15 +285,16 @@ def build_skill_selector(
     needs_skill = Noul[
         (
             True,
-            "A listed skill matches this task and supplies specialized instructions "
-            "or formatting rules needed to complete it. This includes a follow-up asking for a "
-            "new fact that continues the previous web research and needs a source.",
+            {
+                "task_matches_any_available_workflow": {
+                    skill.name: skill.description for skill in candidates
+                }
+            },
         ),
         (
             False,
-            "General conversation, greetings, remembering user facts, unresolved "
-            "follow-ups, requests answered by the previous exchange, or tasks that do not match "
-            "any listed skill.",
+            "No workflow applies. Includes casual chat, recalling a personal fact, "
+            "or answering from the previous exchange.",
         ),
     ]
     signature = dspy.make_signature(

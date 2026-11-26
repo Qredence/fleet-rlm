@@ -144,6 +144,8 @@ def test_jev_selector_shortlists_and_applies_calibration(settings, tmp_path, mon
     def decide(self, *, task, lm):
         assert lm.model == "typesafe:jev-latest"
         options = self.signature.output_fields["primary_skill"].annotation.criteria()
+        workflows = self.get_criteria("needs_skill")["true"]["task_matches_any_available_workflow"]
+        assert workflows == {name: desc["what"] for name, desc in options.items()}
         assert len(options) == 40 and "zz-csv" in options and "skill-40" not in options
         assert self.fields["primary_skill"]["weights"] == {"skill-00": 3.0}
         threshold = self.fields["needs_skill"]["threshold"]
@@ -2114,7 +2116,7 @@ async def test_live_skill_selection_and_ab_results():
             ephemeral_sandbox(daytona, live_settings) as sandbox,
         ):
             input_path = f"/workspace/files/{filename}"
-            await sandbox.fs.upload_file(data, input_path)
+            await sandbox.fs.write_bytes(input_path, data, atomic=True)
             prediction = await run_workspace_task(
                 live_settings,
                 task=prompt,
@@ -2133,7 +2135,7 @@ async def test_live_skill_selection_and_ab_results():
             assert artifact_path in {
                 path.removeprefix("/workspace/") for path in prediction.artifact_paths
             }
-            artifact = await sandbox.fs.download_file(f"/workspace/{artifact_path}")
+            artifact = await sandbox.fs.read_bytes(f"/workspace/{artifact_path}")
             return answer, artifact
 
     sales = (
