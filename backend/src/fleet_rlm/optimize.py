@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import copy
+import difflib
 import importlib.util
 import io
 import json
@@ -16,7 +17,8 @@ import re
 import signal
 import sys
 import threading
-from collections import defaultdict
+import time
+from collections import defaultdict, deque
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, AsyncExitStack, contextmanager, suppress
 from contextvars import ContextVar
@@ -48,6 +50,8 @@ _LOG = logging.getLogger(__name__)
 TargetKind = Literal["rlm", "skills", "memory"]
 ProgramKind = Literal["rlm", "flex"]
 SplitKind = Literal["train", "val", "holdout"]
+RoleName = Literal["root_lm", "sub_lm", "reflection_lm", "judge_lm", "decision_lm"]
+ApiMode = Literal["auto", "chat", "responses"]
 
 DEFAULT_OUTPUTS: dict[TargetKind, Path] = {
     "rlm": Path("artifacts/rlm_program.json"),
@@ -59,7 +63,322 @@ DEFAULT_HOLDOUT_REPEATS = 3
 _VALID_SPLITS = frozenset({"train", "val", "holdout"})
 _VALID_VERIFIER_TYPES = frozenset({"exact", "json", "fact_checklist", "artifact", "rubric"})
 _AUTO_APPROVE_THRESHOLD = 0.90
+_MAX_CASE_DELTAS = 50
+_MAX_CANDIDATE_HISTORY = 100
 _MISSING = object()
+
+_VALID_ROLE_NAMES: frozenset[str] = frozenset(
+    {"root_lm", "sub_lm", "reflection_lm", "judge_lm", "decision_lm"}
+)
+_VALID_API_MODES: frozenset[str] = frozenset({"auto", "chat", "responses"})
+_COLON_DIALECTS: frozenset[str] = frozenset({"openai-chat", "vllm", "sglang", "typesafe"})
+_SLASH_DIALECTS: frozenset[str] = frozenset(
+    {"openai", "anthropic", "gemini", "openrouter", "xai", "groq", "deepseek", "ollama"}
+)
+_OPENAI_COMPAT_DIALECTS: frozenset[str] = frozenset(
+    {"openai_compatible", "openai-compatible", "openai-chat"}
+)
+_TERMINAL_STAGES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
+
+_SECRET_SCAN_RE = re.compile(
+    r"(?:"
+    r"sk-(?:proj-|ant-|or-)?[A-Za-z0-9_-]{16,}"
+    r"|dtn_[A-Za-z0-9_-]{12,}"
+    r"|tvly-[A-Za-z0-9_-]{12,}"
+    r"|napi_[A-Za-z0-9_-]{12,}"
+    r"|xai-[A-Za-z0-9_-]{12,}"
+    r"|gsk_[A-Za-z0-9_-]{12,}"
+    r"|AIza[0-9A-Za-z_-]{20,}"
+    r"|ghp_[A-Za-z0-9]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|postgres(?:ql)?(?:\+psycopg)?://[^\s\"']+"
+    r"|https?://[^/\s:@\"'<>]+:[^/\s@\"'<>]+@[^\s\"']+"
+    r"|Bearer\s+[A-Za-z0-9._-]{16,}"
+    r"|(?:(?i:api[_-]?key|token|secret|password))=[^\s&\"']{6,}"
+    r")"
+)
+
+
+def _scrub_secrets(text: str, extra_secrets: Sequence[str] = ()) -> str:
+    cleaned = _SECRET_SCAN_RE.sub("[REDACTED]", text)
+    for secret in extra_secrets:
+        if secret:
+            cleaned = cleaned.replace(secret, "[REDACTED]")
+    return cleaned
+
+
+def _collect_settings_secrets(
+    settings: Settings,
+    *,
+    database_url: str | None = None,
+    role_models: Mapping[RoleName, "RoleModelConfig"] | None = None,
+) -> list[str]:
+    secrets: list[str] = []
+    for raw in (settings.database_url, settings.database_direct_url, database_url):
+        if raw:
+            secrets.append(raw)
+            try:
+                parsed = urlsplit(raw)
+                if parsed.password:
+                    secrets.append(parsed.password)
+            except ValueError:
+                pass
+    for attr in (
+        "api_bearer_token",
+        "daytona_api_key",
+        "tavily_api_key",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        "llm_api_key",
+        "optimization_database_url",
+        "neon_api_key",
+    ):
+        val = getattr(settings, attr, None)
+        if val is not None and hasattr(val, "get_secret_value"):
+            secret_text = str(val.get_secret_value() or "")
+            if secret_text:
+                secrets.append(secret_text)
+    if role_models:
+        for spec in role_models.values():
+            if spec.api_key:
+                secrets.append(spec.api_key)
+            if spec.base_url:
+                try:
+                    parsed = urlsplit(spec.base_url)
+                    if parsed.password or parsed.username:
+                        secrets.append(spec.base_url)
+                        if parsed.password:
+                            secrets.append(parsed.password)
+                except ValueError:
+                    pass
+    for env_key in (
+        "TYPESAFE_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "XAI_API_KEY",
+        "GROQ_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ):
+        env_val = os.environ.get(env_key)
+        if env_val:
+            secrets.append(env_val)
+    return list(dict.fromkeys(s for s in secrets if len(s) >= 4))
+
+
+@dataclass(frozen=True)
+class RoleModelConfig:
+    """Resolved non-default model & credential binding for a single optimizer role."""
+
+    model: str
+    dialect: str | None = None
+    api_mode: ApiMode = "auto"
+    api_key: str | None = field(default=None, repr=False)
+    base_url: str | None = field(default=None, repr=False)
+    provider_name: str | None = None
+    timeout: float | None = None
+
+
+def _infer_dialect(model: str) -> str | None:
+    cleaned = model.strip()
+    if not cleaned:
+        return None
+    colon_idx = cleaned.find(":")
+    slash_idx = cleaned.find("/")
+    if colon_idx > 0 and (slash_idx == -1 or colon_idx < slash_idx):
+        return cleaned[:colon_idx].lower()
+    if slash_idx > 0:
+        return cleaned[:slash_idx].lower()
+    return None
+
+
+def _format_lm15_model(
+    model: str,
+    *,
+    dialect: str | None,
+    api_mode: ApiMode,
+) -> tuple[str, ApiMode]:
+    """Normalize a (dialect, api_mode, model) triple for DSPy 3.5 lm15 routing."""
+    raw_model = model.strip()
+    if not raw_model:
+        raise ValueError("Model ID must be a non-empty string")
+    norm_dialect = (dialect or "").strip().lower() or None
+
+    if norm_dialect in _OPENAI_COMPAT_DIALECTS:
+        effective_mode: ApiMode = "chat" if api_mode == "auto" else api_mode
+        bare = raw_model
+        for prefix in ("openai-chat:", "openai-chat/", "openai:", "openai/"):
+            if bare.lower().startswith(prefix):
+                bare = bare[len(prefix) :]
+                break
+        if effective_mode == "responses":
+            routed = f"openai:{bare}" if "/" in bare else f"openai/{bare}"
+            return routed, "responses"
+        return f"openai-chat:{bare}", "chat"
+
+    if norm_dialect == "openai":
+        bare = raw_model
+        for prefix in ("openai-chat:", "openai-chat/", "openai:", "openai/"):
+            if bare.lower().startswith(prefix):
+                bare = bare[len(prefix) :]
+                break
+        if api_mode == "chat":
+            return f"openai-chat:{bare}", "chat"
+        routed = f"openai:{bare}" if "/" in bare else f"openai/{bare}"
+        return routed, api_mode
+
+    if norm_dialect in _COLON_DIALECTS:
+        bare = raw_model
+        if bare.lower().startswith(f"{norm_dialect}:"):
+            bare = bare[len(norm_dialect) + 1 :]
+        elif bare.lower().startswith(f"{norm_dialect}/"):
+            bare = bare[len(norm_dialect) + 1 :]
+        return f"{norm_dialect}:{bare}", api_mode
+
+    if norm_dialect in _SLASH_DIALECTS:
+        lower = raw_model.lower()
+        if lower.startswith(f"{norm_dialect}/") or lower.startswith(f"{norm_dialect}:"):
+            return raw_model, api_mode
+        return f"{norm_dialect}/{raw_model}", api_mode
+
+    if norm_dialect is not None:
+        lower = raw_model.lower()
+        if lower.startswith(f"{norm_dialect}:") or lower.startswith(f"{norm_dialect}/"):
+            return raw_model, api_mode
+        return f"{norm_dialect}/{raw_model}", api_mode
+
+    return raw_model, api_mode
+
+
+def _build_role_lm(spec: RoleModelConfig) -> tuple[dspy.LM, str, ApiMode]:
+    """Construct a DSPy 3.5 lm15-compatible LM using native client keys only."""
+    routed_model, resolved_mode = _format_lm15_model(
+        spec.model,
+        dialect=spec.dialect,
+        api_mode=spec.api_mode,
+    )
+    # Only pass DSPy 3.5 lm15 NATIVE_CLIENT_KEYS (api_key, api_base, timeout).
+    lm_kwargs: dict[str, Any] = {}
+    if resolved_mode in {"chat", "responses"}:
+        lm_kwargs["model_type"] = resolved_mode
+    if spec.api_key is not None and spec.api_key.strip():
+        lm_kwargs["api_key"] = spec.api_key.strip()
+    if spec.base_url is not None and spec.base_url.strip():
+        lm_kwargs["api_base"] = spec.base_url.strip()
+    if spec.timeout is not None:
+        lm_kwargs["timeout"] = spec.timeout
+    return dspy.LM(routed_model, **lm_kwargs), routed_model, resolved_mode
+
+
+def _role_provenance(
+    *,
+    model: str,
+    dialect: str | None = None,
+    provider_name: str | None = None,
+    extra_secrets: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Return non-secret model/provider provenance safe for report_json."""
+    resolved_dialect = (dialect or "").strip().lower() or _infer_dialect(model)
+    safe_model = _scrub_secrets(model.strip(), extra_secrets)
+    safe_provider = (
+        _scrub_secrets(provider_name.strip(), extra_secrets)
+        if isinstance(provider_name, str) and provider_name.strip()
+        else None
+    )
+    return {
+        "dialect": resolved_dialect,
+        "model": safe_model,
+        "provider_name": safe_provider,
+    }
+
+
+def load_role_credentials(path: Path) -> dict[RoleName, RoleModelConfig]:
+    """Load per-role LLM credentials from a private JSON file."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Credentials file not found: {path}")
+    try:
+        mode = path.stat().st_mode & 0o777
+        if os.name == "posix" and mode & 0o077:
+            _LOG.warning(
+                "Credentials file %s has permissive mode %04o; expected 0600",
+                path,
+                mode,
+            )
+    except OSError:
+        pass
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ValueError("Credentials file must contain a JSON object mapping role names to specs")
+
+    configs: dict[RoleName, RoleModelConfig] = {}
+    for role_key, entry in raw.items():
+        if role_key not in _VALID_ROLE_NAMES:
+            raise ValueError(
+                f"Unknown role {role_key!r} in credentials file "
+                f"(expected one of {sorted(_VALID_ROLE_NAMES)})"
+            )
+        if entry is None:
+            continue
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"Credentials entry for {role_key!r} must be an object")
+        raw_model = entry.get("model")
+        if not isinstance(raw_model, str) or not raw_model.strip():
+            raise ValueError(f"Credentials entry for {role_key!r} requires a nonempty 'model'")
+        raw_dialect = entry.get("dialect")
+        if raw_dialect is not None and not isinstance(raw_dialect, str):
+            raise ValueError(f"Credentials entry for {role_key!r}: 'dialect' must be a string")
+        dialect = raw_dialect.strip().lower() if isinstance(raw_dialect, str) else None
+        if dialect == "":
+            dialect = None
+
+        raw_mode = entry.get("api_mode")
+        if raw_mode is None or raw_mode == "":
+            api_mode: ApiMode = "chat" if dialect in _OPENAI_COMPAT_DIALECTS else "auto"
+        elif isinstance(raw_mode, str) and raw_mode.strip().lower() in _VALID_API_MODES:
+            api_mode = cast(ApiMode, raw_mode.strip().lower())
+        else:
+            raise ValueError(
+                f"Credentials entry for {role_key!r}: invalid api_mode {raw_mode!r} "
+                f"(expected 'auto', 'chat', or 'responses')"
+            )
+
+        raw_key = entry.get("api_key")
+        if raw_key is not None and not isinstance(raw_key, str):
+            raise ValueError(f"Credentials entry for {role_key!r}: 'api_key' must be a string")
+        api_key = raw_key.strip() if isinstance(raw_key, str) and raw_key.strip() else None
+
+        raw_base = entry.get("base_url", entry.get("api_base"))
+        if raw_base is not None and not isinstance(raw_base, str):
+            raise ValueError(f"Credentials entry for {role_key!r}: 'base_url' must be a string")
+        base_url = raw_base.strip() if isinstance(raw_base, str) and raw_base.strip() else None
+
+        raw_provider = entry.get("provider_name", entry.get("name"))
+        provider_name = (
+            raw_provider.strip() if isinstance(raw_provider, str) and raw_provider.strip() else None
+        )
+
+        raw_timeout = entry.get("timeout")
+        timeout: float | None = None
+        if raw_timeout is not None:
+            if isinstance(raw_timeout, bool) or not isinstance(raw_timeout, (int, float)):
+                raise ValueError(f"Credentials entry for {role_key!r}: 'timeout' must be numeric")
+            if float(raw_timeout) <= 0 or not math.isfinite(float(raw_timeout)):
+                raise ValueError(f"Credentials entry for {role_key!r}: 'timeout' must be positive")
+            timeout = float(raw_timeout)
+
+        configs[cast(RoleName, role_key)] = RoleModelConfig(
+            model=raw_model.strip(),
+            dialect=dialect,
+            api_mode=api_mode,
+            api_key=api_key,
+            base_url=base_url,
+            provider_name=provider_name,
+            timeout=timeout,
+        )
+    return configs
 
 
 class _MlflowTracking(Protocol):
@@ -97,14 +416,98 @@ class OptimizationResult:
 
 
 class _ProgressEmitter:
-    """Thread-safe JSONL writer for live UI progress tracking."""
+    """Thread-safe JSONL writer for live UI progress tracking with cumulative stage timeline."""
 
-    def __init__(self, path: Path | None) -> None:
+    def __init__(
+        self,
+        path: Path | None,
+        *,
+        extra_secrets: Sequence[str] = (),
+    ) -> None:
         self._path = path
         self.enabled = path is not None
         self._lock = threading.Lock()
+        self._extra_secrets: list[str] = [s for s in extra_secrets if s]
+        self._timeline: list[dict[str, Any]] = []
+        self._timeline_started_mono: list[float] = []
+        self._last_baseline_score: float | None = None
+        self._last_best_score: float | None = None
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
+
+    def add_secrets(self, secrets: Sequence[str]) -> None:
+        with self._lock:
+            existing = set(self._extra_secrets)
+            for secret in secrets:
+                if secret and secret not in existing:
+                    self._extra_secrets.append(secret)
+                    existing.add(secret)
+
+    def timeline(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(item) for item in self._timeline]
+
+    def _update_timeline_locked(
+        self,
+        stage: str,
+        label: str,
+        status: Literal["running", "completed", "failed", "cancelled"],
+        now_iso: str,
+        now_mono: float,
+    ) -> list[dict[str, Any]]:
+        is_terminal = status in _TERMINAL_STAGES or stage in _TERMINAL_STAGES
+        if is_terminal:
+            terminal_status: Literal["completed", "failed", "cancelled"] = (
+                "cancelled"
+                if status == "cancelled" or stage == "cancelled"
+                else "failed"
+                if status == "failed" or stage == "failed"
+                else "completed"
+            )
+            if self._timeline and self._timeline[-1]["status"] == "running":
+                start_mono = self._timeline_started_mono[-1]
+                self._timeline[-1]["status"] = terminal_status
+                self._timeline[-1]["finished_at"] = now_iso
+                self._timeline[-1]["duration_seconds"] = round(max(0.0, now_mono - start_mono), 3)
+            elif not self._timeline:
+                self._timeline.append(
+                    {
+                        "stage": stage,
+                        "label": label,
+                        "status": terminal_status,
+                        "started_at": now_iso,
+                        "finished_at": now_iso,
+                        "duration_seconds": 0.0,
+                    }
+                )
+                self._timeline_started_mono.append(now_mono)
+        else:
+            if self._timeline and self._timeline[-1]["stage"] == stage:
+                start_mono = self._timeline_started_mono[-1]
+                self._timeline[-1]["label"] = label
+                self._timeline[-1]["status"] = "running"
+                self._timeline[-1]["finished_at"] = None
+                self._timeline[-1]["duration_seconds"] = round(max(0.0, now_mono - start_mono), 3)
+            else:
+                if self._timeline and self._timeline[-1]["status"] == "running":
+                    prev_start = self._timeline_started_mono[-1]
+                    self._timeline[-1]["status"] = "completed"
+                    self._timeline[-1]["finished_at"] = now_iso
+                    self._timeline[-1]["duration_seconds"] = round(
+                        max(0.0, now_mono - prev_start), 3
+                    )
+                self._timeline.append(
+                    {
+                        "stage": stage,
+                        "label": label,
+                        "status": "running",
+                        "started_at": now_iso,
+                        "finished_at": None,
+                        "duration_seconds": 0.0,
+                    }
+                )
+                self._timeline_started_mono.append(now_mono)
+        return [dict(item) for item in self._timeline]
 
     def emit(
         self,
@@ -120,21 +523,33 @@ class _ProgressEmitter:
     ) -> None:
         if self._path is None or not self.enabled:
             return
-        payload = {
-            "stage": stage,
-            "label": label,
-            "status": status,
-            "completed": completed,
-            "total": total,
-            "baseline_score": baseline_score,
-            "best_score": best_score,
-            "message": message,
-            "ts": datetime.now(UTC).isoformat(),
-        }
-        line = json.dumps(payload, default=str) + "\n"
-        with self._lock, self._path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
-            handle.flush()
+        with self._lock:
+            now_iso = datetime.now(UTC).isoformat()
+            now_mono = time.monotonic()
+            if baseline_score is not None:
+                self._last_baseline_score = baseline_score
+            if best_score is not None:
+                self._last_best_score = best_score
+            safe_message = (
+                _scrub_secrets(message, self._extra_secrets) if message is not None else None
+            )
+            stage_timeline = self._update_timeline_locked(stage, label, status, now_iso, now_mono)
+            payload = {
+                "stage": stage,
+                "label": label,
+                "status": status,
+                "completed": completed,
+                "total": total,
+                "baseline_score": self._last_baseline_score,
+                "best_score": self._last_best_score,
+                "message": safe_message,
+                "stage_timeline": stage_timeline,
+                "ts": now_iso,
+            }
+            line = json.dumps(payload, default=str) + "\n"
+            with self._path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+                handle.flush()
 
 
 @dataclass
@@ -157,6 +572,7 @@ class _CaseSpec:
     case_id: str
     fixture_id: str | None = None
     fixtures_module_path: Path | None = None
+    fixtures_fallback_dirs: tuple[Path, ...] = ()
     input_files: dict[str, bytes] = field(default_factory=dict)
     web_fixtures: dict[str, Any] | None = None
     enable_web_tools: bool = False
@@ -262,9 +678,12 @@ def _normalize_database_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), netloc, parts.path, query, ""))
 
 
-def _endpoint_key(normalized_url: str) -> tuple[str | None, int | None, str]:
+def _endpoint_key(normalized_url: str) -> tuple[str | None, int, str]:
     parts = urlsplit(normalized_url)
-    return (parts.hostname.lower() if parts.hostname else None, parts.port, parts.path)
+    host = parts.hostname.rstrip(".").lower() if parts.hostname else None
+    port = parts.port if parts.port is not None else 5432
+    path = parts.path or "/"
+    return (host, port, path)
 
 
 def guard_database_url(
@@ -316,11 +735,16 @@ def _extract_predictor_instructions(module: Any) -> dict[str, str]:
 
 
 def _extract_reanchor_parameters(predictor: Any) -> dict[str, Any]:
+    fields: Any = None
     try:
         state = predictor.dump_state() if hasattr(predictor, "dump_state") else {}
+        if isinstance(state, Mapping):
+            fields = state.get("fields")
     except Exception:
-        return {}
-    fields = state.get("fields") if isinstance(state, Mapping) else None
+        fields = None
+    if not isinstance(fields, Mapping):
+        raw_fields = getattr(predictor, "fields", None)
+        fields = raw_fields if isinstance(raw_fields, Mapping) else None
     if not isinstance(fields, Mapping):
         return {}
     extracted: dict[str, Any] = {}
@@ -328,13 +752,573 @@ def _extract_reanchor_parameters(predictor: Any) -> dict[str, Any]:
         if not isinstance(cfg, Mapping):
             continue
         item: dict[str, Any] = {}
-        if "threshold" in cfg:
-            item["threshold"] = cfg["threshold"]
+        if "threshold" in cfg and isinstance(cfg["threshold"], (int, float)):
+            item["threshold"] = float(cfg["threshold"])
         if "weights" in cfg and isinstance(cfg["weights"], Mapping):
-            item["weights"] = dict(cfg["weights"])
+            item["weights"] = {
+                str(option): float(weight)
+                for option, weight in cfg["weights"].items()
+                if isinstance(weight, (int, float)) and not isinstance(weight, bool)
+            }
+        if "cuts" in cfg and isinstance(cfg["cuts"], Sequence) and not isinstance(cfg["cuts"], str):
+            item["cuts"] = [
+                float(cut)
+                for cut in cfg["cuts"]
+                if isinstance(cut, (int, float)) and not isinstance(cut, bool)
+            ]
         if item:
             extracted[str(field_name)] = item
     return extracted
+
+
+def _build_reanchor_parameter_diffs(
+    baseline_params: Mapping[str, Any],
+    fitted_params: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Build before->after parameter diff entries against baseline defaults (0.50 / 1.0)."""
+    diffs: list[dict[str, Any]] = []
+    gates = sorted(set(baseline_params) | set(fitted_params))
+    for gate in gates:
+        raw_base_cfg = baseline_params.get(gate)
+        base_cfg: Mapping[str, Any] = raw_base_cfg if isinstance(raw_base_cfg, Mapping) else {}
+        raw_fit_cfg = fitted_params.get(gate)
+        fit_cfg: Mapping[str, Any] = raw_fit_cfg if isinstance(raw_fit_cfg, Mapping) else {}
+
+        if "threshold" in base_cfg or "threshold" in fit_cfg:
+            base_val = float(base_cfg.get("threshold", 0.50))
+            fit_val = float(fit_cfg.get("threshold", base_val))
+            diffs.append(
+                {
+                    "gate": gate,
+                    "parameter": "threshold",
+                    "baseline": round(base_val, 6),
+                    "fitted": round(fit_val, 6),
+                    "delta": round(fit_val - base_val, 6),
+                }
+            )
+
+        raw_base_weights = base_cfg.get("weights")
+        base_weights: Mapping[str, Any] = (
+            raw_base_weights if isinstance(raw_base_weights, Mapping) else {}
+        )
+        raw_fit_weights = fit_cfg.get("weights")
+        fit_weights: Mapping[str, Any] = (
+            raw_fit_weights if isinstance(raw_fit_weights, Mapping) else {}
+        )
+        for option in sorted(set(base_weights) | set(fit_weights)):
+            base_w = float(base_weights.get(option, 1.0))
+            fit_w = float(fit_weights.get(option, base_w))
+            diffs.append(
+                {
+                    "gate": gate,
+                    "parameter": f"weight:{option}",
+                    "baseline": round(base_w, 6),
+                    "fitted": round(fit_w, 6),
+                    "delta": round(fit_w - base_w, 6),
+                }
+            )
+    return diffs
+
+
+def _build_instruction_diffs(
+    baseline_instructions: Mapping[str, str],
+    optimized_instructions: Mapping[str, str],
+) -> dict[str, str]:
+    """Generate unified diff text for each predictor's instructions."""
+    names = list(baseline_instructions.keys()) + [
+        name for name in optimized_instructions if name not in baseline_instructions
+    ]
+    diffs: dict[str, str] = {}
+    for name in names:
+        before = str(baseline_instructions.get(name, "") or "")
+        after = str(optimized_instructions.get(name, "") or "")
+        diff_lines = list(
+            difflib.unified_diff(
+                before.splitlines(),
+                after.splitlines(),
+                fromfile=f"baseline/{name}",
+                tofile=f"optimized/{name}",
+                lineterm="",
+            )
+        )
+        diffs[name] = "\n".join(diff_lines)
+    return diffs
+
+
+def _extract_gepa_candidate_history(
+    detailed: Any,
+    *,
+    extra_secrets: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """Safely extract structured GEPA candidate trajectory from compiled.detailed_results."""
+    if detailed is None:
+        return []
+
+    raw_scores = getattr(detailed, "val_aggregate_scores", None)
+    raw_parents = getattr(detailed, "parents", None)
+    raw_counts = getattr(detailed, "discovery_eval_counts", None)
+    raw_candidates = getattr(detailed, "candidates", None)
+    raw_reflections = getattr(detailed, "reflection_summaries", None)
+    if raw_reflections is None:
+        raw_reflections = getattr(detailed, "reflections", None)
+    raw_accepted = getattr(detailed, "accepted", None)
+
+    scores: list[Any] = (
+        list(raw_scores)
+        if isinstance(raw_scores, Sequence) and not isinstance(raw_scores, (str, bytes))
+        else []
+    )
+    parents: list[Any] = (
+        list(raw_parents)
+        if isinstance(raw_parents, Sequence) and not isinstance(raw_parents, (str, bytes))
+        else []
+    )
+    counts: list[Any] = (
+        list(raw_counts)
+        if isinstance(raw_counts, Sequence) and not isinstance(raw_counts, (str, bytes))
+        else []
+    )
+    candidates: list[Any] = (
+        list(raw_candidates)
+        if isinstance(raw_candidates, Sequence) and not isinstance(raw_candidates, (str, bytes))
+        else []
+    )
+    reflections: list[Any] = (
+        list(raw_reflections)
+        if isinstance(raw_reflections, Sequence) and not isinstance(raw_reflections, (str, bytes))
+        else []
+    )
+    accepted_flags: list[Any] = (
+        list(raw_accepted)
+        if isinstance(raw_accepted, Sequence) and not isinstance(raw_accepted, (str, bytes))
+        else []
+    )
+
+    total = max(len(scores), len(candidates))
+    if total == 0:
+        return []
+
+    numeric_scores: list[float | None] = []
+    for idx in range(total):
+        val = scores[idx] if idx < len(scores) else None
+        if (
+            isinstance(val, (int, float))
+            and not isinstance(val, bool)
+            and math.isfinite(float(val))
+        ):
+            numeric_scores.append(round(float(val), 6))
+        else:
+            numeric_scores.append(None)
+
+    raw_best_idx = getattr(detailed, "best_idx", None)
+    if (
+        isinstance(raw_best_idx, int)
+        and not isinstance(raw_best_idx, bool)
+        and 0 <= raw_best_idx < total
+    ):
+        best_idx: int | None = raw_best_idx
+    else:
+        valid_pairs = [(idx, sc) for idx, sc in enumerate(numeric_scores) if sc is not None]
+        best_idx = max(valid_pairs, key=lambda pair: pair[1])[0] if valid_pairs else None
+
+    cand_instructions: list[dict[str, str]] = []
+    for idx in range(total):
+        if idx < len(candidates):
+            try:
+                cand_instructions.append(_extract_predictor_instructions(candidates[idx]))
+            except Exception:
+                cand_instructions.append({})
+        else:
+            cand_instructions.append({})
+
+    history: list[dict[str, Any]] = []
+    for idx in range(total):
+        val_score = numeric_scores[idx]
+        parent_list: list[int] = []
+        if idx < len(parents):
+            raw_parent = parents[idx]
+            if isinstance(raw_parent, int) and not isinstance(raw_parent, bool):
+                parent_list = [raw_parent]
+            elif isinstance(raw_parent, Sequence) and not isinstance(raw_parent, (str, bytes)):
+                parent_list = [
+                    p
+                    for p in raw_parent
+                    if isinstance(p, int) and not isinstance(p, bool) and 0 <= p < total
+                ]
+        parent_idx = parent_list[0] if parent_list else None
+
+        metric_calls: int | None = None
+        if idx < len(counts):
+            raw_count = counts[idx]
+            if isinstance(raw_count, int) and not isinstance(raw_count, bool):
+                metric_calls = raw_count
+
+        if idx < len(accepted_flags) and isinstance(accepted_flags[idx], bool):
+            accepted = accepted_flags[idx]
+        elif idx == 0 or parent_idx is None:
+            accepted = True
+        else:
+            parent_score = numeric_scores[parent_idx]
+            accepted = (
+                True
+                if (val_score is not None and (parent_score is None or val_score > parent_score))
+                or idx == best_idx
+                else False
+            )
+
+        reflection_summary: str | None = None
+        if (
+            idx < len(reflections)
+            and isinstance(reflections[idx], str)
+            and reflections[idx].strip()
+        ):
+            reflection_summary = _scrub_secrets(reflections[idx].strip(), extra_secrets)[:300]
+        elif idx == 0:
+            reflection_summary = "Baseline seed candidate"
+        elif parent_idx is not None and cand_instructions[idx] and cand_instructions[parent_idx]:
+            changed_parts: list[str] = []
+            for pred_name, after_text in cand_instructions[idx].items():
+                before_text = cand_instructions[parent_idx].get(pred_name, "")
+                if before_text != after_text:
+                    added = 0
+                    removed = 0
+                    for line in difflib.unified_diff(
+                        before_text.splitlines(), after_text.splitlines(), lineterm=""
+                    ):
+                        if line.startswith("+") and not line.startswith("+++"):
+                            added += 1
+                        elif line.startswith("-") and not line.startswith("---"):
+                            removed += 1
+                    changed_parts.append(f"{pred_name} (+{added}/-{removed} lines)")
+            if changed_parts:
+                reflection_summary = f"Mutated {', '.join(changed_parts)}"[:300]
+
+        history.append(
+            {
+                "candidate_idx": idx,
+                "val_score": val_score,
+                "parent": parent_idx,
+                "parents": parent_list,
+                "accepted": accepted,
+                "is_best": idx == best_idx,
+                "metric_calls": metric_calls,
+                "reflection_summary": reflection_summary,
+            }
+        )
+
+    if len(history) <= _MAX_CANDIDATE_HISTORY:
+        return history
+    pinned_indices = {0, len(history) - 1}
+    if best_idx is not None:
+        pinned_indices.add(best_idx)
+    tail_slots = _MAX_CANDIDATE_HISTORY - len(pinned_indices)
+    selected = sorted(pinned_indices | set(range(max(0, len(history) - tail_slots), len(history))))
+    return [history[idx] for idx in selected[:_MAX_CANDIDATE_HISTORY]]
+
+
+def _build_reanchor_gate_checks(
+    *,
+    fitted_changed: bool,
+    fitted_fields: Sequence[str],
+    score_improved: bool,
+    baseline_score: float | None,
+    optimized_score: float | None,
+    fp_non_regressing: bool,
+    fp_rate_before: float | None,
+    fp_rate_after: float | None,
+    has_holdout: bool,
+) -> list[dict[str, Any]]:
+    score_reason: str
+    if baseline_score is None or optimized_score is None:
+        score_reason = "Missing baseline or candidate holdout score"
+    elif score_improved:
+        score_reason = f"Holdout score improved from {baseline_score:.4f} to {optimized_score:.4f}"
+    else:
+        score_reason = (
+            f"Holdout score {optimized_score:.4f} did not exceed baseline {baseline_score:.4f}"
+        )
+
+    if not has_holdout or fp_rate_before is None or fp_rate_after is None:
+        fp_reason = "No holdout FP rate available; check waived"
+        fp_threshold = "n/a"
+    elif fp_non_regressing:
+        fp_reason = f"FP rate {fp_rate_after:.4f} <= baseline {fp_rate_before:.4f}"
+        fp_threshold = f"<= {fp_rate_before:.4f}"
+    else:
+        fp_reason = f"FP rate regressed from {fp_rate_before:.4f} to {fp_rate_after:.4f}"
+        fp_threshold = f"<= {fp_rate_before:.4f}"
+
+    return [
+        {
+            "name": "parameters_changed",
+            "label": "Parameters changed from baseline",
+            "passed": bool(fitted_changed),
+            "actual": len(fitted_fields),
+            "threshold": ">= 1 fitted field",
+            "reason": (
+                f"Calibrated {len(fitted_fields)} field(s): {', '.join(fitted_fields)}"
+                if fitted_changed
+                else "ReAnchor kept baseline defaults (all candidate fields skipped)"
+            ),
+        },
+        {
+            "name": "holdout_score_improved",
+            "label": "Holdout score improved over baseline",
+            "passed": bool(score_improved),
+            "actual": optimized_score,
+            "threshold": f"> {baseline_score:.4f}" if baseline_score is not None else "> baseline",
+            "reason": score_reason,
+        },
+        {
+            "name": "fp_rate_non_regression",
+            "label": "False-positive rate did not regress",
+            "passed": bool(fp_non_regressing),
+            "actual": fp_rate_after,
+            "threshold": fp_threshold,
+            "reason": fp_reason,
+        },
+    ]
+
+
+def _build_rlm_gate_checks(
+    *,
+    instructions_changed: bool,
+    baseline_score: float,
+    optimized_score: float,
+    baseline_correctness: float,
+    candidate_correctness: float,
+    blocking_failure_count: int,
+    paired_regression_count: int,
+) -> list[dict[str, Any]]:
+    score_improved = optimized_score > baseline_score
+    correctness_ok = candidate_correctness >= baseline_correctness
+    zero_blocking = blocking_failure_count == 0
+    zero_regressions = paired_regression_count == 0
+    return [
+        {
+            "name": "instructions_changed",
+            "label": "Instructions changed from baseline",
+            "passed": bool(instructions_changed),
+            "actual": bool(instructions_changed),
+            "threshold": True,
+            "reason": (
+                "Compiled program modified instructions or module source"
+                if instructions_changed
+                else "Compiled program instructions are identical to baseline"
+            ),
+        },
+        {
+            "name": "holdout_score_improved",
+            "label": "Holdout score improved over baseline",
+            "passed": bool(score_improved),
+            "actual": optimized_score,
+            "threshold": f"> {baseline_score:.2f}",
+            "reason": (
+                f"Holdout score improved from {baseline_score:.2f} to {optimized_score:.2f}"
+                if score_improved
+                else (
+                    f"Holdout score {optimized_score:.2f} did not beat "
+                    f"baseline {baseline_score:.2f}"
+                )
+            ),
+        },
+        {
+            "name": "correctness_non_regression",
+            "label": "Correctness did not regress",
+            "passed": bool(correctness_ok),
+            "actual": candidate_correctness,
+            "threshold": f">= {baseline_correctness:.4f}",
+            "reason": (
+                f"Correctness {candidate_correctness:.4f} >= baseline {baseline_correctness:.4f}"
+                if correctness_ok
+                else (
+                    f"Correctness regressed from {baseline_correctness:.4f} "
+                    f"to {candidate_correctness:.4f}"
+                )
+            ),
+        },
+        {
+            "name": "zero_blocking_failures",
+            "label": "Zero blocking case failures",
+            "passed": bool(zero_blocking),
+            "actual": blocking_failure_count,
+            "threshold": 0,
+            "reason": (
+                "All blocking holdout cases passed"
+                if zero_blocking
+                else f"{blocking_failure_count} blocking holdout failure(s) detected"
+            ),
+        },
+        {
+            "name": "zero_paired_regressions",
+            "label": "Zero paired case regressions",
+            "passed": bool(zero_regressions),
+            "actual": paired_regression_count,
+            "threshold": 0,
+            "reason": (
+                "No holdout case pass rate regressed vs baseline"
+                if zero_regressions
+                else f"{paired_regression_count} holdout case(s) regressed vs baseline"
+            ),
+        },
+    ]
+
+
+def _build_reanchor_case_deltas(
+    before_records: Sequence[Mapping[str, Any]],
+    after_records: Sequence[Mapping[str, Any]],
+    *,
+    limit: int = _MAX_CASE_DELTAS,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Pair baseline vs candidate ReAnchor holdout evaluations into bounded delta lists."""
+    regressed: list[dict[str, Any]] = []
+    fixed: list[dict[str, Any]] = []
+    unchanged: list[dict[str, Any]] = []
+    for before, after in zip(before_records, after_records, strict=False):
+        b_score = float(before.get("score", 0.0))
+        a_score = float(after.get("score", 0.0))
+        b_passed = bool(before.get("passed", False))
+        a_passed = bool(after.get("passed", False))
+        if a_score > b_score or (not b_passed and a_passed):
+            outcome: Literal["fixed", "regressed", "unchanged"] = "fixed"
+        elif a_score < b_score or (b_passed and not a_passed):
+            outcome = "regressed"
+        else:
+            outcome = "unchanged"
+        row = {
+            "case_id": before.get("case_id"),
+            "lineage": before.get("lineage"),
+            "input_preview": before.get("input_preview", ""),
+            "expected": before.get("expected"),
+            "baseline_pred": before.get("pred_label"),
+            "baseline_prob": before.get("pred_prob"),
+            "baseline_score": round(b_score, 6),
+            "candidate_pred": after.get("pred_label"),
+            "candidate_prob": after.get("pred_prob"),
+            "candidate_score": round(a_score, 6),
+            "delta": round(a_score - b_score, 6),
+            "outcome": outcome,
+        }
+        if outcome == "regressed":
+            regressed.append(row)
+        elif outcome == "fixed":
+            fixed.append(row)
+        else:
+            unchanged.append(row)
+    combined = (regressed + fixed + unchanged)[:limit]
+    return combined, fixed[:limit], regressed[:limit]
+
+
+def _build_rlm_case_deltas(
+    baseline_rows: Sequence[Mapping[str, Any]],
+    candidate_rows: Sequence[Mapping[str, Any]],
+    holdout_examples: Sequence[dspy.Example],
+    *,
+    blocking_failures: Sequence[Mapping[str, Any]],
+    paired_regressions: Sequence[Mapping[str, Any]],
+    limit: int = _MAX_CASE_DELTAS,
+) -> list[dict[str, Any]]:
+    """Join baseline & candidate holdout rows per case_id, pinning blocking/regressed first."""
+    if not baseline_rows and not candidate_rows:
+        return []
+
+    preview_by_id: dict[str, str] = {}
+    lineage_by_id: dict[str, str | None] = {}
+    blocking_by_id: dict[str, bool] = {}
+    for index, ex in enumerate(holdout_examples, 1):
+        cid = str(getattr(ex, "case_id", None) or f"row-{index}")
+        preview_by_id[cid] = str(getattr(ex, "task", "") or "")[:180]
+        lineage_by_id[cid] = _example_lineage(ex)
+        blocking_by_id[cid] = bool(getattr(ex, "blocking", False))
+
+    base_by_id: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    cand_by_id: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in baseline_rows:
+        base_by_id[str(row["case_id"])].append(row)
+    for row in candidate_rows:
+        cand_by_id[str(row["case_id"])].append(row)
+
+    blocking_failed_ids = {str(row.get("case_id")) for row in blocking_failures}
+    paired_reg_ids = {str(row.get("case_id")) for row in paired_regressions}
+
+    deltas: list[dict[str, Any]] = []
+    for case_id in sorted(set(base_by_id) | set(cand_by_id)):
+        b_rows = base_by_id.get(case_id, [])
+        c_rows = cand_by_id.get(case_id, [])
+        b_score = sum(float(r["score"]) for r in b_rows) / len(b_rows) if b_rows else 0.0
+        c_score = sum(float(r["score"]) for r in c_rows) / len(c_rows) if c_rows else 0.0
+        b_corr = sum(float(r["correctness"]) for r in b_rows) / len(b_rows) if b_rows else 0.0
+        c_corr = sum(float(r["correctness"]) for r in c_rows) / len(c_rows) if c_rows else 0.0
+        b_pass = sum(1 for r in b_rows if r.get("passed")) / len(b_rows) if b_rows else 0.0
+        c_pass = sum(1 for r in c_rows if r.get("passed")) / len(c_rows) if c_rows else 0.0
+
+        is_blocking = blocking_by_id.get(
+            case_id,
+            any(bool(r.get("blocking")) for r in (*b_rows, *c_rows)),
+        )
+        blocking_failed = case_id in blocking_failed_ids
+        paired_regression = case_id in paired_reg_ids
+
+        if paired_regression or blocking_failed or c_score < b_score:
+            outcome: Literal["fixed", "regressed", "unchanged"] = "regressed"
+        elif c_pass > b_pass or c_score > b_score:
+            outcome = "fixed"
+        else:
+            outcome = "unchanged"
+
+        b_fb = next((str(r.get("feedback") or "") for r in b_rows if r.get("feedback")), "")
+        c_fb = next(
+            (
+                str(r.get("feedback") or "")
+                for r in c_rows
+                if not r.get("passed") and r.get("feedback")
+            ),
+            next((str(r.get("feedback") or "") for r in c_rows if r.get("feedback")), ""),
+        )
+        lineage = lineage_by_id.get(case_id)
+        if lineage is None:
+            lineage = next(
+                (r.get("lineage") for r in (*c_rows, *b_rows) if r.get("lineage") is not None),
+                None,
+            )
+
+        deltas.append(
+            {
+                "case_id": case_id,
+                "lineage": lineage,
+                "input_preview": preview_by_id.get(case_id, ""),
+                "blocking": is_blocking,
+                "blocking_failed": blocking_failed,
+                "paired_regression": paired_regression,
+                "baseline_score": round(b_score, 6),
+                "candidate_score": round(c_score, 6),
+                "baseline_correctness": round(b_corr, 6),
+                "candidate_correctness": round(c_corr, 6),
+                "baseline_pass_rate": round(b_pass, 6),
+                "candidate_pass_rate": round(c_pass, 6),
+                "delta": round(c_score - b_score, 6),
+                "repeats": len(c_rows) or len(b_rows),
+                "outcome": outcome,
+                "baseline_feedback": b_fb[:240],
+                "candidate_feedback": c_fb[:240],
+            }
+        )
+
+    def sort_key(item: Mapping[str, Any]) -> tuple[int, float, str]:
+        if item["blocking_failed"]:
+            rank = 0
+        elif item["paired_regression"]:
+            rank = 1
+        elif item["outcome"] == "regressed":
+            rank = 2
+        elif item["outcome"] == "fixed":
+            rank = 3
+        else:
+            rank = 4
+        return (rank, -abs(float(item["delta"])), str(item["case_id"]))
+
+    deltas.sort(key=sort_key)
+    return deltas[:limit]
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
@@ -673,33 +1657,166 @@ def _decode_inline_files(raw: Any, *, path: Path, index: int) -> dict[str, bytes
     return files
 
 
+def _backend_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_fixture_search_paths(
+    dataset_path: Path,
+    settings: Settings | None = None,
+) -> tuple[Path | None, tuple[Path, ...]]:
+    """Resolve sibling fixtures.py (preferred) and fallback eval_datasets/fixtures search roots."""
+    sibling_mod = dataset_path.parent / "fixtures.py"
+    fallback_roots: list[Path] = []
+
+    def add_root(candidate: Path) -> None:
+        resolved = candidate.resolve()
+        if resolved not in fallback_roots and resolved.is_dir():
+            fallback_roots.append(resolved)
+
+    add_root(dataset_path.parent / "fixtures")
+
+    eval_dirs: list[Path] = []
+    if settings is not None:
+        configured = settings.eval_datasets_dir
+        if configured.is_absolute():
+            eval_dirs.append(configured)
+        else:
+            eval_dirs.append(configured)
+            eval_dirs.append(_backend_root() / configured)
+    eval_dirs.append(_backend_root() / "eval_datasets")
+
+    fallback_mod: Path | None = None
+    for eval_dir in eval_dirs:
+        add_root(eval_dir / "fixtures")
+        if fallback_mod is None:
+            for candidate_mod in (eval_dir / "fixtures.py", eval_dir / "fixtures" / "__init__.py"):
+                if candidate_mod.is_file():
+                    fallback_mod = candidate_mod
+                    break
+
+    if sibling_mod.is_file():
+        fixtures_module_path: Path | None = sibling_mod
+    elif (dataset_path.parent / "fixtures" / "__init__.py").is_file():
+        fixtures_module_path = dataset_path.parent / "fixtures" / "__init__.py"
+    else:
+        fixtures_module_path = fallback_mod
+
+    return fixtures_module_path, tuple(fallback_roots)
+
+
+def _load_fixture_from_dir(
+    fixtures_dir: Path,
+    fixture_id: str,
+) -> tuple[dict[str, bytes], dict[str, Any] | None] | None:
+    if not fixture_id or "/" in fixture_id or "\\" in fixture_id or ".." in fixture_id:
+        return None
+    base = fixtures_dir.resolve()
+    if not base.is_dir():
+        return None
+
+    # 1. Directory of static fixture files: eval_datasets/fixtures/<fixture_id>/...
+    subdir = (base / fixture_id).resolve()
+    if subdir.is_relative_to(base) and subdir.is_dir():
+        files: dict[str, bytes] = {}
+        web: dict[str, Any] | None = None
+        for file_path in sorted(subdir.rglob("*")):
+            if not file_path.is_file():
+                continue
+            rel = file_path.relative_to(subdir).as_posix()
+            if rel == "web.json":
+                parsed_web = json.loads(file_path.read_text(encoding="utf-8"))
+                if isinstance(parsed_web, Mapping):
+                    web = dict(parsed_web)
+                continue
+            files[rel] = file_path.read_bytes()
+        return files, web
+
+    # 2. JSON bundle: eval_datasets/fixtures/<fixture_id>.json
+    json_path = (base / f"{fixture_id}.json").resolve()
+    if json_path.is_relative_to(base) and json_path.is_file():
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"Fixture file {json_path} must contain a JSON object")
+        files = _decode_inline_files(payload.get("files"), path=json_path, index=1)
+        raw_web = payload.get("web")
+        web = dict(raw_web) if isinstance(raw_web, Mapping) else None
+        return files, web
+
+    # 3. Module per fixture: eval_datasets/fixtures/<fixture_id>.py
+    py_path = (base / f"{fixture_id}.py").resolve()
+    if py_path.is_relative_to(base) and py_path.is_file():
+        module = _load_fixtures_module(py_path)
+        payload = module.get_case_fixtures(fixture_id)
+        if not isinstance(payload, Mapping):
+            raise ValueError(
+                f"get_case_fixtures({fixture_id!r}) must return a mapping with 'files'/'web'"
+            )
+        raw_files = payload.get("files") or {}
+        if not isinstance(raw_files, Mapping):
+            raise ValueError(f"Fixture {fixture_id!r} 'files' must be a mapping")
+        files = {
+            str(rel_path): (content if isinstance(content, bytes) else str(content).encode("utf-8"))
+            for rel_path, content in raw_files.items()
+        }
+        raw_web = payload.get("web")
+        web = dict(raw_web) if isinstance(raw_web, Mapping) else None
+        return files, web
+
+    return None
+
+
 def _resolve_case_fixtures(spec: _CaseSpec) -> tuple[dict[str, bytes], dict[str, Any] | None]:
     files: dict[str, bytes] = {}
     web: dict[str, Any] | None = None
     if spec.fixture_id:
-        if spec.fixtures_module_path is None:
+        resolved = False
+        module_error: Exception | None = None
+        if spec.fixtures_module_path is not None:
+            try:
+                module = _load_fixtures_module(spec.fixtures_module_path)
+                payload = module.get_case_fixtures(spec.fixture_id)
+                if not isinstance(payload, Mapping):
+                    raise ValueError(
+                        f"get_case_fixtures({spec.fixture_id!r}) must return a mapping "
+                        "with 'files'/'web'"
+                    )
+                raw_files = payload.get("files") or {}
+                if not isinstance(raw_files, Mapping):
+                    raise ValueError(f"Fixture {spec.fixture_id!r} 'files' must be a mapping")
+                for rel_path, content in raw_files.items():
+                    files[str(rel_path)] = (
+                        content if isinstance(content, bytes) else str(content).encode("utf-8")
+                    )
+                raw_web = payload.get("web")
+                if raw_web is not None:
+                    if not isinstance(raw_web, Mapping):
+                        raise ValueError(
+                            f"Fixture {spec.fixture_id!r} 'web' must be a mapping or None"
+                        )
+                    web = dict(raw_web)
+                resolved = True
+            except KeyError as error:
+                module_error = error
+
+        if not resolved:
+            for fallback_dir in spec.fixtures_fallback_dirs:
+                loaded = _load_fixture_from_dir(fallback_dir, spec.fixture_id)
+                if loaded is not None:
+                    dir_files, dir_web = loaded
+                    files.update(dir_files)
+                    if dir_web is not None:
+                        web = dir_web
+                    resolved = True
+                    break
+
+        if not resolved:
+            if module_error is not None:
+                raise module_error
             raise FileNotFoundError(
                 f"Case {spec.case_id!r} references fixture_id={spec.fixture_id!r}, "
-                "but no fixtures.py module exists alongside the dataset"
+                "but no fixtures.py module or eval_datasets/fixtures/ entry was found"
             )
-        module = _load_fixtures_module(spec.fixtures_module_path)
-        payload = module.get_case_fixtures(spec.fixture_id)
-        if not isinstance(payload, Mapping):
-            raise ValueError(
-                f"get_case_fixtures({spec.fixture_id!r}) must return a mapping with 'files'/'web'"
-            )
-        raw_files = payload.get("files") or {}
-        if not isinstance(raw_files, Mapping):
-            raise ValueError(f"Fixture {spec.fixture_id!r} 'files' must be a mapping")
-        for rel_path, content in raw_files.items():
-            files[str(rel_path)] = (
-                content if isinstance(content, bytes) else str(content).encode("utf-8")
-            )
-        raw_web = payload.get("web")
-        if raw_web is not None:
-            if not isinstance(raw_web, Mapping):
-                raise ValueError(f"Fixture {spec.fixture_id!r} 'web' must be a mapping or None")
-            web = dict(raw_web)
     if spec.input_files:
         files.update(spec.input_files)
     if spec.web_fixtures is not None:
@@ -733,8 +1850,9 @@ def load_rlm_dataset(
     registry: skills.SkillRegistry | None = None,
 ) -> list[dspy.Example]:
     """Load labeled RLM evaluation examples from a JSONL file."""
-    fixtures_candidate = path.parent / "fixtures.py"
-    fixtures_module_path = fixtures_candidate if fixtures_candidate.is_file() else None
+    fixtures_module_path, fixtures_fallback_dirs = _resolve_fixture_search_paths(
+        path, settings=settings
+    )
     resolved_registry = registry
 
     def get_registry() -> skills.SkillRegistry:
@@ -835,6 +1953,7 @@ def load_rlm_dataset(
                 skill_names=skill_names,
                 fixture_id=fixture_id,
                 fixtures_module_path=str(fixtures_module_path) if fixtures_module_path else None,
+                fixtures_fallback_dirs=[str(p) for p in fixtures_fallback_dirs],
                 input_files=input_files,
                 web_fixtures=web_fixtures,
                 verifier=verifier,
@@ -2415,12 +3534,14 @@ def _build_case_spec_tables(
     for index, example in enumerate(examples, 1):
         case_id = str(getattr(example, "case_id", None) or f"row-{index}")
         raw_mod_path = getattr(example, "fixtures_module_path", None)
+        raw_fallback_dirs = getattr(example, "fixtures_fallback_dirs", None) or ()
         enable_web = bool(getattr(example, "enable_web_tools", False))
         any_web = any_web or enable_web
         spec = _CaseSpec(
             case_id=case_id,
             fixture_id=getattr(example, "fixture_id", None),
             fixtures_module_path=Path(raw_mod_path) if raw_mod_path else None,
+            fixtures_fallback_dirs=tuple(Path(p) for p in raw_fallback_dirs if p),
             input_files=dict(getattr(example, "input_files", None) or {}),
             web_fixtures=getattr(example, "web_fixtures", None),
             enable_web_tools=enable_web,
@@ -2680,6 +3801,7 @@ def optimize_rlm(
     local_interpreter: bool = False,
     log_dir: Path | None = None,
     progress: _ProgressEmitter | None = None,
+    role_models: Mapping[RoleName, RoleModelConfig] | None = None,
 ) -> OptimizationResult:
     """Compile dspy.RLM or dspy.Flex with GEPA and promote only on verified holdout improvement."""
     if auto is not None and max_metric_calls is not None:
@@ -2689,7 +3811,11 @@ def optimize_rlm(
     if holdout_repeats < 1:
         raise ValueError("holdout_repeats must be positive")
 
+    extra_secrets = _collect_settings_secrets(
+        settings, database_url=database_url, role_models=role_models
+    )
     if progress is not None:
+        progress.add_secrets(extra_secrets)
         progress.emit("loading_dataset", "Loading evaluation dataset")
     safe_url = guard_database_url(database_url, settings, allow_direct=allow_direct)
     if dataset is None:
@@ -2714,12 +3840,38 @@ def optimize_rlm(
     )
 
     target_path = output_path or DEFAULT_OUTPUTS["rlm"]
-    reflection_model_name = reflection_lm or settings.llm_model
-    judge_model_name = judge_lm or settings.llm_model
-    root_lm = agent._model(settings, settings.llm_model)
-    sub_lm = agent._model(settings, settings.sub_llm_model)
-    resolved_reflection_lm = agent._model(settings, reflection_model_name)
-    resolved_judge_lm = agent._model(settings, judge_model_name)
+    roles = role_models or {}
+
+    def resolve_role(
+        role: RoleName, fallback_model: str
+    ) -> tuple[dspy.BaseLM, str, dict[str, Any]]:
+        spec = roles.get(role)
+        if spec is not None:
+            lm_obj, routed_model, _mode = _build_role_lm(spec)
+            prov = _role_provenance(
+                model=routed_model,
+                dialect=spec.dialect,
+                provider_name=spec.provider_name,
+                extra_secrets=extra_secrets,
+            )
+            return lm_obj, routed_model, prov
+        lm_obj = agent._model(settings, fallback_model)
+        prov = _role_provenance(
+            model=fallback_model,
+            dialect=_infer_dialect(fallback_model),
+            provider_name=None,
+            extra_secrets=extra_secrets,
+        )
+        return lm_obj, fallback_model, prov
+
+    root_lm, _root_model_name, root_prov = resolve_role("root_lm", settings.llm_model)
+    sub_lm, _sub_model_name, sub_prov = resolve_role("sub_lm", settings.sub_llm_model)
+    resolved_reflection_lm, reflection_model_name, reflection_prov = resolve_role(
+        "reflection_lm", reflection_lm or settings.llm_model
+    )
+    resolved_judge_lm, judge_model_name, judge_prov = resolve_role(
+        "judge_lm", judge_lm or settings.llm_model
+    )
 
     if disable_cache:
         root_lm.cache = False
@@ -2773,6 +3925,8 @@ def optimize_rlm(
 
     gepa_lock = threading.Lock()
     gepa_calls = 0
+    gepa_window: deque[float] = deque(maxlen=max(1, len(gepa_valset)))
+    gepa_best_score: float | None = None
 
     def tracked_gepa_metric(
         gold: dspy.Example,
@@ -2782,12 +3936,18 @@ def optimize_rlm(
         pred_trace: Any = None,
         program_trace: Any = None,
     ) -> ScoreWithFeedback:
-        nonlocal gepa_calls
+        nonlocal gepa_calls, gepa_best_score
         result = raw_gepa_metric(gold, pred, trace, pred_name, pred_trace, program_trace)
         if progress is not None:
+            score_val = float(result.score) if math.isfinite(float(result.score)) else 0.0
             with gepa_lock:
                 gepa_calls += 1
                 calls = gepa_calls
+                gepa_window.append(score_val)
+                window_pct = round(100.0 * (sum(gepa_window) / len(gepa_window)), 2)
+                if gepa_best_score is None or window_pct > gepa_best_score:
+                    gepa_best_score = window_pct
+                live_best = gepa_best_score
             if calls == 1 or calls % 3 == 0 or calls == resolved_max_metric_calls:
                 progress.emit(
                     "gepa_compile",
@@ -2795,6 +3955,7 @@ def optimize_rlm(
                     completed=calls,
                     total=resolved_max_metric_calls,
                     baseline_score=baseline_score_live,
+                    best_score=live_best,
                 )
         return result
 
@@ -2854,6 +4015,7 @@ def optimize_rlm(
                 "num_threads": num_threads,
                 "log_dir": str(log_dir) if log_dir else None,
                 "seed": seed,
+                "track_stats": True,
             }
             if auto is not None:
                 gepa_kwargs["auto"] = auto
@@ -2868,7 +4030,6 @@ def optimize_rlm(
                 )
                 gepa_kwargs["max_metric_calls"] = resolved_max_metric_calls
                 gepa_kwargs["reflection_minibatch_size"] = minibatch
-                gepa_kwargs["track_stats"] = True
                 gepa_kwargs["gepa_kwargs"] = {"stop_callbacks": MaxMetricCallsStopper(stop_limit)}
 
             if progress is not None:
@@ -2892,6 +4053,7 @@ def optimize_rlm(
                     completed=0,
                     total=holdout_total,
                     baseline_score=baseline_score,
+                    best_score=gepa_best_score,
                 )
             optimized_eval = evaluator(compiled)
             optimized_score = _eval_score(optimized_eval)
@@ -2902,20 +4064,31 @@ def optimize_rlm(
         instructions_changed = _program_changed(student, compiled)
         baseline_instructions = _extract_predictor_instructions(student)
         optimized_instructions = _extract_predictor_instructions(compiled)
+        instruction_diffs = _build_instruction_diffs(baseline_instructions, optimized_instructions)
         baseline_summary = _summarize_holdout_rows(baseline_rows, baseline_score)
         candidate_summary = _summarize_holdout_rows(candidate_rows, optimized_score)
         blocking_failures = [
             row for row in candidate_rows if row.get("blocking") and not row.get("passed")
         ]
         paired_regressions = _paired_case_regressions(baseline_rows, candidate_rows)
-
-        eligible = (
-            instructions_changed
-            and optimized_score > baseline_score
-            and candidate_summary["correctness"] >= baseline_summary["correctness"]
-            and len(blocking_failures) == 0
-            and len(paired_regressions) == 0
+        case_deltas = _build_rlm_case_deltas(
+            baseline_rows,
+            candidate_rows,
+            holdout,
+            blocking_failures=blocking_failures,
+            paired_regressions=paired_regressions,
         )
+
+        gate_checks = _build_rlm_gate_checks(
+            instructions_changed=instructions_changed,
+            baseline_score=baseline_score,
+            optimized_score=optimized_score,
+            baseline_correctness=baseline_summary["correctness"],
+            candidate_correctness=candidate_summary["correctness"],
+            blocking_failure_count=len(blocking_failures),
+            paired_regression_count=len(paired_regressions),
+        )
+        eligible = all(check["passed"] for check in gate_checks)
         saved = eligible or force
         if progress is not None:
             progress.emit(
@@ -2930,13 +4103,18 @@ def optimize_rlm(
 
         detailed = getattr(compiled, "detailed_results", None)
         search_metric_calls = getattr(detailed, "total_metric_calls", None)
+        if not isinstance(search_metric_calls, int) or isinstance(search_metric_calls, bool):
+            search_metric_calls = None
+        candidate_history = _extract_gepa_candidate_history(detailed, extra_secrets=extra_secrets)
         report: dict[str, Any] = {
             "target": "rlm",
             "program_kind": program_kind,
             "instructions_changed": instructions_changed,
             "baseline_instructions": baseline_instructions,
             "optimized_instructions": optimized_instructions,
+            "instruction_diffs": instruction_diffs,
             "eligible": eligible,
+            "gate_checks": gate_checks,
             "saved": saved,
             "force": force,
             "mlflow_run_id": mlflow_run_id,
@@ -2949,11 +4127,12 @@ def optimize_rlm(
                 "search_metric_calls": search_metric_calls,
             },
             "models": {
-                "root_lm": settings.llm_model,
-                "sub_lm": settings.sub_llm_model,
-                "reflection_lm": reflection_model_name,
-                "judge_lm": judge_model_name,
+                "root_lm": root_prov,
+                "sub_lm": sub_prov,
+                "reflection_lm": reflection_prov,
+                "judge_lm": judge_prov,
             },
+            "candidate_history": candidate_history,
             "lineages": {
                 "train": sorted({name for ex in trainset if (name := _example_lineage(ex))}),
                 "val": sorted({name for ex in valset if (name := _example_lineage(ex))}),
@@ -2975,6 +4154,7 @@ def optimize_rlm(
             },
             "blocking_failures": blocking_failures,
             "paired_regressions": paired_regressions,
+            "case_deltas": case_deltas,
             "baseline_cases": baseline_rows,
             "candidate_cases": candidate_rows,
         }
@@ -3064,7 +4244,13 @@ def _reanchor_fitted_changed(report: Mapping[str, Any]) -> tuple[bool, list[str]
     return False, []
 
 
-def _fetch_jev_metadata(decision_model: str, decision_lm: Any) -> dict[str, Any]:
+def _fetch_jev_metadata(
+    decision_model: str,
+    decision_lm: Any,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> dict[str, Any]:
     metadata: dict[str, Any] = {"configured_model": decision_model}
     history = getattr(decision_lm, "history", None)
     if isinstance(history, list) and history:
@@ -3079,19 +4265,23 @@ def _fetch_jev_metadata(decision_model: str, decision_lm: Any) -> dict[str, Any]
             if isinstance(resolved, str) and resolved.strip():
                 metadata["resolved_model"] = resolved.strip()
 
-    api_key = os.environ.get("TYPESAFE_API_KEY")
+    resolved_key = api_key if api_key else os.environ.get("TYPESAFE_API_KEY")
     if (
         not decision_model.startswith("typesafe:")
-        or not api_key
+        or not resolved_key
         or not isinstance(decision_lm, dspy.BaseLM)
     ):
         return metadata
 
     requested_id = decision_model.removeprefix("typesafe:").strip()
+    models_url = "https://api.typesafe.ai/v1/models"
+    if base_url and base_url.strip():
+        trimmed = base_url.strip().rstrip("/")
+        models_url = trimmed if trimmed.endswith("/models") else f"{trimmed}/models"
     try:
         response = httpx.get(
-            "https://api.typesafe.ai/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
+            models_url,
+            headers={"Authorization": f"Bearer {resolved_key}"},
             timeout=5.0,
         )
         response.raise_for_status()
@@ -3114,6 +4304,8 @@ def _evaluate_skill_diagnostics(
     predictor: dspy.Module,
     examples: Sequence[dspy.Example],
     decision_lm: dspy.BaseLM,
+    *,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     neg_total = 0
     neg_fp = 0
@@ -3132,10 +4324,12 @@ def _evaluate_skill_diagnostics(
     )
 
     with dspy.context(lm=decision_lm):
-        for ex in examples:
+        for index, ex in enumerate(examples, 1):
             pred = predictor(**ex.inputs())
             gold_needs = bool(getattr(ex, "needs_skill", True))
-            pred_needs = bool(_decision_value(getattr(pred, "needs_skill", False)))
+            needs_obj = getattr(pred, "needs_skill", False)
+            pred_needs = bool(_decision_value(needs_obj))
+            needs_prob = _decision_probability(needs_obj)
             raw_primary = getattr(pred, "primary_skill", _MISSING)
             pred_skill = _decision_value(raw_primary) if raw_primary is not _MISSING else None
             if isinstance(pred_skill, str):
@@ -3181,6 +4375,31 @@ def _evaluate_skill_diagnostics(
                 if exact:
                     multi_correct += 1
 
+            if records is not None:
+                expected_label = (
+                    str(getattr(ex, "expected_skill", None) or "skill") if gold_needs else "none"
+                )
+                if not pred_needs:
+                    pred_label = "none"
+                elif raw_primary is _MISSING:
+                    pred_label = str(getattr(ex, "expected_skill", None) or "skill")
+                else:
+                    pred_label = str(pred_skill or "none")
+                records.append(
+                    {
+                        "case_id": str(getattr(ex, "case_id", None) or f"holdout-{index}"),
+                        "lineage": _example_lineage(ex),
+                        "input_preview": str(
+                            getattr(ex, "raw_task", None) or getattr(ex, "task", "")
+                        )[:180],
+                        "expected": expected_label,
+                        "pred_label": pred_label,
+                        "pred_prob": round(needs_prob, 6) if needs_prob is not None else None,
+                        "score": float(skill_metric(ex, pred)),
+                        "passed": exact,
+                    }
+                )
+
     metrics: dict[str, float] = {
         "fp_rate": round(neg_fp / neg_total, 6) if neg_total else 0.0,
         "fn_rate": round(pos_fn / pos_total, 6) if pos_total else 0.0,
@@ -3197,6 +4416,8 @@ def _evaluate_memory_diagnostics(
     predictor: dspy.Module,
     examples: Sequence[dspy.Example],
     decision_lm: dspy.BaseLM,
+    *,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     neg_total = 0
     neg_fp = 0
@@ -3207,7 +4428,7 @@ def _evaluate_memory_diagnostics(
     scope_correct = 0
 
     with dspy.context(lm=decision_lm):
-        for ex in examples:
+        for index, ex in enumerate(examples, 1):
             pred = predictor(**ex.inputs())
             gold_worth = bool(getattr(ex, "worth_saving", False))
             worth_obj = getattr(pred, "worth_saving", False)
@@ -3232,6 +4453,25 @@ def _evaluate_memory_diagnostics(
                         action_correct += 1
                     if pred_scope == getattr(ex, "scope", None):
                         scope_correct += 1
+
+            if records is not None:
+                score = float(memory_metric(ex, pred))
+                gold_action = str(getattr(ex, "action", "insert") or "insert")
+                gold_scope = str(getattr(ex, "scope", "session") or "session")
+                expected_label = f"{gold_action}:{gold_scope}" if gold_worth else "skip"
+                pred_label = f"{pred_action}:{pred_scope}" if saved_pred else "skip"
+                records.append(
+                    {
+                        "case_id": str(getattr(ex, "case_id", None) or f"holdout-{index}"),
+                        "lineage": _example_lineage(ex),
+                        "input_preview": str(getattr(ex, "task", "") or "")[:180],
+                        "expected": expected_label,
+                        "pred_label": pred_label,
+                        "pred_prob": round(pred_prob, 6) if pred_prob is not None else None,
+                        "score": score,
+                        "passed": score >= 1.0,
+                    }
+                )
 
     return {
         "fp_rate": round(neg_fp / neg_total, 6) if neg_total else 0.0,
@@ -3260,7 +4500,13 @@ def _run_reanchor(
     require_cache: bool,
     force: bool = False,
     progress: _ProgressEmitter | None = None,
+    role_models: Mapping[RoleName, RoleModelConfig] | None = None,
 ) -> OptimizationResult:
+    extra_secrets = _collect_settings_secrets(
+        settings, database_url=database_url, role_models=role_models
+    )
+    if progress is not None:
+        progress.add_secrets(extra_secrets)
     guard_database_url(database_url, settings, allow_direct=allow_direct)
 
     def stratify(ex: dspy.Example) -> Any:
@@ -3280,23 +4526,51 @@ def _run_reanchor(
         trainset, holdout = list(examples), None
 
     progress_active = progress is not None and progress.enabled
-    decision_lm = dspy.LM(settings.decision_model)
+    decision_spec = (role_models or {}).get("decision_lm")
+    if decision_spec is not None:
+        decision_lm: Any
+        decision_lm, effective_decision_model, _mode = _build_role_lm(decision_spec)
+        decision_prov = _role_provenance(
+            model=effective_decision_model,
+            dialect=decision_spec.dialect,
+            provider_name=decision_spec.provider_name,
+            extra_secrets=extra_secrets,
+        )
+    else:
+        effective_decision_model = settings.decision_model
+        decision_lm = dspy.LM(settings.decision_model)
+        decision_prov = _role_provenance(
+            model=settings.decision_model,
+            dialect=_infer_dialect(settings.decision_model),
+            provider_name=None,
+            extra_secrets=extra_secrets,
+        )
+
     reanchor_lock = threading.Lock()
     reanchor_calls = 0
+    reanchor_window: deque[float] = deque(maxlen=max(1, len(trainset)))
+    reanchor_best_score: float | None = None
 
     def tracked_metric(gold: dspy.Example, pred: Any, trace: Any = None) -> float:
-        nonlocal reanchor_calls
+        nonlocal reanchor_calls, reanchor_best_score
         score = float(metric(gold, pred, trace))
         if progress is not None and progress.enabled:
             with reanchor_lock:
                 reanchor_calls += 1
                 calls = reanchor_calls
+                if math.isfinite(score):
+                    reanchor_window.append(score)
+                    mean_score = round(sum(reanchor_window) / len(reanchor_window), 6)
+                    if reanchor_best_score is None or mean_score > reanchor_best_score:
+                        reanchor_best_score = mean_score
+                live_best = reanchor_best_score
             if calls == 1 or calls % 10 == 0:
                 progress.emit(
                     "reanchor_cv",
                     "Calibrating thresholds & Choice weights via ReAnchor CV",
                     completed=calls,
                     total=None,
+                    best_score=live_best,
                 )
         return score
 
@@ -3307,6 +4581,7 @@ def _run_reanchor(
     ):
         mlflow_run_id = _active_mlflow_run_id()
         baseline_predictor = predictor.deepcopy()
+        baseline_parameters = _extract_reanchor_parameters(baseline_predictor)
         if progress is not None and progress.enabled:
             progress.emit(
                 "reanchor_cv",
@@ -3329,27 +4604,38 @@ def _run_reanchor(
             baseline_score = report.get("train_score_before")
             optimized_score = report.get("train_score")
 
+        baseline_score_num = (
+            float(baseline_score) if isinstance(baseline_score, (int, float)) else None
+        )
+        optimized_score_num = (
+            float(optimized_score) if isinstance(optimized_score, (int, float)) else None
+        )
+
         fitted_changed, fitted_fields = _reanchor_fitted_changed(report)
+        fitted_parameters = _extract_reanchor_parameters(compiled)
+        parameter_diffs = _build_reanchor_parameter_diffs(baseline_parameters, fitted_parameters)
 
         diag_before: dict[str, float] = {}
         diag_after: dict[str, float] = {}
+        before_records: list[dict[str, Any]] = []
+        after_records: list[dict[str, Any]] = []
         if holdout and isinstance(decision_lm, dspy.BaseLM):
             if progress is not None:
                 progress.emit(
                     "holdout_eval",
                     "Evaluating FP/FN diagnostics on holdout",
-                    baseline_score=float(baseline_score)
-                    if isinstance(baseline_score, (int, float))
-                    else None,
-                    best_score=float(optimized_score)
-                    if isinstance(optimized_score, (int, float))
-                    else None,
+                    baseline_score=baseline_score_num,
+                    best_score=optimized_score_num,
                 )
             eval_fn = (
                 _evaluate_skill_diagnostics if target == "skills" else _evaluate_memory_diagnostics
             )
-            diag_before = eval_fn(baseline_predictor, holdout, decision_lm)
-            diag_after = eval_fn(compiled, holdout, decision_lm)
+            diag_before = eval_fn(baseline_predictor, holdout, decision_lm, records=before_records)
+            diag_after = eval_fn(compiled, holdout, decision_lm, records=after_records)
+
+        case_deltas, fixed_cases, regressed_cases = _build_reanchor_case_deltas(
+            before_records, after_records
+        )
 
         fp_rate_before: float | None = diag_before.get(
             "fp_rate",
@@ -3360,50 +4646,71 @@ def _run_reanchor(
             float(report["fp_rate_after"]) if "fp_rate_after" in report else None,
         )
         score_improved = (
-            isinstance(baseline_score, (int, float))
-            and isinstance(optimized_score, (int, float))
-            and float(optimized_score) > float(baseline_score)
+            baseline_score_num is not None
+            and optimized_score_num is not None
+            and optimized_score_num > baseline_score_num
         )
         fp_non_regressing = (
             True
             if not holdout or fp_rate_before is None or fp_rate_after is None
             else fp_rate_after <= fp_rate_before
         )
-        saved = bool((fitted_changed and score_improved and fp_non_regressing) or force)
+        gate_checks = _build_reanchor_gate_checks(
+            fitted_changed=fitted_changed,
+            fitted_fields=fitted_fields,
+            score_improved=score_improved,
+            baseline_score=baseline_score_num,
+            optimized_score=optimized_score_num,
+            fp_non_regressing=fp_non_regressing,
+            fp_rate_before=fp_rate_before,
+            fp_rate_after=fp_rate_after,
+            has_holdout=bool(holdout),
+        )
+        eligible = all(check["passed"] for check in gate_checks)
+        saved = bool(eligible or force)
         if progress is not None:
             progress.emit(
                 "saving_artifact",
                 "Verifying ReAnchor save gate",
-                baseline_score=float(baseline_score)
-                if isinstance(baseline_score, (int, float))
-                else None,
-                best_score=float(optimized_score)
-                if isinstance(optimized_score, (int, float))
-                else None,
+                baseline_score=baseline_score_num,
+                best_score=optimized_score_num,
                 message="Saved" if saved else "Discarded by save gate",
             )
         if saved:
             _save_program(compiled, output_path)
 
-        jev_metadata = _fetch_jev_metadata(settings.decision_model, decision_lm)
+        jev_metadata = _fetch_jev_metadata(
+            effective_decision_model,
+            decision_lm,
+            api_key=decision_spec.api_key if decision_spec is not None else None,
+            base_url=decision_spec.base_url if decision_spec is not None else None,
+        )
         resolved_model = str(jev_metadata.get("resolved_model") or "").strip()
         if (
             resolved_model
-            and settings.decision_model.startswith("typesafe:")
+            and effective_decision_model.startswith("typesafe:")
             and ":" not in resolved_model
         ):
             resolved_decision_model = f"typesafe:{resolved_model}"
         else:
-            resolved_decision_model = resolved_model or settings.decision_model
+            resolved_decision_model = resolved_model or effective_decision_model
         report.update(
             {
+                "target": target,
+                "eligible": eligible,
+                "gate_checks": gate_checks,
                 "fitted_changed": fitted_changed,
                 "fitted_fields": fitted_fields,
-                "fitted_parameters": _extract_reanchor_parameters(compiled),
+                "fitted_parameters": fitted_parameters,
+                "parameter_diffs": parameter_diffs,
                 "fp_rate_before": fp_rate_before,
                 "fp_rate_after": fp_rate_after,
                 "diagnostics_before": diag_before,
                 "diagnostics_after": diag_after,
+                "case_deltas": case_deltas,
+                "fixed_cases": fixed_cases,
+                "regressed_cases": regressed_cases,
+                "models": {"decision_lm": decision_prov},
                 "decision_model_metadata": jev_metadata,
                 "resolved_decision_model": resolved_decision_model,
                 "mlflow_run_id": mlflow_run_id,
@@ -3422,7 +4729,7 @@ def _run_reanchor(
             tracking = _mlflow_api()
             params: dict[str, Any] = {
                 "target": target,
-                "decision_model": settings.decision_model,
+                "decision_model": effective_decision_model,
                 "train_size": len(trainset),
                 "holdout_size": len(holdout) if holdout else 0,
                 "fitted_fields": ",".join(fitted_fields),
@@ -3434,11 +4741,14 @@ def _run_reanchor(
                 params["decision_model_release_date"] = jev_metadata["release_date"]
             tracking.log_params(params)
 
-            metrics: dict[str, float] = {"saved": 1.0 if saved else 0.0}
-            if isinstance(baseline_score, (int, float)):
-                metrics["baseline_score"] = float(baseline_score)
-            if isinstance(optimized_score, (int, float)):
-                metrics["optimized_score"] = float(optimized_score)
+            metrics: dict[str, float] = {
+                "saved": 1.0 if saved else 0.0,
+                "eligible": 1.0 if eligible else 0.0,
+            }
+            if baseline_score_num is not None:
+                metrics["baseline_score"] = baseline_score_num
+            if optimized_score_num is not None:
+                metrics["optimized_score"] = optimized_score_num
             if fp_rate_before is not None:
                 metrics["fp_rate_before"] = fp_rate_before
             if fp_rate_after is not None:
@@ -3458,12 +4768,8 @@ def _run_reanchor(
             "completed",
             "Optimization complete",
             status="completed",
-            baseline_score=float(baseline_score)
-            if isinstance(baseline_score, (int, float))
-            else None,
-            best_score=float(optimized_score)
-            if isinstance(optimized_score, (int, float))
-            else None,
+            baseline_score=baseline_score_num,
+            best_score=optimized_score_num,
             message="Artifact saved" if saved else "Discarded by save gate",
         )
 
@@ -3471,10 +4777,8 @@ def _run_reanchor(
         target=target,
         output_path=output_path,
         saved=saved,
-        baseline_score=float(baseline_score) if isinstance(baseline_score, (int, float)) else None,
-        optimized_score=(
-            float(optimized_score) if isinstance(optimized_score, (int, float)) else None
-        ),
+        baseline_score=baseline_score_num,
+        optimized_score=optimized_score_num,
         train_size=len(trainset),
         holdout_size=len(holdout) if holdout else 0,
         reminder=_pin_reminder(env_var, output_path, resolved_decision_model),
@@ -3497,6 +4801,7 @@ def optimize_skills(
     require_cache: bool = True,
     force: bool = False,
     progress: _ProgressEmitter | None = None,
+    role_models: Mapping[RoleName, RoleModelConfig] | None = None,
 ) -> OptimizationResult:
     """Calibrate SkillSelector thresholds and Choice weights via 5-fold ReAnchor CV."""
     if progress is not None:
@@ -3529,6 +4834,7 @@ def optimize_skills(
         require_cache=require_cache,
         force=force,
         progress=progress,
+        role_models=role_models,
     )
 
 
@@ -3546,6 +4852,7 @@ def optimize_memory(
     require_cache: bool = True,
     force: bool = False,
     progress: _ProgressEmitter | None = None,
+    role_models: Mapping[RoleName, RoleModelConfig] | None = None,
 ) -> OptimizationResult:
     """Calibrate MemoryGate thresholds and choice weights via 5-fold ReAnchor CV."""
     if progress is not None:
@@ -3570,6 +4877,7 @@ def optimize_memory(
         require_cache=require_cache,
         force=force,
         progress=progress,
+        role_models=role_models,
     )
 
 
@@ -3586,8 +4894,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--database-url",
-        required=True,
+        default=None,
         help="Ephemeral Neon branch Postgres URL (refuses primary URLs unless --allow-direct).",
+    )
+    parser.add_argument(
+        "--database-url-file",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a private (0600) file containing the ephemeral Neon branch Postgres URL "
+            "(keeps database credentials out of process argv)."
+        ),
+    )
+    parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a private (0600) JSON file mapping optional optimizer roles "
+            "(root_lm, sub_lm, reflection_lm, judge_lm, decision_lm) to provider credentials."
+        ),
     )
     parser.add_argument(
         "--allow-direct",
@@ -3714,9 +5040,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_database_url_file(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(f"Database URL file not found: {path}")
+    try:
+        mode = path.stat().st_mode & 0o777
+        if os.name == "posix" and mode & 0o077:
+            _LOG.warning(
+                "Database URL file %s has permissive mode %04o; expected 0600",
+                path,
+                mode,
+            )
+    except OSError:
+        pass
+    value = path.read_text(encoding="utf-8").strip()
+    if not value:
+        raise ValueError(f"Database URL file is empty: {path}")
+    return value
+
+
 def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if bool(args.database_url) == bool(args.database_url_file):
+        parser.error("Specify exactly one of --database-url and --database-url-file")
     if args.target in {"skills", "memory"} and args.dataset is None:
         parser.error(f"--dataset is required for --target {args.target}")
     if args.target == "rlm" and args.auto is not None and args.max_metric_calls is not None:
@@ -3731,23 +5078,46 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
 
     progress = _ProgressEmitter(args.progress_file)
     resolved_settings = settings or Settings.model_validate({})
+    extra_secrets = _collect_settings_secrets(resolved_settings)
+    progress.add_secrets(extra_secrets)
 
     prev_sigterm = None
+    sigterm_received = False
     if threading.current_thread() is threading.main_thread():
         prev_sigterm = signal.getsignal(signal.SIGTERM)
 
         def _handle_sigterm(_signum: int, _frame: Any) -> None:
+            nonlocal sigterm_received
+            if sigterm_received:
+                return
+            sigterm_received = True
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
             raise KeyboardInterrupt
 
         signal.signal(signal.SIGTERM, _handle_sigterm)
 
     try:
-        guard_database_url(args.database_url, resolved_settings, allow_direct=args.allow_direct)
+        database_url = (
+            _read_database_url_file(args.database_url_file)
+            if args.database_url_file is not None
+            else str(args.database_url)
+        )
+        role_models: dict[RoleName, RoleModelConfig] | None = (
+            load_role_credentials(args.credentials_file)
+            if args.credentials_file is not None
+            else None
+        )
+        extra_secrets = _collect_settings_secrets(
+            resolved_settings, database_url=database_url, role_models=role_models
+        )
+        progress.add_secrets(extra_secrets)
+
+        guard_database_url(database_url, resolved_settings, allow_direct=args.allow_direct)
         if args.target == "rlm":
             train_ratio = 0.6 if args.train_ratio is None else args.train_ratio
             result = optimize_rlm(
                 resolved_settings,
-                database_url=args.database_url,
+                database_url=database_url,
                 dataset=args.dataset,
                 output_path=args.output,
                 program_kind=args.program,
@@ -3767,12 +5137,13 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 local_interpreter=args.local_interpreter,
                 log_dir=args.log_dir,
                 progress=progress,
+                role_models=role_models,
             )
         elif args.target == "skills":
             train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
             result = optimize_skills(
                 resolved_settings,
-                database_url=args.database_url,
+                database_url=database_url,
                 dataset=args.dataset,
                 output_path=args.output,
                 train_ratio=train_ratio,
@@ -3782,12 +5153,13 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 log_dir=args.log_dir,
                 force=args.force,
                 progress=progress,
+                role_models=role_models,
             )
         else:
             train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
             result = optimize_memory(
                 resolved_settings,
-                database_url=args.database_url,
+                database_url=database_url,
                 dataset=args.dataset,
                 output_path=args.output,
                 train_ratio=train_ratio,
@@ -3797,17 +5169,20 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 log_dir=args.log_dir,
                 force=args.force,
                 progress=progress,
+                role_models=role_models,
             )
     except DatabaseSafetyError as error:
-        progress.emit("failed", "Database safety check failed", status="failed", message=str(error))
-        print(f"Error: {error}", file=sys.stderr)
+        safe_err = _scrub_secrets(str(error), extra_secrets)
+        progress.emit("failed", "Database safety check failed", status="failed", message=safe_err)
+        print(f"Error: {safe_err}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         progress.emit("cancelled", "Optimization cancelled", status="cancelled")
         print("Optimization cancelled", file=sys.stderr)
         return 130
     except Exception as error:
-        progress.emit("failed", "Optimization failed", status="failed", message=str(error))
+        safe_err = _scrub_secrets(str(error) or type(error).__name__, extra_secrets)
+        progress.emit("failed", "Optimization failed", status="failed", message=safe_err)
         raise
     finally:
         if prev_sigterm is not None and threading.current_thread() is threading.main_thread():

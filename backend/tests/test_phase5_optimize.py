@@ -2689,3 +2689,842 @@ def test_optimize_cli_progress_and_report_files_and_sigterm(
         json.loads(line) for line in cancel_progress.read_text(encoding="utf-8").splitlines()
     ]
     assert cancel_events[-1]["status"] == "cancelled"
+    assert isinstance(cancel_events[-1]["stage_timeline"], list)
+
+
+def test_endpoint_key_normalizes_default_port_and_trailing_dot(settings: Settings) -> None:
+    base_key = optimize._endpoint_key(optimize._normalize_database_url(settings.database_url))
+    assert base_key == ("ep-prod-pooler.region.aws.neon.tech", 5432, "/fleet")
+
+    # Explicit :5432, uppercase hostname, and trailing FQDN dot must all be rejected as primary DB.
+    for bypass_url in (
+        "postgresql+psycopg://user:password@ep-prod-pooler.region.aws.neon.tech:5432/fleet",
+        "postgresql://user:password@EP-PROD-POOLER.REGION.AWS.NEON.TECH.:5432/fleet?sslmode=require",
+        "postgresql+psycopg://other:pw@ep-prod.region.aws.neon.tech./fleet",
+        "postgresql+psycopg://other:pw@ep-prod.region.aws.neon.tech.:5432/fleet",
+    ):
+        with pytest.raises(optimize.DatabaseSafetyError):
+            optimize.guard_database_url(bypass_url, settings)
+
+    # Distinct non-default port on the same host is a distinct endpoint.
+    alt_port = "postgresql+psycopg://user:password@ep-prod-pooler.region.aws.neon.tech:5433/fleet"
+    assert optimize._endpoint_key(optimize._normalize_database_url(alt_port))[1] == 5433
+    assert optimize.guard_database_url(alt_port, settings).startswith("postgresql+psycopg://")
+
+
+def test_cli_database_url_file_and_mutual_exclusion(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "mem.jsonl",
+        [
+            {"task": "Remember UTC", "answer": "Noted", "worth_saving": True, "lineage": "a"},
+            {"task": "Hello", "answer": "Hi", "worth_saving": False, "lineage": "b"},
+        ],
+    )
+    db_file = tmp_path / "db.url"
+    db_file.write_text(_BRANCH_URL + "\n", encoding="utf-8")
+    db_file.chmod(0o600)
+
+    seen_urls: list[str] = []
+
+    def fake_optimize_memory(_settings, *, database_url: str, **_kwargs):
+        seen_urls.append(database_url)
+        return optimize.OptimizationResult(
+            target="memory",
+            output_path=tmp_path / "memory_gate.json",
+            saved=True,
+            baseline_score=0.5,
+            optimized_score=0.9,
+            train_size=1,
+            holdout_size=1,
+            report={"eligible": True, "saved": True},
+        )
+
+    monkeypatch.setattr(optimize, "optimize_memory", fake_optimize_memory)
+
+    rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url-file",
+            str(db_file),
+            "--dataset",
+            str(dataset),
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    assert seen_urls == [_BRANCH_URL]
+
+    # Primary DB URL (with :5432 bypass attempt) inside --database-url-file is refused with code 2.
+    primary_file = tmp_path / "primary.url"
+    primary_file.write_text(
+        "postgresql://user:supersecretpw@ep-prod-pooler.region.aws.neon.tech.:5432/fleet\n",
+        encoding="utf-8",
+    )
+    primary_file.chmod(0o600)
+    progress_file = tmp_path / "primary_progress.jsonl"
+    rc_primary = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url-file",
+            str(primary_file),
+            "--dataset",
+            str(dataset),
+            "--progress-file",
+            str(progress_file),
+        ],
+        settings=settings,
+    )
+    assert rc_primary == 2
+    assert "supersecretpw" not in progress_file.read_text(encoding="utf-8")
+    assert "supersecretpw" not in capsys.readouterr().err
+
+    # Passing both or neither --database-url / --database-url-file raises argparse SystemExit(2).
+    with pytest.raises(SystemExit) as exc_neither:
+        optimize.main(["--target", "memory", "--dataset", str(dataset)], settings=settings)
+    assert exc_neither.value.code == 2
+
+    with pytest.raises(SystemExit) as exc_both:
+        optimize.main(
+            [
+                "--target",
+                "memory",
+                "--database-url",
+                _BRANCH_URL,
+                "--database-url-file",
+                str(db_file),
+                "--dataset",
+                str(dataset),
+            ],
+            settings=settings,
+        )
+    assert exc_both.value.code == 2
+
+
+def test_credentials_file_per_role_lm15_and_no_secret_leaks(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dspy.clients import backend_selection
+
+    creds_path = tmp_path / "creds.json"
+    creds_payload = {
+        "root_lm": {
+            "dialect": "openai_compatible",
+            "api_mode": "chat",
+            "model": "meta-llama/Llama-3.3-70B",
+            "api_key": "sk-root-super-secret-value-123456",
+            "base_url": "https://user:urlsecretpass@compat.example.com/v1",
+            "provider_name": "Compat Gateway",
+            "timeout": 45,
+        },
+        "sub_lm": {
+            "dialect": "vllm",
+            "api_mode": "chat",
+            "model": "Qwen/Qwen2.5-72B",
+            "base_url": "http://localhost:8000/v1",
+            "provider_name": "Local vLLM",
+        },
+        "reflection_lm": {
+            "dialect": "openai",
+            "api_mode": "responses",
+            "model": "gpt-4.1",
+            "api_key": "sk-reflect-secret-value-654321",
+            "provider_name": "OpenAI Direct",
+        },
+        "judge_lm": {
+            "dialect": "sglang",
+            "api_mode": "chat",
+            "model": "Qwen/Qwen2.5-32B",
+            "base_url": "http://localhost:30000/v1",
+            "provider_name": "Local SGLang",
+        },
+        "decision_lm": {
+            "dialect": "typesafe",
+            "api_mode": "auto",
+            "model": "jev-1.14.0",
+            "api_key": "sk-typesafe-secret-value-987654",
+            "provider_name": "TypeSafe Prod",
+        },
+    }
+    creds_path.write_text(json.dumps(creds_payload), encoding="utf-8")
+    creds_path.chmod(0o600)
+
+    loaded = optimize.load_role_credentials(creds_path)
+    assert set(loaded) == {"root_lm", "sub_lm", "reflection_lm", "judge_lm", "decision_lm"}
+
+    built: dict[str, tuple[dspy.LM, str, str]] = {}
+    for role, spec in loaded.items():
+        lm_obj, routed, mode = optimize._build_role_lm(spec)
+        built[role] = (lm_obj, routed, mode)
+        sel = backend_selection.select_backend(lm_obj)
+        assert sel.native is True, f"Role {role} did not resolve natively in lm15: {sel}"
+        # Only native client keys (api_key, api_base, timeout) may appear in lm.kwargs.
+        assert not (set(lm_obj.kwargs) & {"headers", "extra_headers", "custom_llm_provider"})
+
+    assert built["root_lm"][1] == "openai-chat:meta-llama/Llama-3.3-70B"
+    assert built["root_lm"][0].model_type == "chat"
+    assert built["root_lm"][0].kwargs.get("timeout") == 45.0
+    assert built["sub_lm"][1] == "vllm:Qwen/Qwen2.5-72B"
+    assert built["sub_lm"][0].model_type == "chat"
+    assert "api_key" not in built["sub_lm"][0].kwargs
+    assert built["reflection_lm"][1] == "openai/gpt-4.1"
+    assert built["reflection_lm"][0].model_type == "responses"
+    assert built["judge_lm"][1] == "sglang:Qwen/Qwen2.5-32B"
+    assert built["judge_lm"][0].model_type == "chat"
+    assert built["decision_lm"][1] == "typesafe:jev-1.14.0"
+
+    # End-to-end RLM run with partial credentials file (omitted judge_lm falls back to Settings).
+    partial_creds = tmp_path / "partial_creds.json"
+    partial_creds.write_text(
+        json.dumps(
+            {
+                "root_lm": creds_payload["root_lm"],
+                "reflection_lm": creds_payload["reflection_lm"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    partial_creds.chmod(0o600)
+
+    dataset = _write_jsonl(
+        tmp_path / "rlm_creds.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {"id": "ho1", "lineage": "l3", "split": "holdout", "task": "H1", "answer": "H1A"},
+        ],
+    )
+    fallback_models: list[str] = []
+
+    def track_fallback(_s: Settings, name: str) -> dspy.LM:
+        fallback_models.append(name)
+        return dspy.LM(name, api_key="offline")
+
+    class FakeGEPA:
+        def __init__(self, **kwargs):
+            self.reflection_lm = kwargs["reflection_lm"]
+
+        def compile(self, student, *, trainset, valset):
+            assert self.reflection_lm.model == "openai/gpt-4.1"
+            assert self.reflection_lm.model_type == "responses"
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nRefined with role creds."
+            )
+            return compiled
+
+    scores = iter([50.0, 90.0])
+    monkeypatch.setattr(optimize.agent, "_model", track_fallback)
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(
+        dspy,
+        "Evaluate",
+        lambda **_kwargs: lambda _prog: SimpleNamespace(score=next(scores)),
+    )
+
+    db_file = tmp_path / "branch.url"
+    db_file.write_text(_BRANCH_URL, encoding="utf-8")
+    db_file.chmod(0o600)
+    report_file = tmp_path / "report.json"
+    progress_file = tmp_path / "progress.jsonl"
+    out_file = tmp_path / "rlm_out.json"
+
+    rc = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url-file",
+            str(db_file),
+            "--credentials-file",
+            str(partial_creds),
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(out_file),
+            "--report-file",
+            str(report_file),
+            "--progress-file",
+            str(progress_file),
+            "--local-interpreter",
+            "--holdout-repeats",
+            "1",
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    # Omitted roles (sub_lm, judge_lm) fell back to Settings defaults.
+    assert fallback_models == [settings.sub_llm_model, settings.llm_model]
+
+    report_text = report_file.read_text(encoding="utf-8")
+    progress_text = progress_file.read_text(encoding="utf-8")
+    for leaked in (
+        "sk-root-super-secret-value-123456",
+        "sk-reflect-secret-value-654321",
+        "urlsecretpass",
+        "compat.example.com",
+    ):
+        assert leaked not in report_text
+        assert leaked not in progress_text
+
+    parsed = json.loads(report_text)["report"]
+    assert parsed["models"]["root_lm"] == {
+        "dialect": "openai_compatible",
+        "model": "openai-chat:meta-llama/Llama-3.3-70B",
+        "provider_name": "Compat Gateway",
+    }
+    assert parsed["models"]["reflection_lm"] == {
+        "dialect": "openai",
+        "model": "openai/gpt-4.1",
+        "provider_name": "OpenAI Direct",
+    }
+    assert parsed["models"]["sub_lm"] == {
+        "dialect": "openai",
+        "model": settings.sub_llm_model,
+        "provider_name": None,
+    }
+
+
+def test_double_sigterm_is_idempotent_during_daytona_cleanup(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import signal
+
+    dataset = _write_jsonl(
+        tmp_path / "rlm_sigterm.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {"id": "ho1", "lineage": "l3", "split": "holdout", "task": "H1", "answer": "H1A"},
+        ],
+    )
+    cleanup_state = {"created": 0, "deleted": 0, "second_sigterm_sent": False}
+
+    class FakeDaytonaClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    @asynccontextmanager
+    async def fake_ephemeral_sandbox(_daytona, _settings: Settings):
+        cleanup_state["created"] += 1
+        try:
+            yield SimpleNamespace(id=f"sb-sig-{cleanup_state['created']}")
+        finally:
+            # Simulate a second SIGTERM arriving while cleanup is in progress.
+            if not cleanup_state["second_sigterm_sent"]:
+                cleanup_state["second_sigterm_sent"] = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.02)
+            cleanup_state["deleted"] += 1
+
+    def fake_factory(sandbox, _settings, loop):
+        class _Factory:
+            execution_instructions = interpreter.DaytonaCodeInterpreter.execution_instructions
+
+            def __call__(self, **_kwargs):
+                return SimpleNamespace(sandbox=sandbox, loop=loop, shutdown=lambda: None)
+
+        return _Factory()
+
+    class InterruptingEvaluate:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __call__(self, _program):
+            os.kill(os.getpid(), signal.SIGTERM)
+            return SimpleNamespace(score=50.0)
+
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", lambda _s: FakeDaytonaClient())
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", fake_ephemeral_sandbox)
+    monkeypatch.setattr(optimize.interpreter, "make_interpreter_factory", fake_factory)
+    monkeypatch.setattr(dspy, "Evaluate", InterruptingEvaluate)
+
+    progress_file = tmp_path / "sigterm_progress.jsonl"
+    prev_handler = signal.getsignal(signal.SIGTERM)
+    rc = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--num-threads",
+            "1",
+            "--holdout-repeats",
+            "1",
+            "--progress-file",
+            str(progress_file),
+        ],
+        settings=settings,
+    )
+    assert rc == 130
+    assert signal.getsignal(signal.SIGTERM) == prev_handler
+    assert cleanup_state["second_sigterm_sent"] is True
+    assert cleanup_state["created"] == 1
+    assert cleanup_state["deleted"] == 1
+
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["status"] == "cancelled"
+    timeline = events[-1]["stage_timeline"]
+    assert timeline[-1]["stage"] == "baseline_eval"
+    assert timeline[-1]["status"] == "cancelled"
+    assert timeline[-1]["finished_at"] is not None
+    assert timeline[-1]["duration_seconds"] >= 0.0
+
+
+def test_reanchor_telemetry_eligible_gate_checks_param_diffs_case_deltas_and_force(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "skills_telemetry.jsonl",
+        [
+            {
+                "task": "Analyze CSV revenue",
+                "expected_skill": "data-analysis",
+                "lineage": "tr-csv",
+                "split": "train",
+            },
+            {
+                "task": "Hello there",
+                "expected_skill": None,
+                "lineage": "tr-hi",
+                "split": "train",
+            },
+            {
+                "task": "Summarize quarterly CSV",
+                "expected_skill": "data-analysis",
+                "secondary_skills": ["charts"],
+                "prior_turns": [{"user": "Load Q1 CSV", "assistant": "Loaded."}],
+                "lineage": "ho-csv",
+                "split": "holdout",
+            },
+            {
+                "task": "Just saying hi",
+                "expected_skill": None,
+                "lineage": "ho-hi",
+                "split": "holdout",
+            },
+        ],
+    )
+
+    class FakeSkillDecisionLM(BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self) -> None:
+            super().__init__(model="typesafe:jev-1.14.0", cache=True)
+            self.history = [{"response": {"model": "jev-1.14.0"}}]
+
+        def __call__(self, request, **kwargs):
+            task = request.messages[0].parts[0].value["inputs"]["task"]
+            is_hi = "Just saying hi" in task or "Hello" in task
+            return SimpleNamespace(
+                provider_data={
+                    "typesafe": {
+                        "answers": {
+                            # Baseline 0.50 marks greeting as FP (0.62 >= 0.50);
+                            # calibrated 0.72 fixes greeting while keeping CSV positive (0.91).
+                            "needs_skill": {"noul": 0.62 if is_hi else 0.91},
+                            "primary_skill": {
+                                "probabilities": {"data-analysis": 0.65, "charts": 0.35},
+                                "confidence": 0.65,
+                            },
+                        }
+                    }
+                }
+            )
+
+    fake_lm = FakeSkillDecisionLM()
+
+    class FakeQualifyingReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "train_score_before": 0.5,
+                "train_score": 1.0,
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [
+                    {"field": "needs_skill", "parameter": "threshold", "value": 0.72},
+                    {
+                        "field": "primary_skill",
+                        "parameter": "weights",
+                        "value": {"data-analysis": 1.25, "charts": 0.85},
+                    },
+                ],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            compiled = student.deepcopy()
+            compiled.fields = {
+                "needs_skill": {"threshold": 0.72},
+                "primary_skill": {"weights": {"data-analysis": 1.25, "charts": 0.85}},
+            }
+            return compiled
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeQualifyingReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_lm)
+
+    qual_res = optimize.optimize_skills(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "skills_ok.json",
+        require_cache=False,
+    )
+    assert qual_res.saved is True
+    assert qual_res.report["eligible"] is True
+    checks = {item["name"]: item for item in qual_res.report["gate_checks"]}
+    assert set(checks) == {
+        "parameters_changed",
+        "holdout_score_improved",
+        "fp_rate_non_regression",
+    }
+    assert all(item["passed"] is True for item in checks.values())
+    for item in checks.values():
+        assert {"name", "label", "passed", "actual", "threshold", "reason"} <= set(item)
+
+    param_diffs = {
+        (item["gate"], item["parameter"]): item for item in qual_res.report["parameter_diffs"]
+    }
+    assert param_diffs[("needs_skill", "threshold")] == {
+        "gate": "needs_skill",
+        "parameter": "threshold",
+        "baseline": 0.5,
+        "fitted": 0.72,
+        "delta": 0.22,
+    }
+    assert param_diffs[("primary_skill", "weight:data-analysis")] == {
+        "gate": "primary_skill",
+        "parameter": "weight:data-analysis",
+        "baseline": 1.0,
+        "fitted": 1.25,
+        "delta": 0.25,
+    }
+    assert param_diffs[("primary_skill", "weight:charts")] == {
+        "gate": "primary_skill",
+        "parameter": "weight:charts",
+        "baseline": 1.0,
+        "fitted": 0.85,
+        "delta": -0.15,
+    }
+
+    assert qual_res.report["diagnostics_before"]["fp_rate"] == 1.0
+    assert qual_res.report["diagnostics_after"]["fp_rate"] == 0.0
+    assert qual_res.report["diagnostics_after"]["primary_accuracy"] == 1.0
+    assert qual_res.report["diagnostics_after"]["multi_turn_accuracy"] == 1.0
+    assert qual_res.report["diagnostics_after"]["secondary_hit_rate"] == 1.0
+    assert len(qual_res.report["fixed_cases"]) == 1
+    assert qual_res.report["fixed_cases"][0]["lineage"] == "ho-hi"
+    assert qual_res.report["fixed_cases"][0]["outcome"] == "fixed"
+    assert qual_res.report["fixed_cases"][0]["baseline_pred"] == "data-analysis"
+    assert qual_res.report["fixed_cases"][0]["candidate_pred"] == "none"
+    assert qual_res.report["regressed_cases"] == []
+    assert len(qual_res.report["case_deltas"]) == 2
+    assert qual_res.report["models"]["decision_lm"]["dialect"] == "typesafe"
+
+    # --force on a failing ReAnchor run MUST keep eligible=False while setting saved=True.
+    class FakeRegressingReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "val_score_before": 0.8,
+                "val_score": 0.8,
+                "fp_rate_before": 0.0,
+                "fp_rate_after": 0.5,
+                "fitted": [{"field": "needs_skill", "parameter": "threshold", "value": 0.30}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            compiled = student.deepcopy()
+            compiled.fields = {"needs_skill": {"threshold": 0.30}}
+            return compiled
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeRegressingReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    forced_res = optimize.optimize_skills(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "skills_forced.json",
+        force=True,
+    )
+    assert forced_res.saved is True
+    assert forced_res.report["eligible"] is False
+    forced_checks = {item["name"]: item for item in forced_res.report["gate_checks"]}
+    assert forced_checks["holdout_score_improved"]["passed"] is False
+    assert forced_checks["fp_rate_non_regression"]["passed"] is False
+
+
+def test_gepa_telemetry_gate_checks_instruction_diffs_candidate_history_and_scrubbing(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm_telemetry.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {
+                "id": "ho-block",
+                "lineage": "l3",
+                "split": "holdout",
+                "task": "Blocking task",
+                "answer": "EXACT",
+                "blocking": True,
+                "verifier": {"type": "exact", "expected": "EXACT"},
+            },
+            {
+                "id": "ho-fix",
+                "lineage": "l4",
+                "split": "holdout",
+                "task": "Fixable task",
+                "answer": "FIXED",
+                "verifier": {"type": "exact", "expected": "FIXED"},
+            },
+        ],
+    )
+
+    class FakeGEPAWithStats:
+        def __init__(self, **kwargs):
+            self.metric = kwargs["metric"]
+
+        def compile(self, student, *, trainset, valset):
+            # Trigger tracked_gepa_metric to verify live best_score emission.
+            self.metric(valset[0], dspy.Prediction(answer=valset[0].answer))
+            cand1 = student.deepcopy()
+            sig = cand1.generate_action.signature
+            assert sig is not None
+            cand1.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nAlways double check exact strings."
+            )
+            cand1.detailed_results = SimpleNamespace(
+                candidates=[student.deepcopy(), cand1],
+                parents=[[None], [0]],
+                val_aggregate_scores=[0.5, 0.95],
+                discovery_eval_counts=[4, 18],
+                total_metric_calls=24,
+                best_idx=1,
+            )
+            return cand1
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            self.devset = list(kwargs["devset"])
+            self.metric = kwargs["metric"]
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            results = []
+            total = 0.0
+            for ex in self.devset:
+                if self.calls == 1:
+                    ans = "EXACT" if ex.case_id == "ho-block" else "WRONG"
+                else:
+                    # Candidate fails blocking case and fixes ho-fix to test pinning order.
+                    ans = "WRONG" if ex.case_id == "ho-block" else "FIXED"
+                pred = dspy.Prediction(
+                    answer=ans,
+                    telemetry=optimize._RolloutTelemetry(completion="submit", root_actions=2),
+                )
+                score = self.metric(ex, pred)
+                total += float(score)
+                results.append((ex, pred, score))
+            return SimpleNamespace(
+                score=round(100.0 * total / len(self.devset), 2),
+                results=results,
+            )
+
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPAWithStats)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+
+    progress_file = tmp_path / "gepa_progress.jsonl"
+    progress = optimize._ProgressEmitter(progress_file)
+    result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "gepa_forced.json",
+        holdout_repeats=1,
+        local_interpreter=True,
+        force=True,
+        progress=progress,
+    )
+
+    assert result.saved is True
+    assert result.report["eligible"] is False
+    checks = {item["name"]: item for item in result.report["gate_checks"]}
+    assert set(checks) == {
+        "instructions_changed",
+        "holdout_score_improved",
+        "correctness_non_regression",
+        "zero_blocking_failures",
+        "zero_paired_regressions",
+    }
+    assert checks["instructions_changed"]["passed"] is True
+    assert checks["zero_blocking_failures"]["passed"] is False
+    assert checks["zero_paired_regressions"]["passed"] is False
+
+    # Unified instruction diff generated for changed predictor and empty string for unchanged.
+    diffs = result.report["instruction_diffs"]
+    assert "--- baseline/generate_action" in diffs["generate_action"]
+    assert "+++ optimized/generate_action" in diffs["generate_action"]
+    assert "+Always double check exact strings." in diffs["generate_action"]
+    assert diffs["extract"] == ""
+
+    # Structured candidate_history extracted cleanly from detailed_results.
+    history = result.report["candidate_history"]
+    assert len(history) == 2
+    assert history[0]["candidate_idx"] == 0
+    assert history[0]["val_score"] == 0.5
+    assert history[0]["parent"] is None
+    assert history[1]["candidate_idx"] == 1
+    assert history[1]["val_score"] == 0.95
+    assert history[1]["parent"] == 0
+    assert history[1]["accepted"] is True
+    assert history[1]["is_best"] is True
+    assert history[1]["metric_calls"] == 18
+    assert "generate_action" in (history[1]["reflection_summary"] or "")
+
+    # Blocking failure / paired regression case is pinned first in case_deltas.
+    deltas = result.report["case_deltas"]
+    assert [row["case_id"] for row in deltas] == ["ho-block", "ho-fix"]
+    assert deltas[0]["blocking_failed"] is True
+    assert deltas[0]["paired_regression"] is True
+    assert deltas[0]["outcome"] == "regressed"
+    assert deltas[1]["outcome"] == "fixed"
+
+    # Progress JSONL carries cumulative stage_timeline and live best_score during gepa_compile.
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    gepa_ticks = [e for e in events if e["stage"] == "gepa_compile" and e["completed"] == 1]
+    assert gepa_ticks and gepa_ticks[0]["best_score"] == 100.0
+    final_timeline = events[-1]["stage_timeline"]
+    assert [entry["stage"] for entry in final_timeline] == [
+        "loading_dataset",
+        "baseline_eval",
+        "gepa_compile",
+        "holdout_eval",
+        "saving_artifact",
+    ]
+    assert all(
+        entry["status"] == "completed"
+        and entry["started_at"] is not None
+        and entry["finished_at"] is not None
+        and entry["duration_seconds"] >= 0.0
+        for entry in final_timeline
+    )
+
+    # Absent or minimal mocked detailed_results never crashes extraction.
+    assert optimize._extract_gepa_candidate_history(None) == []
+    assert optimize._extract_gepa_candidate_history(SimpleNamespace()) == []
+
+    # Error messages emitted to progress.jsonl are scrubbed of secrets.
+    err_progress = tmp_path / "err_progress.jsonl"
+    monkeypatch.setattr(
+        optimize,
+        "optimize_rlm",
+        MagicMock(
+            side_effect=RuntimeError(
+                "Auth failed for sk-leak-secret-token-9876543210 against "
+                "postgresql+psycopg://user:dbsecret99@host/db"
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError):
+        optimize.main(
+            [
+                "--target",
+                "rlm",
+                "--database-url",
+                _BRANCH_URL,
+                "--dataset",
+                str(dataset),
+                "--progress-file",
+                str(err_progress),
+            ],
+            settings=settings,
+        )
+    err_text = err_progress.read_text(encoding="utf-8")
+    assert "sk-leak-secret-token-9876543210" not in err_text
+    assert "dbsecret99" not in err_text
+    assert "[REDACTED]" in err_text
+
+
+def test_custom_temp_dir_rlm_dataset_fixture_id_fallback(
+    settings: Settings, tmp_path: Path
+) -> None:
+    from tempfile import TemporaryDirectory
+
+    # 1. Custom RLM JSONL in an isolated TemporaryDirectory without sibling fixtures.py
+    # falls back to repo eval_datasets/fixtures.py.
+    with TemporaryDirectory(prefix="fleet-test-custom-rlm-") as temp_dir:
+        custom_jsonl = _write_jsonl(
+            Path(temp_dir) / "uploaded.jsonl",
+            [
+                {
+                    "id": "custom-inv-1",
+                    "lineage": "inv",
+                    "split": "train",
+                    "task": "Audit invoices",
+                    "answer": "42",
+                    "fixture_id": "data_dirty_invoices",
+                    "verifier": {"type": "exact", "expected": "42"},
+                }
+            ],
+        )
+        loaded = optimize.load_rlm_dataset(custom_jsonl, settings=settings)
+        assert len(loaded) == 1
+        by_id, _by_key, _any_web = optimize._build_case_spec_tables(loaded)
+        files, _web = optimize._resolve_case_fixtures(by_id["custom-inv-1"])
+        assert files and any(name.endswith(".csv") for name in files)
+
+    # 2. Fallback to eval_datasets/fixtures/<fixture_id>/ directory when no fixtures.py defines it.
+    custom_eval_dir = tmp_path / "custom_eval_datasets"
+    fixture_dir = custom_eval_dir / "fixtures" / "dir_case_alpha"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "metrics.csv").write_text("k,v\na,10\n", encoding="utf-8")
+    (fixture_dir / "web.json").write_text(
+        json.dumps({"limit": 2, "searches": {}, "pages": {}}),
+        encoding="utf-8",
+    )
+    dir_settings = settings.model_copy(update={"eval_datasets_dir": custom_eval_dir})
+
+    with TemporaryDirectory(prefix="fleet-test-dir-fixture-") as temp_dir:
+        dir_jsonl = _write_jsonl(
+            Path(temp_dir) / "uploaded_dir.jsonl",
+            [
+                {
+                    "id": "dir-1",
+                    "lineage": "dir",
+                    "split": "train",
+                    "task": "Read metrics.csv",
+                    "answer": "10",
+                    "fixture_id": "dir_case_alpha",
+                    "verifier": {"type": "exact", "expected": "10"},
+                },
+                {
+                    "id": "dir-traversal",
+                    "lineage": "trav",
+                    "split": "holdout",
+                    "task": "Attempt traversal",
+                    "answer": "no",
+                    "fixture_id": "../secret",
+                    "verifier": {"type": "exact", "expected": "no"},
+                },
+            ],
+        )
+        loaded_dir = optimize.load_rlm_dataset(dir_jsonl, settings=dir_settings)
+        by_id_dir, _by_key_dir, _any_web_dir = optimize._build_case_spec_tables(loaded_dir)
+        dir_files, dir_web = optimize._resolve_case_fixtures(by_id_dir["dir-1"])
+        assert dir_files == {"metrics.csv": b"k,v\na,10\n"}
+        assert dir_web == {"limit": 2, "searches": {}, "pages": {}}
+        with pytest.raises((FileNotFoundError, KeyError)):
+            optimize._resolve_case_fixtures(by_id_dir["dir-traversal"])
