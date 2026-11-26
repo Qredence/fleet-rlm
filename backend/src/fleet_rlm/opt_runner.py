@@ -1243,6 +1243,49 @@ async def _terminate_and_reap_proc(proc: Any, *, grace_seconds: float) -> None:
             await proc.wait()
 
 
+def _optimizer_arguments(
+    spec: JobRunSpec, dataset_arg: Path | None, branch_mode: OptimizationBranchMode
+) -> list[str]:
+    cmd: list[str] = []
+    if dataset_arg is not None:
+        cmd.extend(["--dataset", str(dataset_arg)])
+    if branch_mode == "direct_readonly":
+        cmd.append("--allow-direct")
+    if spec.train_ratio is not None:
+        cmd.extend(["--train-ratio", str(spec.train_ratio)])
+    if spec.force:
+        cmd.append("--force")
+    if spec.num_threads is not None:
+        cmd.extend(["--num-threads", str(spec.num_threads)])
+
+    if spec.target == "rlm":
+        cmd.extend(_rlm_arguments(spec, dataset_arg))
+    return cmd
+
+
+def _rlm_arguments(spec: JobRunSpec, dataset_arg: Path | None) -> list[str]:
+    cmd: list[str] = []
+    cmd.extend(["--program", spec.program_kind])
+    if spec.val_ratio is not None:
+        cmd.extend(["--val-ratio", str(spec.val_ratio)])
+    if spec.auto is not None:
+        cmd.extend(["--auto", spec.auto])
+    elif spec.max_metric_calls is not None:
+        cmd.extend(["--max-metric-calls", str(spec.max_metric_calls)])
+    cmd.extend(["--holdout-repeats", str(spec.holdout_repeats)])
+    if not spec.disable_cache:
+        cmd.append("--no-disable-cache")
+    if spec.local_interpreter:
+        cmd.append("--local-interpreter")
+    if spec.reflection_lm and "reflection_lm" not in spec.role_credentials:
+        cmd.extend(["--reflection-lm", spec.reflection_lm])
+    if spec.judge_lm and "judge_lm" not in spec.role_credentials:
+        cmd.extend(["--judge-lm", spec.judge_lm])
+    if dataset_arg is None:
+        cmd.extend(["--limit", str(spec.limit)])
+    return cmd
+
+
 async def supervise_optimization_job(
     runtime: OptimizationRuntimeLike,
     job_id: UUID,
@@ -1419,36 +1462,7 @@ async def supervise_optimization_job(
                     json.dumps(creds_payload, separators=(",", ":")),
                 )
                 cmd.extend(["--credentials-file", str(credentials_file)])
-            if dataset_arg is not None:
-                cmd.extend(["--dataset", str(dataset_arg)])
-            if branch_mode == "direct_readonly":
-                cmd.append("--allow-direct")
-            if spec.train_ratio is not None:
-                cmd.extend(["--train-ratio", str(spec.train_ratio)])
-            if spec.force:
-                cmd.append("--force")
-            if spec.num_threads is not None:
-                cmd.extend(["--num-threads", str(spec.num_threads)])
-
-            if spec.target == "rlm":
-                cmd.extend(["--program", spec.program_kind])
-                if spec.val_ratio is not None:
-                    cmd.extend(["--val-ratio", str(spec.val_ratio)])
-                if spec.auto is not None:
-                    cmd.extend(["--auto", spec.auto])
-                elif spec.max_metric_calls is not None:
-                    cmd.extend(["--max-metric-calls", str(spec.max_metric_calls)])
-                cmd.extend(["--holdout-repeats", str(spec.holdout_repeats)])
-                if not spec.disable_cache:
-                    cmd.append("--no-disable-cache")
-                if spec.local_interpreter:
-                    cmd.append("--local-interpreter")
-                if spec.reflection_lm and "reflection_lm" not in spec.role_credentials:
-                    cmd.extend(["--reflection-lm", spec.reflection_lm])
-                if spec.judge_lm and "judge_lm" not in spec.role_credentials:
-                    cmd.extend(["--judge-lm", spec.judge_lm])
-                if dataset_arg is None:
-                    cmd.extend(["--limit", str(spec.limit)])
+            cmd.extend(_optimizer_arguments(spec, dataset_arg, branch_mode))
 
             env = build_subprocess_env(
                 effective,
