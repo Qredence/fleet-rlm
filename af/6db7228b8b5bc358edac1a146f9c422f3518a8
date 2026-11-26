@@ -1,0 +1,29 @@
+.circleci/continue-config.yml
+  s_4c5656a3b33387::t_8abafa3d548959 56-65
+.circleci/smoke-wheel.sh
+  s_4c5656a3b33387::t_249d059e4b2838 23-24,27-31
+backend/src/fleet_rlm/optimize.py
+  s_4c5656a3b33387::t_1a8f1dc311b159 47,1843,1846
+frontend/src/components/optimization/RunFullDiffSheet.tsx
+  s_4c5656a3b33387::t_6d465c91556338 325,339,361,368,412,417,419-420,425,432,434,826,833,836
+frontend/src/pages/OptimizationPage.test.tsx
+  s_4c5656a3b33387::t_568140bb3f4fae 865-868
+scripts/check_hygiene.py
+  s_4c5656a3b33387::t_538902d3b326fc 1,5,63,96-115,129-140,142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af6db7228b8b5bc358edac1a146f9c422f3518a8",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
