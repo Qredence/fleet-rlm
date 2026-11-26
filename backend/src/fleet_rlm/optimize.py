@@ -403,6 +403,12 @@ def _mlflow_api() -> _MlflowTracking:
     return cast(_MlflowTracking, mlflow)
 
 
+_DATABASE_SAFETY_MESSAGE = (
+    "Refusing to run optimization against configured database_url/database_direct_url. "
+    "Pass an ephemeral Neon branch URL or --allow-direct to override."
+)
+
+
 class DatabaseSafetyError(ValueError):
     """Raised when an optimization run targets the configured primary database."""
 
@@ -711,10 +717,7 @@ def guard_database_url(
     endpoint = _endpoint_key(normalized)
     configured_endpoints = {_endpoint_key(item) for item in configured}
     if normalized in configured or endpoint in configured_endpoints:
-        raise DatabaseSafetyError(
-            "Refusing to run optimization against configured database_url/database_direct_url. "
-            "Pass an ephemeral Neon branch URL or --allow-direct to override."
-        )
+        raise DatabaseSafetyError(_DATABASE_SAFETY_MESSAGE)
     return normalized
 
 
@@ -5192,8 +5195,8 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 progress=progress,
                 role_models=role_models,
             )
-    except DatabaseSafetyError as error:
-        safe_err = _scrub_secrets(str(error), extra_secrets)
+    except DatabaseSafetyError:
+        safe_err = _DATABASE_SAFETY_MESSAGE
         progress.emit("failed", "Database safety check failed", status="failed", message=safe_err)
         print(f"Error: {safe_err}", file=sys.stderr)
         return 2
@@ -5204,7 +5207,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
     except Exception as error:
         safe_err = _scrub_secrets(str(error) or type(error).__name__, extra_secrets)
         progress.emit("failed", "Optimization failed", status="failed", message=safe_err)
-        raise
+        raise RuntimeError(safe_err) from None
     finally:
         if prev_sigterm is not None and threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, prev_sigterm)
