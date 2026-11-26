@@ -196,7 +196,7 @@ def _selection(
     required: SkillDefinition | None = None,
 ) -> SkillSelection:
     if required is not None:
-        active = (required, *active)
+        active = (required, *(skill for skill in active if skill != required))[:2]
         scores[required.name] = 1.0
     tools = tuple(dict.fromkeys(tool for skill in active for tool in skill.allowed_tools))
     return SkillSelection(active, MappingProxyType(scores), tools)
@@ -351,11 +351,24 @@ def _analysis_and_chart(task: str) -> bool:
         re.search(r"\b(?:charts?|plots?|graphs?|visuali[sz]ations?)\b", task, re.I)
         and re.search(r"\b(?:data|dataset|rows?|records?|csv|parquet)\b", task, re.I)
         and re.search(
-            r"\b(?:analy[sz](?:e[ds]?|ing)|aggregat\w*|group\w*|reconcil\w*|filter\w*|summari[sz]e)\b",
+            r"\b(?:analy[sz](?:e[ds]?|ing)|aggregate|aggregating|group(?:ing)?|reconcile|reconciling|filter(?:ing)?|summari[sz]e)\b",
             task,
             re.I,
         )
     )
+
+
+def _companion_skill(primary: str, task: str) -> str | None:
+    if primary in {"data-analysis", "chart-visualization"} and _analysis_and_chart(task):
+        return "chart-visualization" if primary == "data-analysis" else "data-analysis"
+    if (
+        primary == "recursive-synthesis"
+        and re.search(r"\bchunks?\b", task, re.I)
+        and re.search(r"\.(?:txt|pdf|docx)\b", task, re.I)
+        and re.search(r"\b(?:extract\w*|references?|citations?)\b", task, re.I)
+    ):
+        return "document-extraction"
+    return None
 
 
 def format_selector_task(
@@ -428,7 +441,7 @@ def select_skills(
     )
     candidates = _candidates(
         task,
-        tuple(skill for skill in available if skill != web),
+        available,
         context,
     )
     if not candidates:
@@ -470,12 +483,10 @@ def select_skills(
             if isinstance(primary, str) and primary in by_name:
                 active = (by_name[primary],)
                 scores.setdefault(primary, float(probabilities.get(primary, 1.0)))
-    if len(active) == 1 and active[0].name in {"data-analysis", "chart-visualization"}:
-        pair = ("data-analysis", "chart-visualization")
-        by_name = {skill.name: skill for skill in candidates}
-        if all(name in by_name for name in pair) and _analysis_and_chart(task):
-            primary = active[0]
-            companion = next(name for name in pair if name != primary.name)
-            active = (primary, by_name[companion])
-            scores.setdefault(companion, 0.0)
+    if len(active) == 1:
+        companion = _companion_skill(active[0].name, task)
+        match = next((skill for skill in candidates if skill.name == companion), None)
+        if match:
+            active = (*active, match)
+            scores.setdefault(match.name, 0.0)
     return _selection(active, scores, required=web)
