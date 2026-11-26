@@ -1528,6 +1528,43 @@ def _trace_link(runtime: Runtime, trace: LiveSpan | None) -> str | None:
     )
 
 
+async def _persist_turn_outcome(
+    sessionmaker: store.SessionFactory,
+    turn: Turn,
+    status: store.TerminalStatus,
+    stream: ui_stream.UiStream,
+    *,
+    result: dspy.Prediction | None,
+    artifacts: list[store.StagedFile],
+    error: str | None,
+) -> bool:
+    completed = status == "completed"
+    persisted: dict[str, Any] = {}
+    if completed and result is not None:
+        persisted = {
+            "answer": result.answer,
+            "history_json": result.history.model_dump(mode="json"),
+            "files": artifacts,
+        }
+    return await _finish_root(
+        sessionmaker,
+        turn,
+        status,
+        child_snapshots=None if completed else stream.pending_child_snapshots(),
+        ui_parts=stream.snapshot(str(turn.run_id)),
+        error=error,
+        **persisted,
+    )
+
+
+def _turn_failure_message(error: Exception) -> str:
+    if isinstance(error, TimeoutError):
+        return "Turn timed out"
+    if isinstance(error, SandboxStartupError):
+        return _WORKSPACE_STARTUP_HELP
+    return "Turn failed"
+
+
 async def _execute_turn(
     request: Request,
     runtime: Runtime,
@@ -1778,12 +1815,7 @@ async def _execute_turn(
         if current_task is not None and current_task.cancelling():
             status = "cancelled"
             raise asyncio.CancelledError from error
-        if timed_out:
-            error_text = "Turn timed out"
-        else:
-            error_text = (
-                _WORKSPACE_STARTUP_HELP if isinstance(error, SandboxStartupError) else "Turn failed"
-            )
+        error_text = _turn_failure_message(error)
         _LOG.warning("Turn %s failed (%s)", turn.run_id, type(error.__cause__ or error).__name__)
     finally:
         turn.finalizing = True
@@ -1797,23 +1829,14 @@ async def _execute_turn(
         with workspace_span("fleet.turn.finalize") as finalization:
             fence_committed = False
             try:
-                persisted: dict[str, Any] = {}
-                if status == "completed" and result is not None:
-                    persisted = {
-                        "answer": result.answer,
-                        "history_json": result.history.model_dump(mode="json"),
-                        "files": artifacts,
-                    }
-                committed = await _finish_root(
+                committed = await _persist_turn_outcome(
                     sessionmaker,
                     turn,
                     status,
-                    child_snapshots=stream.pending_child_snapshots()
-                    if status != "completed"
-                    else None,
-                    ui_parts=stream.snapshot(root_id),
+                    stream,
+                    result=result,
+                    artifacts=artifacts,
                     error=error_text,
-                    **persisted,
                 )
                 fence_committed = committed
             except Exception as error:
