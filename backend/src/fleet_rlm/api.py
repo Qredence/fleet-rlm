@@ -123,9 +123,39 @@ def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> di
     return state
 
 
+def _calibrated_gates_loaded(settings: Settings) -> bool:
+    return settings.skill_selector_path is not None or settings.memory_gate_path is not None
+
+
+def _is_floating_model(model: str) -> bool:
+    return model.endswith(("-latest", ":latest"))
+
+
+def _decision_model_uncalibrated(base: Settings, effective: Settings) -> bool:
+    return _calibrated_gates_loaded(base) and (
+        effective.decision_model != base.decision_model
+        or _is_floating_model(effective.decision_model)
+    )
+
+
+def _warn_on_unsafe_config(settings: Settings) -> None:
+    if settings.api_bearer_token is None:
+        _LOG.warning(
+            "FLEET_API_BEARER_TOKEN is unset or empty; every protected API route, "
+            "including sandbox execution and settings, accepts unauthenticated requests"
+        )
+    if _calibrated_gates_loaded(settings) and _is_floating_model(settings.decision_model):
+        _LOG.warning(
+            "FLEET_DECISION_MODEL %r is a floating tag but calibrated gates are loaded; "
+            "pin the exact decision model snapshot the gates were calibrated against",
+            settings.decision_model,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = Settings()
+    _warn_on_unsafe_config(settings)
     engine, sessionmaker = store.create_db(settings)
     runtime: Runtime | None = None
     try:
@@ -346,6 +376,7 @@ class WorkspaceSettingsStatus(BaseModel):
     llm_api_key_configured: bool
     llm_base_url: str | None
     bearer_auth_enabled: bool
+    decision_model_uncalibrated: bool
     max_concurrent_turns_per_worker: int
     mlflow_tracking_uri: str | None
     mlflow_experiment: str
@@ -651,8 +682,8 @@ async def _workspace_settings_view(
             storage_bucket=base.s3_bucket,
             llm_api_key_configured=bool(base.llm_api_key.get_secret_value()),
             llm_base_url=base.llm_base_url,
-            bearer_auth_enabled=base.api_bearer_token is not None
-            and bool(base.api_bearer_token.get_secret_value()),
+            bearer_auth_enabled=base.api_bearer_token is not None,
+            decision_model_uncalibrated=_decision_model_uncalibrated(base, effective),
             max_concurrent_turns_per_worker=base.max_concurrent_turns_per_worker,
             mlflow_tracking_uri=base.mlflow_tracking_uri,
             mlflow_experiment=base.mlflow_experiment,
@@ -767,7 +798,14 @@ async def patch_settings(
         overrides = await store.update_workspace_settings_overrides(runtime.sessionmaker, changes)
     else:
         overrides = await store.get_workspace_settings_overrides(runtime.sessionmaker)
-    return await _workspace_settings_view(runtime, overrides)
+    view = await _workspace_settings_view(runtime, overrides)
+    if "decision_model" in changes and view.status.decision_model_uncalibrated:
+        _LOG.warning(
+            "Decision model %r is not the pinned model the loaded calibrated gates expect; "
+            "gate probabilities can drift from their calibration",
+            view.effective.decision_model,
+        )
+    return view
 
 
 @app.delete("/api/settings", dependencies=[Depends(require_auth)])

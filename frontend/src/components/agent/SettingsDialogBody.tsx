@@ -508,6 +508,14 @@ export function SettingsDialogBody({
                     value={draft.decision_model}
                     onChange={(event) => updateField('decision_model', event.target.value)}
                   />
+                  {status?.decision_model_uncalibrated && (
+                    <Alert>
+                      <AlertDescription>
+                        Calibrated gates are loaded, but the decision model is not the pinned snapshot they
+                        were calibrated against. Gate probabilities can drift.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   {status && (
                     <StatusTile
                       label="LLM Base URL (.env-managed · read-only)"

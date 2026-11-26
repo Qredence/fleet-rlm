@@ -597,6 +597,66 @@ async def test_auth_and_cors(offline):
     ).status_code == 200
 
 
+def test_startup_warns_on_open_auth_and_floating_decision_model(offline, caplog):
+    assert not [r for r in caplog.get_records("setup") if r.levelname == "WARNING"]
+    caplog.set_level("WARNING", logger=api.__name__)
+
+    api._warn_on_unsafe_config(offline.settings.model_copy(update={"api_bearer_token": None}))
+    assert [r.getMessage() for r in caplog.records] == [
+        "FLEET_API_BEARER_TOKEN is unset or empty; every protected API route, "
+        "including sandbox execution and settings, accepts unauthenticated requests"
+    ]
+
+    for gate in ("skill_selector_path", "memory_gate_path"):
+        caplog.clear()
+        api._warn_on_unsafe_config(offline.settings.model_copy(update={gate: Path("gate.json")}))
+        assert len(caplog.records) == 1
+        assert "'typesafe:jev-latest' is a floating tag" in caplog.records[0].getMessage()
+
+    caplog.clear()
+    api._warn_on_unsafe_config(
+        offline.settings.model_copy(
+            update={"memory_gate_path": Path("gate.json"), "decision_model": "typesafe:jev-1"}
+        )
+    )
+    assert not caplog.records
+
+
+def test_empty_bearer_token_is_unset(offline):
+    data = offline.settings.model_dump() | {"api_bearer_token": ""}
+    assert Settings.model_validate(data).api_bearer_token is None
+
+
+@pytest.mark.asyncio
+async def test_decision_model_override_warns_while_gates_are_loaded(offline, caplog):
+    caplog.set_level("WARNING", logger=api.__name__)
+    response = await offline.client.patch("/api/settings", json={"decision_model": "custom:jev"})
+    assert response.json()["status"]["decision_model_uncalibrated"] is False
+    assert not caplog.records
+
+    offline.settings.decision_model = "typesafe:jev-1"
+    offline.settings.skill_selector_path = Path("skill_selector.json")
+    response = await offline.client.patch("/api/settings", json={"rlm_max_iters": 12})
+    assert response.json()["status"]["decision_model_uncalibrated"] is True
+    assert not caplog.records
+
+    response = await offline.client.patch(
+        "/api/settings", json={"decision_model": "typesafe:jev-1"}
+    )
+    assert response.json()["status"]["decision_model_uncalibrated"] is False
+    assert not caplog.records
+
+    response = await offline.client.patch(
+        "/api/settings", json={"decision_model": "typesafe:jev-latest"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"]["decision_model_uncalibrated"] is True
+    assert [r.getMessage() for r in caplog.records] == [
+        "Decision model 'typesafe:jev-latest' is not the pinned model the loaded calibrated "
+        "gates expect; gate probabilities can drift from their calibration"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_models_reads_the_configured_gateway(offline, monkeypatch):
     offline.settings.llm_base_url = "https://gateway.example/openai/v1/"
@@ -1729,6 +1789,7 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
         "llm_api_key_configured": True,
         "llm_base_url": None,
         "bearer_auth_enabled": True,
+        "decision_model_uncalibrated": False,
         "max_concurrent_turns_per_worker": 16,
         "mlflow_tracking_uri": None,
         "mlflow_experiment": "fleet-rlm",

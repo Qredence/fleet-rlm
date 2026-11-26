@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: str | None = None
     mlflow_experiment: str = "fleet-rlm"
 
+    @field_validator("api_bearer_token")
+    @classmethod
+    def empty_token_is_unset(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value():
+            return None
+        return value
+
     @field_validator("database_url", "database_direct_url")
     @classmethod
     def use_psycopg(cls, value: str) -> str:
