@@ -131,3 +131,52 @@ Both arms ran against isolated Neon branches, branch-scoped Neon Object Storage,
 
 - Both arms missed `route-workbook` (`0/2`, uncalibrated `SkillSelector`); the single `skill-creator-reuse` candidate repeat miss was traced to stochastic LLM authoring variance in the generated `SKILL.md` with zero `MemoryGate` involvement.
 - **Promotion:** Enabled in untracked `backend/.env` with `FLEET_MEMORY_GATE_PATH=artifacts/memory_gate.json`, pinned `FLEET_DECISION_MODEL=typesafe:jev-1.14.0`, and `FLEET_SKILLS_DIR=skills`. `SkillSelector` and root `dspy.RLM` remain unoptimized until future candidates pass their promotion gates.
+
+## Five-repeat routing release qualification, 2026-11-26
+
+The candidate was merged main at `e665bff6a`. The reference was `d6bcbc84f`, immediately before the two Jev routing fixes. Both ran Daytona v2 using the same image and model settings on separate disposable Neon branches with branch-specific object storage, separate skills directories and separate MLflow experiments. DSPy memory and disk model caches were disabled. This comparison measures the routing release on v2. The historical v0 cutover is a separate qualification.
+
+### Jev routing
+
+| Metric | Reference | Candidate |
+| --- | ---: | ---: |
+| Primary skill present or correct abstention | 155/205 | 205/205 |
+| Exact ordered skill list | 145/205 | 205/205 |
+| Exact matches per 41-case repeat | 30, 30, 27, 29, 29 | 41, 41, 41, 41, 41 |
+
+Each arm used its own bundled registry. The reference numbers exclude a preliminary run that loaded the candidate checkout's skill directory, which affected recognition of bundled host tools. The five passes reuse the same 41 labeled cases. They measure repeatability on that corpus.
+
+### Live HTTP workflows
+
+**Release decision — hold.** Candidate routing passed every automatic-selection case, but the candidate cleared only 56 of 70 scheduled bundled checks and 7 of 10 recovery checks with verified traces. Eight bundled case/repeat pairs that passed on the reference did not pass on the candidate. Diagnostic replays are excluded from all qualification totals.
+
+Both deployments reported `openai/deepseek/deepseek-v4.1-flash` for the root and child model, `typesafe:jev-1.14.0` for decisions, image `img_MDWBfg4msegHiPCgBbJh7W`, 20 iterations, 50 LM calls, and maximum depth 4. The bundled runner starts five repeat lanes concurrently per arm. The recovery runner runs both cases concurrently within each repeat. [Reference bundled run](http://127.0.0.1:5001/#/experiments/49/runs/cb438e02703646e99e189472c8390c95) · [Candidate bundled run](http://127.0.0.1:5001/#/experiments/50/runs/da17f90b8bb446a598ae8e04cca5877a)
+
+| Workflow (passes out of five) | Reference | Candidate |
+| --- | ---: | ---: |
+| Null-key data analysis | 4 | 5 |
+| PDF page evidence | 2 | 2 |
+| Workbook missing formula cache | 3 | 4 |
+| SVG chart | 5 | 4 |
+| PNG chart | 5 | 3 |
+| Welch reference / invalid input | 5 / 5 | 4 / 4 |
+| Recursive artifacts | 5 | 4 |
+| Automatic data-and-chart / workbook | 5 / 3 | 5 / 5 |
+| Automatic no-skill / greeting | 5 / 5 | 5 / 5 |
+| Create skill / reuse installed skill | 2 / 2 | 4 / 2 |
+| CSV recovery after forced VM replacement, including traces | 2 | 4 |
+| Recursive reconciliation, including traces | 4 | 3 |
+
+**Bundled denominators.** The reference had 56 passes, seven scored failures, four unscored errors, and three reuse checks blocked by failed creation. The candidate had 56 passes, three scored failures, ten unscored errors, and one blocked reuse. The runner attached traces with Daytona execution evidence to 45/63 scored reference turns and 43/59 scored candidate turns.
+
+**Paired regressions and diagnosis**
+
+- Seven reference passes became unscored on the candidate: PNG repeats 1 and 4, SVG repeat 2, PDF repeat 1, recursive artifacts repeat 5, Welch invalid repeat 1, and Welch reference repeat 4. Nine of the ten candidate execution errors were HTTP 503 on file upload. The remaining one failed during the turn; the candidate server logged `NoSuchUpload`. The reference also logged two `NoSuchUpload` failures. The storage endpoints and credentials were distinct between arms.
+- A controlled probe on candidate storage created two multipart uploads under sibling prefixes. A list restricted to the first prefix returned **both** keys. Fleet's [session cleanup](../backend/src/fleet_rlm/storage.py) aborts every upload returned by that list without checking its key. This establishes a mechanism by which cleanup can abort a neighboring session's upload. The individual HTTP 503s do not expose enough provider detail to attribute each one conclusively. Before release, verify each key belongs to the deleting session, then exercise concurrent upload and deletion on staged Neon storage.
+- The eighth paired regression was skill reuse repeat 1. The expected generated skill was active, but its instructions required merchant, date, and total for every receipt. The approved rule only required three receipts. Given four IDs, the agent returned `NOT APPROVED`. Candidate reuse repeat 5 similarly returned `NEEDS_REVIEW` after the generated skill added mandatory fields and blocking checks. Candidate creation repeat 3 produced an installable document that omitted the required approval token, blocking its reuse check. These failures occurred after skill selection. Verify generated rules preserve the approved condition before counting installation as successful. [Repeat 1 trace](http://127.0.0.1:5001/#/experiments/50/traces?traceId=tr-8e9e4400f61fd426987fcced0514abb7) · [Repeat 5 trace](http://127.0.0.1:5001/#/experiments/50/traces?traceId=tr-5cfd829747666cf6dd57f86ed4e0d7f8)
+- Both arms passed the answer, artifact, trajectory, and HTTP session-cleanup assertions on all ten recovery cases before trace verification. The reference lost five of 15 turn traces across four cases. The candidate lost three across three cases: reconciliation repeats 3 and 5, and CSV repeat 4. All three candidate cases passed on the reference. Direct lookup of all eight SSE-advertised trace IDs returned `RESOURCE_DOES_NOT_EXIST` from MLflow. Increasing the search result limit alone cannot recover them. Both servers also logged span-start warnings; the exporter failure mechanism remains unresolved.
+- In the available recovery traces, maximum sandbox acquisition was 3.57 seconds on the reference (10 observations) and 4.83 seconds on the candidate (12), below the 120-second bound. Median Python cell duration after the first execution on each worker was 0.815 seconds (146 reference cells) and 0.793 seconds (147 candidate cells). The observed medians clear the 25% slowdown threshold; missing traces limit coverage.
+
+A single-lane diagnostic replay of PDF page evidence and automatic workbook routing passed both cases on both arms. The replay supports an intermittent failure and does not replace the original attempts. [Reference replay](http://127.0.0.1:5001/#/experiments/49/runs/dd16320cabdf43ea864e8bfaa5951804) · [Candidate replay](http://127.0.0.1:5001/#/experiments/50/runs/b0153e30e0124f1dbf626f6a192eee6c)
+
+Both Neon branches were deleted. The final Daytona inventory contained no matches for the recorded test VM IDs or run-derived VM names. Private per-repeat JSON is retained locally under `.fleet-evidence/qualification-e665bff6a/{baseline,candidate}/`. Requalification requires a fresh five-repeat run after the multipart isolation, trace export, and generated-skill fidelity issues are addressed.
