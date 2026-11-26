@@ -15,5 +15,7 @@ workflows:
           resource_class: small
           mapping: |
             backend/.* run-backend true
+            (scripts/.*|docs/.*|AGENTS\.md|README\.md|GLOSSARY\.md) run-backend true
+            \.node-version run-frontend true
             frontend/.* run-frontend true
             (\.circleci/.*|Makefile|docker-compose\.yml|\.pre-commit-config\.yaml|\.python-version) run-all true

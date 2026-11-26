@@ -49,10 +49,19 @@ jobs:
           command: cd backend && uv run ty check src
       - run:
           name: Backend tests (pytest)
+          command: cd backend && uv run pytest
+      - run:
+          name: Check repository contracts
           command: |
-            export PYTHONPATH="$PWD/.circleci${PYTHONPATH:+:$PYTHONPATH}"
+            git fetch origin main:refs/remotes/origin/main
+            make check-hygiene
+      - run:
+          name: Verify installed wheel resources
+          command: |
             cd backend
-            uv run pytest -p fleet_ci_pytest
+            wheel_dir=$(mktemp -d)
+            uv build --wheel --out-dir "$wheel_dir"
+            bash ../.circleci/smoke-wheel.sh "$wheel_dir"/*.whl
 
   frontend-check:
     docker:

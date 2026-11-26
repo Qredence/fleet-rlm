@@ -25,7 +25,7 @@ from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 from pydantic import SecretStr
 
-from fleet_rlm import api, db, interpreter
+from fleet_rlm import api, db, interpreter, skills
 from fleet_rlm.config import Settings
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
@@ -1261,6 +1261,10 @@ async def test_approving_legacy_memory_displays_only_the_fact(offline):
 async def test_consolidate_searches_prompt_and_answer_including_unapproved_memories(
     offline, monkeypatch
 ):
+    decision = SimpleNamespace(needs_skill=SimpleNamespace(value=False))
+    monkeypatch.setattr(
+        skills, "build_skill_selector", Mock(return_value=Mock(return_value=decision))
+    )
     pending_id = uuid4()
     approved_id = uuid4()
     pending_memory = db.Memory(
