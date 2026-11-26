@@ -1,0 +1,14 @@
+.circleci/smoke-wheel.sh
+  h_f276322eb5eb9f 28-29,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f53806234ef112adbfff722055f5808b4e1f186",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
