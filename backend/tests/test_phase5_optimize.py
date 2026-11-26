@@ -2586,3 +2586,106 @@ def test_optimize_rlm_holdout_repeats_preserve_per_repeat_outcomes(
     assert [(r["case_id"], r["repeat"]) for r in result.report["blocking_failures"]] == [
         ("ho-block", 1)
     ]
+
+
+def test_optimize_cli_progress_and_report_files_and_sigterm(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "memory_cli.jsonl",
+        [
+            {"task": "Remember UTC", "answer": "Noted", "worth_saving": True, "lineage": "a"},
+            {"task": "Hi", "answer": "Hello", "worth_saving": False, "lineage": "b"},
+            {"task": "Remember ISO", "answer": "Noted", "worth_saving": True, "lineage": "c"},
+        ],
+    )
+    progress_file = tmp_path / "progress.jsonl"
+    report_file = tmp_path / "report.json"
+    out_file = tmp_path / "memory_gate.json"
+
+    class FakeReAnchor:
+        def __init__(self, metric, **_kwargs):
+            self.metric = metric
+            self.report = {
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [{"field": "worth_saving", "value": 0.6}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            for ex in trainset:
+                self.metric(
+                    ex,
+                    dspy.Prediction(
+                        worth_saving=SimpleNamespace(value=ex.worth_saving, probability=0.9),
+                        action=SimpleNamespace(value=ex.action),
+                        scope=SimpleNamespace(value=ex.scope),
+                    ),
+                )
+            return student.deepcopy()
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    monkeypatch.setattr(
+        optimize,
+        "_evaluate_memory_diagnostics",
+        lambda *_args, **_kwargs: {"fp_rate": 0.0, "fn_rate": 0.0},
+    )
+
+    rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(out_file),
+            "--progress-file",
+            str(progress_file),
+            "--report-file",
+            str(report_file),
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    assert out_file.is_file()
+    assert report_file.is_file()
+    report_payload = json.loads(report_file.read_text(encoding="utf-8"))
+    assert report_payload["saved"] is True
+    assert report_payload["report"]["fitted_changed"] is True
+
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    stages = [item["stage"] for item in events]
+    assert "loading_dataset" in stages
+    assert "reanchor_cv" in stages
+    assert "saving_artifact" in stages
+    assert events[-1]["stage"] == "completed"
+    assert events[-1]["status"] == "completed"
+
+    # Simulated SIGTERM cancellation triggers exit code 130 + cancelled progress event
+    cancel_progress = tmp_path / "cancel_progress.jsonl"
+    monkeypatch.setattr(
+        optimize,
+        "optimize_memory",
+        MagicMock(side_effect=KeyboardInterrupt),
+    )
+    cancel_rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--progress-file",
+            str(cancel_progress),
+        ],
+        settings=settings,
+    )
+    assert cancel_rc == 130
+    cancel_events = [
+        json.loads(line) for line in cancel_progress.read_text(encoding="utf-8").splitlines()
+    ]
+    assert cancel_events[-1]["status"] == "cancelled"

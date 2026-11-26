@@ -94,6 +94,154 @@ export interface WorkspaceSettingsView {
   status: WorkspaceSettingsStatus
 }
 
+export type OptimizationTarget = 'skills' | 'memory' | 'rlm'
+export type OptimizationBranchMode = 'auto_neon' | 'configured_branch' | 'custom_branch' | 'direct_readonly'
+export type OptimizationJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface OptimizationPromotionView {
+  id: string
+  target: OptimizationTarget
+  job_id: string
+  artifact_object_key: string
+  artifact_sha256: string
+  artifact_size_bytes: number
+  resolved_decision_model: string | null
+  active: boolean
+  promoted_at: string
+  rolled_back_at: string | null
+}
+
+export interface OptimizationJobProgress {
+  stage?: string
+  label?: string
+  status?: string
+  completed?: number | null
+  total?: number | null
+  baseline_score?: number | null
+  best_score?: number | null
+  message?: string | null
+  ts?: string
+}
+
+export interface OptimizationJobSummary {
+  id: string
+  target: OptimizationTarget
+  program_kind: string | null
+  status: OptimizationJobStatus
+  stage: string
+  dataset_source: 'builtin' | 'custom' | 'db'
+  dataset_name: string | null
+  dataset_id: string | null
+  config_json: Record<string, unknown>
+  progress_json: OptimizationJobProgress
+  saved: boolean | null
+  baseline_score: number | null
+  optimized_score: number | null
+  train_size: number | null
+  val_size: number | null
+  holdout_size: number | null
+  artifact_object_key: string | null
+  artifact_sha256: string | null
+  artifact_size_bytes: number | null
+  resolved_decision_model: string | null
+  mlflow_run_id: string | null
+  mlflow_experiment: string | null
+  mlflow_run_url: string | null
+  cancel_requested: boolean
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface OptimizationJobDetail extends OptimizationJobSummary {
+  report_json: Record<string, unknown> | null
+  log_tail: string
+}
+
+export interface TargetStatusSummary {
+  target: OptimizationTarget
+  source: 'promoted' | 'env' | 'default'
+  env_path: string | null
+  active_promotion: OptimizationPromotionView | null
+  can_rollback_previous: boolean
+  can_rollback_env: boolean
+  latest_job: OptimizationJobSummary | null
+  active_job: OptimizationJobSummary | null
+}
+
+export interface OptimizationCapabilities {
+  auto_neon_enabled: boolean
+  configured_branch_enabled: boolean
+  configured_branch_label: string | null
+  mlflow_tracking_uri: string | null
+  mlflow_experiment: string
+  daytona_configured: boolean
+  decision_model: string
+  llm_model: string
+  sub_llm_model: string
+}
+
+export interface OptimizationOverview {
+  targets: TargetStatusSummary[]
+  capabilities: OptimizationCapabilities
+}
+
+export interface OptimizationDatasetSummary {
+  id: string
+  name: string
+  target: OptimizationTarget
+  source: 'builtin' | 'custom'
+  row_count: number
+  size_bytes: number
+  sha256: string | null
+  summary_json: {
+    row_count?: number
+    splits?: Record<string, number>
+    lineage_count?: number
+    positive_count?: number
+    negative_count?: number
+    blocking_count?: number
+  }
+  created_at: string | null
+}
+
+export interface OptimizationDatasetPreview {
+  dataset: OptimizationDatasetSummary
+  rows: Record<string, unknown>[]
+}
+
+export interface OptimizationJobCreate {
+  target: OptimizationTarget
+  dataset_id?: string | null
+  program_kind?: 'rlm' | 'flex'
+  branch_mode?: OptimizationBranchMode | null
+  custom_database_url?: string | null
+  allow_direct_opt_in?: boolean
+  train_ratio?: number | null
+  val_ratio?: number | null
+  seed?: number
+  auto?: 'light' | 'medium' | 'heavy' | null
+  max_metric_calls?: number | null
+  holdout_repeats?: number
+  disable_cache?: boolean
+  local_interpreter?: boolean
+  num_threads?: number | null
+  limit?: number
+  force?: boolean
+  reflection_lm?: string | null
+  judge_lm?: string | null
+}
+
+export interface PromoteJobRequest {
+  confirm_non_qualifying?: boolean
+  pin_decision_model?: boolean
+}
+
+export interface RollbackTargetRequest {
+  mode?: 'previous' | 'env'
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -110,8 +258,10 @@ export function bearerHeaders(token?: string) {
 
 export const sessionsPath = '/api/sessions'
 export const settingsPath = '/api/settings'
+export const optimizationsPath = '/api/optimizations'
 export const sessionPath = (id: string) => `${sessionsPath}/${encodeURIComponent(id)}`
 export const chatPath = (id: string) => `${sessionPath(id)}/chat`
+export const optimizationJobEventsUrl = (id: string) => `${optimizationsPath}/jobs/${encodeURIComponent(id)}/events`
 
 export async function responseError(response: Response): Promise<ApiError> {
   const body = await response.text()
@@ -226,6 +376,51 @@ export function createApi(token?: string) {
     updateSettings: (changes: Partial<WorkspaceSettingsFields>) =>
       json<WorkspaceSettingsView>(settingsPath, writeJson('PATCH', changes)),
     resetSettings: () => json<WorkspaceSettingsView>(settingsPath, { method: 'DELETE' }),
+    getOptimizationOverview: (signal?: AbortSignal) =>
+      json<OptimizationOverview>(`${optimizationsPath}/overview`, { signal }),
+    listOptimizationDatasets: (signal?: AbortSignal) =>
+      json<OptimizationDatasetSummary[]>(`${optimizationsPath}/datasets`, { signal }),
+    previewOptimizationDataset: (id: string, limit = 25, signal?: AbortSignal) =>
+      json<OptimizationDatasetPreview>(
+        `${optimizationsPath}/datasets/${encodeURIComponent(id)}/preview?limit=${limit}`,
+        { signal },
+      ),
+    uploadOptimizationDataset: (body: FormData, signal?: AbortSignal) =>
+      json<OptimizationDatasetSummary>(`${optimizationsPath}/datasets`, { method: 'POST', body, signal }),
+    async deleteOptimizationDataset(id: string) {
+      await request(`${optimizationsPath}/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+    listOptimizationJobs(filters: { target?: OptimizationTarget; status?: OptimizationJobStatus; limit?: number } = {}, signal?: AbortSignal) {
+      const params = new URLSearchParams()
+      if (filters.target) params.set('target', filters.target)
+      if (filters.status) params.set('status', filters.status)
+      if (filters.limit !== undefined) params.set('limit', String(filters.limit))
+      return json<OptimizationJobSummary[]>(
+        `${optimizationsPath}/jobs${params.size ? `?${params}` : ''}`,
+        { signal },
+      )
+    },
+    getOptimizationJob: (id: string, signal?: AbortSignal) =>
+      json<OptimizationJobDetail>(`${optimizationsPath}/jobs/${encodeURIComponent(id)}`, { signal }),
+    createOptimizationJob: (payload: OptimizationJobCreate) =>
+      json<OptimizationJobDetail>(`${optimizationsPath}/jobs`, writeJson('POST', payload)),
+    cancelOptimizationJob: (id: string) =>
+      json<OptimizationJobDetail>(`${optimizationsPath}/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    promoteOptimizationJob: (id: string, payload: PromoteJobRequest = {}) =>
+      json<OptimizationPromotionView>(
+        `${optimizationsPath}/jobs/${encodeURIComponent(id)}/promote`,
+        writeJson('POST', payload),
+      ),
+    rollbackOptimizationTarget: (target: OptimizationTarget, payload: RollbackTargetRequest = { mode: 'previous' }) =>
+      json<TargetStatusSummary>(
+        `${optimizationsPath}/targets/${encodeURIComponent(target)}/rollback`,
+        writeJson('POST', payload),
+      ),
+    openOptimizationEvents: (id: string, signal?: AbortSignal) =>
+      request(optimizationJobEventsUrl(id), {
+        headers: { Accept: 'text/event-stream' },
+        signal,
+      }),
   }
 }
 

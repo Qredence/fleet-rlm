@@ -13,6 +13,7 @@ import os
 import queue
 import random
 import re
+import signal
 import sys
 import threading
 from collections import defaultdict
@@ -20,9 +21,10 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, AsyncExitStack, contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from ipaddress import ip_address
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.etree import ElementTree
@@ -90,7 +92,49 @@ class OptimizationResult:
     holdout_size: int
     val_size: int = 0
     reminder: str | None = None
+    mlflow_run_id: str | None = None
     report: dict[str, Any] = field(default_factory=dict)
+
+
+class _ProgressEmitter:
+    """Thread-safe JSONL writer for live UI progress tracking."""
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+        self.enabled = path is not None
+        self._lock = threading.Lock()
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+    def emit(
+        self,
+        stage: str,
+        label: str,
+        *,
+        status: Literal["running", "completed", "failed", "cancelled"] = "running",
+        completed: int | None = None,
+        total: int | None = None,
+        baseline_score: float | None = None,
+        best_score: float | None = None,
+        message: str | None = None,
+    ) -> None:
+        if self._path is None or not self.enabled:
+            return
+        payload = {
+            "stage": stage,
+            "label": label,
+            "status": status,
+            "completed": completed,
+            "total": total,
+            "baseline_score": baseline_score,
+            "best_score": best_score,
+            "message": message,
+            "ts": datetime.now(UTC).isoformat(),
+        }
+        line = json.dumps(payload, default=str) + "\n"
+        with self._lock, self._path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.flush()
 
 
 @dataclass
@@ -246,6 +290,61 @@ def guard_database_url(
             "Pass an ephemeral Neon branch URL or --allow-direct to override."
         )
     return normalized
+
+
+def _active_mlflow_run_id() -> str | None:
+    active_run = getattr(mlflow, "active_run", None)
+    if not callable(active_run):
+        return None
+    run = active_run()
+    info = getattr(run, "info", None)
+    run_id = getattr(info, "run_id", None)
+    return str(run_id) if isinstance(run_id, str) and run_id else None
+
+
+def _extract_predictor_instructions(module: Any) -> dict[str, str]:
+    base = module.rlm if isinstance(module, _OfflineWorkspaceProgram) else module
+    instructions: dict[str, str] = {}
+    if hasattr(base, "named_predictors"):
+        for name, pred in base.named_predictors():
+            sig = getattr(pred, "signature", None)
+            if sig is not None:
+                instructions[str(name)] = agent.strip_dynamic_tool_docs(
+                    str(getattr(sig, "instructions", "") or "")
+                )
+    return instructions
+
+
+def _extract_reanchor_parameters(predictor: Any) -> dict[str, Any]:
+    try:
+        state = predictor.dump_state() if hasattr(predictor, "dump_state") else {}
+    except Exception:
+        return {}
+    fields = state.get("fields") if isinstance(state, Mapping) else None
+    if not isinstance(fields, Mapping):
+        return {}
+    extracted: dict[str, Any] = {}
+    for field_name, cfg in fields.items():
+        if not isinstance(cfg, Mapping):
+            continue
+        item: dict[str, Any] = {}
+        if "threshold" in cfg:
+            item["threshold"] = cfg["threshold"]
+        if "weights" in cfg and isinstance(cfg["weights"], Mapping):
+            item["weights"] = dict(cfg["weights"])
+        if item:
+            extracted[str(field_name)] = item
+    return extracted
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(payload, indent=2, default=str) + "\n"
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
 
 
 @contextmanager
@@ -2580,6 +2679,7 @@ def optimize_rlm(
     allow_direct: bool = False,
     local_interpreter: bool = False,
     log_dir: Path | None = None,
+    progress: _ProgressEmitter | None = None,
 ) -> OptimizationResult:
     """Compile dspy.RLM or dspy.Flex with GEPA and promote only on verified holdout improvement."""
     if auto is not None and max_metric_calls is not None:
@@ -2589,6 +2689,8 @@ def optimize_rlm(
     if holdout_repeats < 1:
         raise ValueError("holdout_repeats must be positive")
 
+    if progress is not None:
+        progress.emit("loading_dataset", "Loading evaluation dataset")
     safe_url = guard_database_url(database_url, settings, allow_direct=allow_direct)
     if dataset is None:
         _LOG.warning(
@@ -2631,7 +2733,7 @@ def optimize_rlm(
         resolved_max_metric_calls = DEFAULT_MAX_METRIC_CALLS
 
     case_specs_by_id, case_specs_by_key, any_web_tools = _build_case_spec_tables(examples)
-    gepa_metric = _make_rlm_metric(judge_lm=resolved_judge_lm)
+    raw_gepa_metric = _make_rlm_metric(judge_lm=resolved_judge_lm)
     holdout_collector = _HoldoutMetricCollector(judge_lm=resolved_judge_lm)
 
     gepa_trainset = _with_case_id_inputs(trainset) if program_kind == "rlm" else list(trainset)
@@ -2639,8 +2741,72 @@ def optimize_rlm(
     repeated_holdout = _repeat_holdout_examples(
         holdout, repeats=holdout_repeats, include_case_id=(program_kind == "rlm")
     )
+    holdout_total = len(repeated_holdout)
+    eval_phase = "baseline"
+    baseline_score_live: float | None = None
+    holdout_lock = threading.Lock()
+    holdout_done = 0
 
+    def tracked_holdout_metric(
+        gold: dspy.Example, pred: Any, trace: Any = None
+    ) -> ScoreWithFeedback:
+        nonlocal holdout_done
+        result = holdout_collector.metric(gold, pred, trace)
+        if progress is not None:
+            with holdout_lock:
+                holdout_done += 1
+                done = holdout_done
+            stage = "baseline_eval" if eval_phase == "baseline" else "holdout_eval"
+            label = (
+                "Evaluating baseline on holdout"
+                if eval_phase == "baseline"
+                else "Evaluating compiled candidate on holdout"
+            )
+            progress.emit(
+                stage,
+                label,
+                completed=done,
+                total=holdout_total,
+                baseline_score=baseline_score_live,
+            )
+        return result
+
+    gepa_lock = threading.Lock()
+    gepa_calls = 0
+
+    def tracked_gepa_metric(
+        gold: dspy.Example,
+        pred: Any,
+        trace: Any = None,
+        pred_name: str | None = None,
+        pred_trace: Any = None,
+        program_trace: Any = None,
+    ) -> ScoreWithFeedback:
+        nonlocal gepa_calls
+        result = raw_gepa_metric(gold, pred, trace, pred_name, pred_trace, program_trace)
+        if progress is not None:
+            with gepa_lock:
+                gepa_calls += 1
+                calls = gepa_calls
+            if calls == 1 or calls % 3 == 0 or calls == resolved_max_metric_calls:
+                progress.emit(
+                    "gepa_compile",
+                    "Running GEPA prompt evolution",
+                    completed=calls,
+                    total=resolved_max_metric_calls,
+                    baseline_score=baseline_score_live,
+                )
+        return result
+
+    mlflow_run_id: str | None = None
     with _mlflow_tracking(settings, "rlm") as mlflow_active:
+        mlflow_run_id = _active_mlflow_run_id()
+        if progress is not None and program_kind == "rlm" and not local_interpreter:
+            progress.emit(
+                "provisioning_sandboxes",
+                "Provisioning ephemeral Daytona sandboxes",
+                message=f"train={len(trainset)} val={len(valset)} holdout={len(holdout)}",
+            )
         with _rlm_execution_context(
             settings,
             root_lm,
@@ -2660,21 +2826,30 @@ def optimize_rlm(
                     case_specs_by_key=case_specs_by_key,
                 )
             )
+            progress_active = progress is not None and progress.enabled
             evaluator = dspy.Evaluate(
                 devset=repeated_holdout,
-                metric=holdout_collector.metric,
+                metric=tracked_holdout_metric if progress_active else holdout_collector.metric,
                 num_threads=num_threads,
                 display_progress=False,
             )
+            if progress is not None:
+                progress.emit(
+                    "baseline_eval",
+                    "Evaluating baseline on holdout",
+                    completed=0,
+                    total=holdout_total,
+                )
             holdout_collector.reset()
             baseline_eval = evaluator(student)
             baseline_score = _eval_score(baseline_eval)
+            baseline_score_live = baseline_score
             baseline_rows = _extract_holdout_rows(
                 baseline_eval, holdout_collector.outcomes, judge_lm=resolved_judge_lm
             )
 
             gepa_kwargs: dict[str, Any] = {
-                "metric": gepa_metric,
+                "metric": tracked_gepa_metric if progress_active else raw_gepa_metric,
                 "reflection_lm": resolved_reflection_lm,
                 "num_threads": num_threads,
                 "log_dir": str(log_dir) if log_dir else None,
@@ -2696,10 +2871,28 @@ def optimize_rlm(
                 gepa_kwargs["track_stats"] = True
                 gepa_kwargs["gepa_kwargs"] = {"stop_callbacks": MaxMetricCallsStopper(stop_limit)}
 
+            if progress is not None:
+                progress.emit(
+                    "gepa_compile",
+                    "Running GEPA prompt evolution",
+                    completed=0,
+                    total=resolved_max_metric_calls,
+                    baseline_score=baseline_score,
+                )
             gepa = dspy.GEPA(**gepa_kwargs)
             compiled = gepa.compile(student, trainset=gepa_trainset, valset=gepa_valset)
 
+            eval_phase = "holdout"
+            holdout_done = 0
             holdout_collector.reset()
+            if progress is not None:
+                progress.emit(
+                    "holdout_eval",
+                    "Evaluating compiled candidate on holdout",
+                    completed=0,
+                    total=holdout_total,
+                    baseline_score=baseline_score,
+                )
             optimized_eval = evaluator(compiled)
             optimized_score = _eval_score(optimized_eval)
             candidate_rows = _extract_holdout_rows(
@@ -2707,6 +2900,8 @@ def optimize_rlm(
             )
 
         instructions_changed = _program_changed(student, compiled)
+        baseline_instructions = _extract_predictor_instructions(student)
+        optimized_instructions = _extract_predictor_instructions(compiled)
         baseline_summary = _summarize_holdout_rows(baseline_rows, baseline_score)
         candidate_summary = _summarize_holdout_rows(candidate_rows, optimized_score)
         blocking_failures = [
@@ -2722,6 +2917,14 @@ def optimize_rlm(
             and len(paired_regressions) == 0
         )
         saved = eligible or force
+        if progress is not None:
+            progress.emit(
+                "saving_artifact",
+                "Verifying holdout promotion gate",
+                baseline_score=baseline_score,
+                best_score=optimized_score,
+                message="Saved" if saved else "Discarded by holdout gate",
+            )
         if saved:
             _save_program(compiled, target_path)
 
@@ -2731,9 +2934,13 @@ def optimize_rlm(
             "target": "rlm",
             "program_kind": program_kind,
             "instructions_changed": instructions_changed,
+            "baseline_instructions": baseline_instructions,
+            "optimized_instructions": optimized_instructions,
             "eligible": eligible,
             "saved": saved,
             "force": force,
+            "mlflow_run_id": mlflow_run_id,
+            "mlflow_experiment": settings.mlflow_experiment if mlflow_active else None,
             "holdout_repeats": holdout_repeats,
             "disable_cache": disable_cache,
             "budget": {
@@ -2813,6 +3020,16 @@ def optimize_rlm(
             if saved:
                 tracking.log_artifact(str(target_path))
 
+    if progress is not None:
+        progress.emit(
+            "completed",
+            "Optimization complete",
+            status="completed",
+            baseline_score=baseline_score,
+            best_score=optimized_score,
+            message="Artifact saved" if saved else "Discarded by holdout gate",
+        )
+
     return OptimizationResult(
         target="rlm",
         output_path=target_path,
@@ -2822,6 +3039,7 @@ def optimize_rlm(
         train_size=len(trainset),
         holdout_size=len(holdout),
         val_size=len(valset),
+        mlflow_run_id=mlflow_run_id,
         report=report,
     )
 
@@ -3041,6 +3259,7 @@ def _run_reanchor(
     log_dir: Path | None,
     require_cache: bool,
     force: bool = False,
+    progress: _ProgressEmitter | None = None,
 ) -> OptimizationResult:
     guard_database_url(database_url, settings, allow_direct=allow_direct)
 
@@ -3060,14 +3279,42 @@ def _run_reanchor(
     else:
         trainset, holdout = list(examples), None
 
+    progress_active = progress is not None and progress.enabled
     decision_lm = dspy.LM(settings.decision_model)
+    reanchor_lock = threading.Lock()
+    reanchor_calls = 0
+
+    def tracked_metric(gold: dspy.Example, pred: Any, trace: Any = None) -> float:
+        nonlocal reanchor_calls
+        score = float(metric(gold, pred, trace))
+        if progress is not None and progress.enabled:
+            with reanchor_lock:
+                reanchor_calls += 1
+                calls = reanchor_calls
+            if calls == 1 or calls % 10 == 0:
+                progress.emit(
+                    "reanchor_cv",
+                    "Calibrating thresholds & Choice weights via ReAnchor CV",
+                    completed=calls,
+                    total=None,
+                )
+        return score
+
+    mlflow_run_id: str | None = None
     with (
         _mlflow_tracking(settings, target) as mlflow_active,
         dspy.context(lm=decision_lm),
     ):
+        mlflow_run_id = _active_mlflow_run_id()
         baseline_predictor = predictor.deepcopy()
+        if progress is not None and progress.enabled:
+            progress.emit(
+                "reanchor_cv",
+                "Calibrating thresholds & Choice weights via ReAnchor CV",
+                message=f"train={len(trainset)} holdout={len(holdout) if holdout else 0}",
+            )
         reanchor = ReAnchor(
-            metric,
+            tracked_metric if progress_active else metric,
             num_threads=num_threads,
             log_dir=log_dir,
             require_cache=require_cache,
@@ -3087,6 +3334,17 @@ def _run_reanchor(
         diag_before: dict[str, float] = {}
         diag_after: dict[str, float] = {}
         if holdout and isinstance(decision_lm, dspy.BaseLM):
+            if progress is not None:
+                progress.emit(
+                    "holdout_eval",
+                    "Evaluating FP/FN diagnostics on holdout",
+                    baseline_score=float(baseline_score)
+                    if isinstance(baseline_score, (int, float))
+                    else None,
+                    best_score=float(optimized_score)
+                    if isinstance(optimized_score, (int, float))
+                    else None,
+                )
             eval_fn = (
                 _evaluate_skill_diagnostics if target == "skills" else _evaluate_memory_diagnostics
             )
@@ -3112,19 +3370,44 @@ def _run_reanchor(
             else fp_rate_after <= fp_rate_before
         )
         saved = bool((fitted_changed and score_improved and fp_non_regressing) or force)
+        if progress is not None:
+            progress.emit(
+                "saving_artifact",
+                "Verifying ReAnchor save gate",
+                baseline_score=float(baseline_score)
+                if isinstance(baseline_score, (int, float))
+                else None,
+                best_score=float(optimized_score)
+                if isinstance(optimized_score, (int, float))
+                else None,
+                message="Saved" if saved else "Discarded by save gate",
+            )
         if saved:
             _save_program(compiled, output_path)
 
         jev_metadata = _fetch_jev_metadata(settings.decision_model, decision_lm)
+        resolved_model = str(jev_metadata.get("resolved_model") or "").strip()
+        if (
+            resolved_model
+            and settings.decision_model.startswith("typesafe:")
+            and ":" not in resolved_model
+        ):
+            resolved_decision_model = f"typesafe:{resolved_model}"
+        else:
+            resolved_decision_model = resolved_model or settings.decision_model
         report.update(
             {
                 "fitted_changed": fitted_changed,
                 "fitted_fields": fitted_fields,
+                "fitted_parameters": _extract_reanchor_parameters(compiled),
                 "fp_rate_before": fp_rate_before,
                 "fp_rate_after": fp_rate_after,
                 "diagnostics_before": diag_before,
                 "diagnostics_after": diag_after,
                 "decision_model_metadata": jev_metadata,
+                "resolved_decision_model": resolved_decision_model,
+                "mlflow_run_id": mlflow_run_id,
+                "mlflow_experiment": settings.mlflow_experiment if mlflow_active else None,
                 "saved": saved,
                 "force": force,
             }
@@ -3170,6 +3453,20 @@ def _run_reanchor(
             if saved:
                 tracking.log_artifact(str(output_path))
 
+    if progress is not None:
+        progress.emit(
+            "completed",
+            "Optimization complete",
+            status="completed",
+            baseline_score=float(baseline_score)
+            if isinstance(baseline_score, (int, float))
+            else None,
+            best_score=float(optimized_score)
+            if isinstance(optimized_score, (int, float))
+            else None,
+            message="Artifact saved" if saved else "Discarded by save gate",
+        )
+
     return OptimizationResult(
         target=target,
         output_path=output_path,
@@ -3180,7 +3477,8 @@ def _run_reanchor(
         ),
         train_size=len(trainset),
         holdout_size=len(holdout) if holdout else 0,
-        reminder=_pin_reminder(env_var, output_path, settings.decision_model),
+        reminder=_pin_reminder(env_var, output_path, resolved_decision_model),
+        mlflow_run_id=mlflow_run_id,
         report=report,
     )
 
@@ -3198,8 +3496,11 @@ def optimize_skills(
     log_dir: Path | None = None,
     require_cache: bool = True,
     force: bool = False,
+    progress: _ProgressEmitter | None = None,
 ) -> OptimizationResult:
     """Calibrate SkillSelector thresholds and Choice weights via 5-fold ReAnchor CV."""
+    if progress is not None:
+        progress.emit("loading_dataset", "Loading labeled Skill Selector dataset")
     registry = skills.SkillRegistry.load(
         settings.skills_dir, fallback_to_bundled=True
     ).with_installed(settings.skills_dir)
@@ -3227,6 +3528,7 @@ def optimize_skills(
         log_dir=log_dir,
         require_cache=require_cache,
         force=force,
+        progress=progress,
     )
 
 
@@ -3243,8 +3545,11 @@ def optimize_memory(
     log_dir: Path | None = None,
     require_cache: bool = True,
     force: bool = False,
+    progress: _ProgressEmitter | None = None,
 ) -> OptimizationResult:
     """Calibrate MemoryGate thresholds and choice weights via 5-fold ReAnchor CV."""
+    if progress is not None:
+        progress.emit("loading_dataset", "Loading labeled Memory Gate dataset")
     examples = load_memory_dataset(dataset)
     if not examples:
         raise ValueError(f"No memory examples found in {dataset}")
@@ -3264,6 +3569,7 @@ def optimize_memory(
         log_dir=log_dir,
         require_cache=require_cache,
         force=force,
+        progress=progress,
     )
 
 
@@ -3393,6 +3699,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional directory for GEPA / ReAnchor logs and reports.",
     )
+    parser.add_argument(
+        "--progress-file",
+        type=Path,
+        default=None,
+        help="Optional JSONL path for structured live progress updates.",
+    )
+    parser.add_argument(
+        "--report-file",
+        type=Path,
+        default=None,
+        help="Optional JSON path for structured OptimizationResult output.",
+    )
     return parser
 
 
@@ -3411,7 +3729,18 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
             file=sys.stderr,
         )
 
+    progress = _ProgressEmitter(args.progress_file)
     resolved_settings = settings or Settings.model_validate({})
+
+    prev_sigterm = None
+    if threading.current_thread() is threading.main_thread():
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def _handle_sigterm(_signum: int, _frame: Any) -> None:
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+
     try:
         guard_database_url(args.database_url, resolved_settings, allow_direct=args.allow_direct)
         if args.target == "rlm":
@@ -3437,6 +3766,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 allow_direct=args.allow_direct,
                 local_interpreter=args.local_interpreter,
                 log_dir=args.log_dir,
+                progress=progress,
             )
         elif args.target == "skills":
             train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
@@ -3451,6 +3781,7 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 allow_direct=args.allow_direct,
                 log_dir=args.log_dir,
                 force=args.force,
+                progress=progress,
             )
         else:
             train_ratio = 0.7 if args.train_ratio is None else args.train_ratio
@@ -3465,10 +3796,27 @@ def main(argv: Sequence[str] | None = None, *, settings: Settings | None = None)
                 allow_direct=args.allow_direct,
                 log_dir=args.log_dir,
                 force=args.force,
+                progress=progress,
             )
     except DatabaseSafetyError as error:
+        progress.emit("failed", "Database safety check failed", status="failed", message=str(error))
         print(f"Error: {error}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        progress.emit("cancelled", "Optimization cancelled", status="cancelled")
+        print("Optimization cancelled", file=sys.stderr)
+        return 130
+    except Exception as error:
+        progress.emit("failed", "Optimization failed", status="failed", message=str(error))
+        raise
+    finally:
+        if prev_sigterm is not None and threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, prev_sigterm)
+
+    if args.report_file is not None:
+        payload = asdict(result)
+        payload["output_path"] = str(result.output_path)
+        _write_json_atomic(args.report_file, payload)
 
     status = f"saved to {result.output_path}" if result.saved else "discarded (gate rejected)"
     val_segment = f" val={result.val_size}" if result.val_size else ""

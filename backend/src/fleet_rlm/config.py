@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     skill_selector_path: Path | None = None
     memory_gate_path: Path | None = None
 
+    optimization_database_url: SecretStr | None = Field(default=None, repr=False)
+    neon_api_key: SecretStr | None = Field(default=None, repr=False)
+    neon_project_id: str | None = None
+    neon_parent_branch_id: str | None = None
+    optimization_stale_timeout_seconds: int = Field(default=3600, ge=60, le=86_400)
+    eval_datasets_dir: Path = Path("eval_datasets")
+    artifact_cache_dir: Path | None = None
+
     mlflow_tracking_uri: str | None = None
     mlflow_experiment: str = "fleet-rlm"
 
@@ -75,3 +83,17 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+psycopg://"):
             raise ValueError("Expected a PostgreSQL URL using psycopg")
         return value
+
+    @field_validator("optimization_database_url")
+    @classmethod
+    def use_psycopg_optional(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        raw = value.get_secret_value().strip()
+        if not raw:
+            return None
+        if raw.startswith("postgresql://"):
+            return SecretStr(raw.replace("postgresql://", "postgresql+psycopg://", 1))
+        if not raw.startswith("postgresql+psycopg://"):
+            raise ValueError("Expected a PostgreSQL URL using psycopg")
+        return SecretStr(raw)

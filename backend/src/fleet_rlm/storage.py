@@ -89,6 +89,26 @@ class ObjectStorage:
     def new_key(cls, session_id: UUID) -> str:
         return f"{cls.prefix(session_id)}{uuid4().hex}"
 
+    @staticmethod
+    def optimization_artifact_key(job_id: UUID, target: str) -> str:
+        return f"optimizations/artifacts/{job_id}/{target}.json"
+
+    @staticmethod
+    def optimization_dataset_key(dataset_id: UUID) -> str:
+        return f"optimizations/datasets/{dataset_id}.jsonl"
+
+    async def put_object(self, key: str, path: Path) -> tuple[str, int]:
+        """Upload and SHA-256 verify a non-session object without a cleanup lease callback."""
+
+        async def _noop_register(_upload_id: str) -> None:
+            return None
+
+        return await self.put(key, path, register=_noop_register)
+
+    async def delete_object(self, key: str) -> None:
+        """Delete a single object from the workspace bucket."""
+        await _transfer(lambda: self._client.delete_object(Bucket=self.bucket, Key=key))
+
     async def put(
         self, key: str, path: Path, *, register: Callable[[str], Awaitable[None]]
     ) -> tuple[str, int]:

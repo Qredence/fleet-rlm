@@ -9,11 +9,14 @@ from uuid import UUID
 from sqlalchemy import (
     CHAR,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Computed,
     DateTime,
+    Float,
     ForeignKey,
     Index,
+    Integer,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -42,6 +45,10 @@ from fleet_rlm.config import Settings
 
 _ROOT_LOCK_INDEX = "uq_runs_one_running_root_per_session"
 _RUNNING_ROOT = text("parent_run_id IS NULL AND status = 'running'")
+_OPT_JOB_LOCK_INDEX = "uq_optimization_jobs_one_active_per_target"
+_ACTIVE_OPT_JOB = text("status IN ('queued', 'running')")
+_OPT_PROMOTION_LOCK_INDEX = "uq_optimization_promotions_one_active_per_target"
+_ACTIVE_OPT_PROMOTION = text("active = true")
 _UPLOAD_LEASE = timedelta(minutes=5)
 
 
@@ -190,6 +197,126 @@ class WorkspaceSettings(Base):
     )
 
 
+type OptimizationTarget = Literal["rlm", "skills", "memory"]
+type OptimizationDatasetSource = Literal["builtin", "custom", "db"]
+type OptimizationJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+
+
+class OptimizationDataset(Base):
+    __tablename__ = "optimization_datasets"
+    __table_args__ = (
+        CheckConstraint(
+            "target IN ('rlm', 'skills', 'memory')", name="ck_optimization_datasets_target"
+        ),
+        UniqueConstraint("name", name="uq_optimization_datasets_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
+    name: Mapped[str] = mapped_column(Text)
+    target: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(CHAR(64))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    row_count: Mapped[int] = mapped_column(Integer)
+    summary_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OptimizationJob(Base):
+    __tablename__ = "optimization_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "target IN ('rlm', 'skills', 'memory')", name="ck_optimization_jobs_target"
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_optimization_jobs_status",
+        ),
+        CheckConstraint(
+            "dataset_source IN ('builtin', 'custom', 'db')",
+            name="ck_optimization_jobs_dataset_source",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
+    target: Mapped[str] = mapped_column(Text)
+    program_kind: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
+    stage: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
+    dataset_source: Mapped[str] = mapped_column(Text)
+    dataset_name: Mapped[str | None] = mapped_column(Text)
+    dataset_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("optimization_datasets.id", ondelete="SET NULL")
+    )
+    config_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    progress_json: Mapped[JsonObject] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    report_json: Mapped[JsonObject | None] = mapped_column(JSONB)
+    log_tail: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    saved: Mapped[bool | None] = mapped_column(Boolean)
+    baseline_score: Mapped[float | None] = mapped_column(Float)
+    optimized_score: Mapped[float | None] = mapped_column(Float)
+    train_size: Mapped[int | None] = mapped_column(Integer)
+    val_size: Mapped[int | None] = mapped_column(Integer)
+    holdout_size: Mapped[int | None] = mapped_column(Integer)
+    artifact_object_key: Mapped[str | None] = mapped_column(Text)
+    artifact_sha256: Mapped[str | None] = mapped_column(CHAR(64))
+    artifact_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    resolved_decision_model: Mapped[str | None] = mapped_column(Text)
+    mlflow_run_id: Mapped[str | None] = mapped_column(Text)
+    mlflow_experiment: Mapped[str | None] = mapped_column(Text)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+Index(_OPT_JOB_LOCK_INDEX, OptimizationJob.target, unique=True, postgresql_where=_ACTIVE_OPT_JOB)
+Index("idx_optimization_jobs_created", OptimizationJob.created_at.desc(), OptimizationJob.id.desc())
+Index(
+    "idx_optimization_jobs_target_created",
+    OptimizationJob.target,
+    OptimizationJob.created_at.desc(),
+    OptimizationJob.id.desc(),
+)
+
+
+class OptimizationPromotion(Base):
+    __tablename__ = "optimization_promotions"
+    __table_args__ = (
+        CheckConstraint(
+            "target IN ('rlm', 'skills', 'memory')", name="ck_optimization_promotions_target"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuidv7()"))
+    target: Mapped[str] = mapped_column(Text)
+    job_id: Mapped[UUID] = mapped_column(ForeignKey("optimization_jobs.id", ondelete="RESTRICT"))
+    artifact_object_key: Mapped[str] = mapped_column(Text)
+    artifact_sha256: Mapped[str] = mapped_column(CHAR(64))
+    artifact_size_bytes: Mapped[int] = mapped_column(BigInteger)
+    resolved_decision_model: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    promoted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+Index(
+    _OPT_PROMOTION_LOCK_INDEX,
+    OptimizationPromotion.target,
+    unique=True,
+    postgresql_where=_ACTIVE_OPT_PROMOTION,
+)
+Index(
+    "idx_optimization_promotions_target_promoted",
+    OptimizationPromotion.target,
+    OptimizationPromotion.promoted_at.desc(),
+    OptimizationPromotion.id.desc(),
+)
+
+
 class SessionNotFoundError(LookupError):
     pass
 
@@ -199,6 +326,10 @@ class TurnConflictError(RuntimeError):
 
 
 class UploadConflictError(TurnConflictError):
+    pass
+
+
+class OptimizationConflictError(RuntimeError):
     pass
 
 
@@ -941,3 +1072,373 @@ async def reset_workspace_settings_overrides(db: SessionFactory) -> dict[str, An
     async with db.begin() as connection:
         await connection.execute(statement)
     return {}
+
+
+async def create_optimization_dataset(
+    db: SessionFactory,
+    *,
+    name: str,
+    target: OptimizationTarget,
+    object_key: str,
+    sha256: str,
+    size_bytes: int,
+    row_count: int,
+    summary_json: JsonObject,
+    dataset_id: UUID | None = None,
+) -> OptimizationDataset:
+    async with db.begin() as connection:
+        record = OptimizationDataset(
+            **({"id": dataset_id} if dataset_id is not None else {}),
+            name=name,
+            target=target,
+            object_key=object_key,
+            sha256=sha256,
+            size_bytes=size_bytes,
+            row_count=row_count,
+            summary_json=summary_json,
+        )
+        connection.add(record)
+    return record
+
+
+async def list_optimization_datasets(db: SessionFactory) -> list[OptimizationDataset]:
+    async with db() as connection:
+        rows = await connection.scalars(
+            select(OptimizationDataset).order_by(
+                OptimizationDataset.created_at.desc(), OptimizationDataset.id.desc()
+            )
+        )
+        return list(rows)
+
+
+async def get_optimization_dataset(
+    db: SessionFactory, dataset_id: UUID
+) -> OptimizationDataset | None:
+    async with db() as connection:
+        return await connection.get(OptimizationDataset, dataset_id)
+
+
+async def delete_optimization_dataset(
+    db: SessionFactory, dataset_id: UUID
+) -> OptimizationDataset | None:
+    async with db.begin() as connection:
+        record = await connection.get(OptimizationDataset, dataset_id, with_for_update=True)
+        if record is None:
+            return None
+        active_ref = await connection.scalar(
+            select(OptimizationJob.id).where(
+                OptimizationJob.dataset_id == dataset_id,
+                OptimizationJob.status.in_(("queued", "running")),
+            )
+        )
+        if active_ref is not None:
+            raise OptimizationConflictError("Dataset is currently in use by an active job")
+        await connection.delete(record)
+        return record
+
+
+async def create_optimization_job(
+    db: SessionFactory,
+    *,
+    target: OptimizationTarget,
+    program_kind: str | None,
+    dataset_source: OptimizationDatasetSource,
+    dataset_name: str | None,
+    dataset_id: UUID | None,
+    config_json: JsonObject,
+    mlflow_experiment: str | None,
+) -> OptimizationJob:
+    try:
+        async with db.begin() as connection:
+            job = OptimizationJob(
+                target=target,
+                program_kind=program_kind,
+                status="queued",
+                stage="queued",
+                dataset_source=dataset_source,
+                dataset_name=dataset_name,
+                dataset_id=dataset_id,
+                config_json=config_json,
+                progress_json={},
+                mlflow_experiment=mlflow_experiment,
+            )
+            connection.add(job)
+        return job
+    except IntegrityError as exc:
+        if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) == _OPT_JOB_LOCK_INDEX:
+            raise OptimizationConflictError(
+                f"Target '{target}' already has an active optimization job"
+            ) from exc
+        raise
+
+
+async def update_optimization_job_progress(
+    db: SessionFactory,
+    job_id: UUID,
+    *,
+    status: Literal["queued", "running"] | None = None,
+    stage: str | None = None,
+    progress_json: JsonObject | None = None,
+    log_tail: str | None = None,
+    started_at: datetime | None = None,
+) -> OptimizationJob | None:
+    values: dict[str, Any] = {}
+    if status is not None:
+        values["status"] = status
+    if stage is not None:
+        values["stage"] = stage
+    if progress_json is not None:
+        values["progress_json"] = progress_json
+    if log_tail is not None:
+        values["log_tail"] = log_tail
+    if started_at is not None:
+        values["started_at"] = started_at
+    if not values:
+        return await get_optimization_job(db, job_id)
+    async with db.begin() as connection:
+        return await connection.scalar(
+            update(OptimizationJob)
+            .where(
+                OptimizationJob.id == job_id,
+                OptimizationJob.status.in_(("queued", "running")),
+            )
+            .values(**values)
+            .returning(OptimizationJob)
+        )
+
+
+async def finish_optimization_job(
+    db: SessionFactory,
+    job_id: UUID,
+    *,
+    status: TerminalStatus,
+    stage: str,
+    saved: bool | None = None,
+    baseline_score: float | None = None,
+    optimized_score: float | None = None,
+    train_size: int | None = None,
+    val_size: int | None = None,
+    holdout_size: int | None = None,
+    progress_json: JsonObject | None = None,
+    report_json: JsonObject | None = None,
+    log_tail: str | None = None,
+    artifact_object_key: str | None = None,
+    artifact_sha256: str | None = None,
+    artifact_size_bytes: int | None = None,
+    resolved_decision_model: str | None = None,
+    mlflow_run_id: str | None = None,
+    mlflow_experiment: str | None = None,
+    error: str | None = None,
+) -> OptimizationJob | None:
+    values: dict[str, Any] = {
+        "status": status,
+        "stage": stage,
+        "finished_at": func.now(),
+    }
+    if saved is not None:
+        values["saved"] = saved
+    if baseline_score is not None:
+        values["baseline_score"] = baseline_score
+    if optimized_score is not None:
+        values["optimized_score"] = optimized_score
+    if train_size is not None:
+        values["train_size"] = train_size
+    if val_size is not None:
+        values["val_size"] = val_size
+    if holdout_size is not None:
+        values["holdout_size"] = holdout_size
+    if progress_json is not None:
+        values["progress_json"] = progress_json
+    if report_json is not None:
+        values["report_json"] = report_json
+    if log_tail is not None:
+        values["log_tail"] = log_tail
+    if artifact_object_key is not None:
+        values["artifact_object_key"] = artifact_object_key
+    if artifact_sha256 is not None:
+        values["artifact_sha256"] = artifact_sha256
+    if artifact_size_bytes is not None:
+        values["artifact_size_bytes"] = artifact_size_bytes
+    if resolved_decision_model is not None:
+        values["resolved_decision_model"] = resolved_decision_model
+    if mlflow_run_id is not None:
+        values["mlflow_run_id"] = mlflow_run_id
+    if mlflow_experiment is not None:
+        values["mlflow_experiment"] = mlflow_experiment
+    if error is not None:
+        values["error"] = error
+    async with db.begin() as connection:
+        return await connection.scalar(
+            update(OptimizationJob)
+            .where(
+                OptimizationJob.id == job_id,
+                OptimizationJob.status.in_(("queued", "running")),
+            )
+            .values(**values)
+            .returning(OptimizationJob)
+        )
+
+
+async def request_optimization_job_cancel(
+    db: SessionFactory, job_id: UUID
+) -> OptimizationJob | None:
+    async with db.begin() as connection:
+        job = await connection.get(OptimizationJob, job_id, with_for_update=True)
+        if job is None:
+            return None
+        if job.status in ("queued", "running"):
+            job.cancel_requested = True
+            if job.status == "queued":
+                job.stage = "cancelling"
+        return job
+
+
+async def is_optimization_job_cancel_requested(db: SessionFactory, job_id: UUID) -> bool:
+    async with db() as connection:
+        flag = await connection.scalar(
+            select(OptimizationJob.cancel_requested).where(OptimizationJob.id == job_id)
+        )
+        return bool(flag)
+
+
+async def reap_stale_optimization_jobs(db: SessionFactory, timeout_seconds: int) -> int:
+    cutoff = datetime.now(UTC) - timedelta(seconds=timeout_seconds)
+    async with db.begin() as connection:
+        if connection is None:
+            return 0
+        result = await connection.execute(
+            update(OptimizationJob)
+            .where(
+                OptimizationJob.status.in_(("queued", "running")),
+                func.coalesce(OptimizationJob.started_at, OptimizationJob.created_at) < cutoff,
+            )
+            .values(
+                status="failed",
+                stage="failed",
+                error="Optimization job timed out or worker restarted",
+                finished_at=func.now(),
+            )
+        )
+        return max(getattr(result, "rowcount", 0) or 0, 0)
+
+
+async def list_optimization_jobs(
+    db: SessionFactory,
+    *,
+    target: OptimizationTarget | None = None,
+    status: OptimizationJobStatus | None = None,
+    limit: int = 50,
+) -> list[OptimizationJob]:
+    async with db() as connection:
+        query = select(OptimizationJob)
+        if target is not None:
+            query = query.where(OptimizationJob.target == target)
+        if status is not None:
+            query = query.where(OptimizationJob.status == status)
+        rows = await connection.scalars(
+            query.order_by(OptimizationJob.created_at.desc(), OptimizationJob.id.desc()).limit(
+                limit
+            )
+        )
+        return list(rows)
+
+
+async def get_optimization_job(db: SessionFactory, job_id: UUID) -> OptimizationJob | None:
+    async with db() as connection:
+        return await connection.get(OptimizationJob, job_id)
+
+
+async def promote_optimization_artifact(
+    db: SessionFactory,
+    *,
+    target: OptimizationTarget,
+    job_id: UUID,
+    artifact_object_key: str,
+    artifact_sha256: str,
+    artifact_size_bytes: int,
+    resolved_decision_model: str | None,
+) -> OptimizationPromotion:
+    async with db.begin() as connection:
+        await connection.execute(
+            update(OptimizationPromotion)
+            .where(
+                OptimizationPromotion.target == target,
+                OptimizationPromotion.active.is_(True),
+            )
+            .values(active=False, rolled_back_at=func.now())
+        )
+        await connection.flush()
+        promotion = OptimizationPromotion(
+            target=target,
+            job_id=job_id,
+            artifact_object_key=artifact_object_key,
+            artifact_sha256=artifact_sha256,
+            artifact_size_bytes=artifact_size_bytes,
+            resolved_decision_model=resolved_decision_model,
+            active=True,
+        )
+        connection.add(promotion)
+        return promotion
+
+
+async def rollback_optimization_target(
+    db: SessionFactory,
+    target: OptimizationTarget,
+    *,
+    mode: Literal["previous", "env"] = "previous",
+) -> OptimizationPromotion | None:
+    async with db.begin() as connection:
+        current = await connection.scalar(
+            select(OptimizationPromotion)
+            .where(
+                OptimizationPromotion.target == target,
+                OptimizationPromotion.active.is_(True),
+            )
+            .with_for_update()
+        )
+        if current is None:
+            return None
+        current.active = False
+        current.rolled_back_at = func.now()
+        await connection.flush()
+        if mode != "previous":
+            return None
+        previous = await connection.scalar(
+            select(OptimizationPromotion)
+            .where(
+                OptimizationPromotion.target == target,
+                OptimizationPromotion.id != current.id,
+                OptimizationPromotion.active.is_(False),
+            )
+            .order_by(OptimizationPromotion.promoted_at.desc(), OptimizationPromotion.id.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if previous is None:
+            return None
+        previous.active = True
+        previous.rolled_back_at = None
+        return previous
+
+
+async def list_active_optimization_promotions(
+    db: SessionFactory,
+) -> dict[str, OptimizationPromotion]:
+    async with db() as connection:
+        rows = await connection.scalars(
+            select(OptimizationPromotion).where(OptimizationPromotion.active.is_(True))
+        )
+        return {row.target: row for row in rows}
+
+
+async def list_target_promotion_history(
+    db: SessionFactory, target: OptimizationTarget, limit: int = 10
+) -> list[OptimizationPromotion]:
+    async with db() as connection:
+        rows = await connection.scalars(
+            select(OptimizationPromotion)
+            .where(OptimizationPromotion.target == target)
+            .order_by(OptimizationPromotion.promoted_at.desc(), OptimizationPromotion.id.desc())
+            .limit(limit)
+        )
+        return list(rows)
