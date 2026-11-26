@@ -1415,6 +1415,22 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     assert terminate_calls == 1
     assert mem_store.jobs[UUID(job_id)].status == "cancelled"
 
+    proc_started.clear()
+    shutdown_job = await client.post(
+        "/api/optimizations/jobs",
+        headers=_AUTH,
+        json={"target": "skills", "branch_mode": "configured_branch"},
+    )
+    shutdown_job.raise_for_status()
+    shutdown_id = UUID(shutdown_job.json()["id"])
+    await asyncio.wait_for(proc_started.wait(), timeout=2.0)
+    runtime = api.app.state.runtime
+    await opt_runner.shutdown_optimization_runtime(runtime)
+    assert mem_store.jobs[shutdown_id].status == "cancelled"
+    assert terminate_calls == 2
+    assert not runtime.optimization_tasks and not runtime.optimization_procs
+    assert not runtime.optimization_cancel_events
+
     # 2. Pre-spawn cancellation: cancel requested BEFORE supervisor starts -> no branch/subprocess!
     branch_spy = AsyncMock(return_value=("br-should-not-run", "postgresql://u:p@h/db"))
     exec_spy = AsyncMock()
