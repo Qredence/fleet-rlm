@@ -1,3 +1,4 @@
+import { asRecord, buildModelsProvenance, parseGateChecks } from './optimization-report'
 import { formatScore, holdoutPoints } from './holdout-score'
 import {
   AlertTriangle,
@@ -44,20 +45,6 @@ import {
 import { fontWeights } from '@/lib/font-weight'
 import { typeClass } from '@/lib/type-scale'
 
-interface GateCheckItem {
-  name: string
-  label: string
-  passed: boolean
-  reason: string
-}
-
-interface ProvenanceModel {
-  role: string
-  model: string
-  providerName: string | null
-  dialect: string | null
-}
-
 function formatRate(value: unknown): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return `${(value * 100).toFixed(1)}%`
@@ -73,136 +60,6 @@ function formatTimestamp(iso: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function buildGateChecklist(
-  job: OptimizationJobDetail,
-  report: Record<string, unknown> | null,
-): GateCheckItem[] {
-  const raw = report?.gate_checks
-  if (Array.isArray(raw) && raw.length > 0) {
-    return raw.flatMap((item): GateCheckItem[] => {
-      const rec = asRecord(item)
-      if (!rec) return []
-      return [
-        {
-          name: typeof rec.name === 'string' ? rec.name : 'gate',
-          label: typeof rec.label === 'string' ? rec.label : String(rec.name ?? 'Gate check'),
-          passed: rec.passed === true,
-          reason: typeof rec.reason === 'string' ? rec.reason : '',
-        },
-      ]
-    })
-  }
-
-  if (job.status !== 'completed') return []
-  const items: GateCheckItem[] = []
-  if (job.baseline_score !== null && job.optimized_score !== null) {
-    const improved = job.optimized_score > job.baseline_score
-    items.push({
-      name: 'holdout_score_improved',
-      label: 'Holdout score improved over baseline',
-      passed: improved,
-      reason: improved
-        ? `${formatScore(job.baseline_score, job.target)} → ${formatScore(job.optimized_score, job.target)}`
-        : `${formatScore(job.optimized_score, job.target)} did not exceed ${formatScore(job.baseline_score, job.target)}`,
-    })
-  }
-  if (job.target !== 'rlm') {
-    const fpBefore = typeof report?.fp_rate_before === 'number' ? report.fp_rate_before : null
-    const fpAfter = typeof report?.fp_rate_after === 'number' ? report.fp_rate_after : null
-    if (fpBefore !== null && fpAfter !== null) {
-      items.push({
-        name: 'fp_rate_non_regression',
-        label: 'False-positive rate did not regress',
-        passed: fpAfter <= fpBefore,
-        reason: `${formatRate(fpBefore)} → ${formatRate(fpAfter)}`,
-      })
-    }
-  } else {
-    const blocking = Array.isArray(report?.blocking_failures) ? report.blocking_failures.length : null
-    const reg = Array.isArray(report?.paired_regressions) ? report.paired_regressions.length : null
-    if (blocking !== null) {
-      items.push({
-        name: 'zero_blocking_failures',
-        label: 'Zero blocking case failures',
-        passed: blocking === 0,
-        reason: blocking === 0 ? 'All blocking cases passed' : `${blocking} blocking failure(s)`,
-      })
-    }
-    if (reg !== null) {
-      items.push({
-        name: 'zero_paired_regressions',
-        label: 'Zero paired case regressions',
-        passed: reg === 0,
-        reason: reg === 0 ? 'No case regressions' : `${reg} paired regression(s)`,
-      })
-    }
-  }
-  return items
-}
-
-function buildModelsProvenance(
-  job: OptimizationJobDetail,
-  report: Record<string, unknown> | null,
-): ProvenanceModel[] {
-  const modelsRec = asRecord(report?.models)
-  const roles: Array<[string, string]> = [
-    ['root_lm', 'Root LM'],
-    ['sub_lm', 'Sub LM'],
-    ['reflection_lm', 'Reflection LM'],
-    ['judge_lm', 'Judge LM'],
-    ['decision_lm', 'Decision LM'],
-  ]
-  const rows: ProvenanceModel[] = []
-  if (modelsRec) {
-    for (const [key, label] of roles) {
-      const entry = asRecord(modelsRec[key])
-      if (!entry || typeof entry.model !== 'string' || !entry.model) continue
-      rows.push({
-        role: label,
-        model: entry.model,
-        providerName: typeof entry.provider_name === 'string' ? entry.provider_name : null,
-        dialect: typeof entry.dialect === 'string' ? entry.dialect : null,
-      })
-    }
-  }
-  if (rows.length === 0) {
-    // Fallback to config_json provenance or resolved_decision_model.
-    const cfg = asRecord(job.config_json)
-    for (const [key, label] of [
-      ['root_lm', 'Root LM'],
-      ['reflection_lm_config', 'Reflection LM'],
-      ['decision_lm', 'Decision LM'],
-    ] as const) {
-      const entry = asRecord(cfg?.[key])
-      const model = typeof entry?.model === 'string' ? entry.model : null
-      const providerName = typeof entry?.provider_name === 'string' ? entry.provider_name : null
-      if (model || providerName) {
-        rows.push({
-          role: label,
-          model: model ?? 'Provider default',
-          providerName,
-          dialect: typeof entry?.dialect === 'string' ? entry.dialect : null,
-        })
-      }
-    }
-  }
-  if (rows.length === 0 && job.resolved_decision_model) {
-    rows.push({
-      role: 'Decision LM',
-      model: job.resolved_decision_model,
-      providerName: null,
-      dialect: null,
-    })
-  }
-  return rows
 }
 
 export function RunInspectorPanel({
@@ -233,12 +90,12 @@ export function RunInspectorPanel({
 
   const report = useMemo(() => asRecord(job?.report_json), [job?.report_json])
   const gateChecklist = useMemo(
-    () => (job ? buildGateChecklist(job, report) : []),
-    [job, report],
+    () => (job ? parseGateChecks(job) : []),
+    [job],
   )
   const provenanceModels = useMemo(
-    () => (job ? buildModelsProvenance(job, report) : []),
-    [job, report],
+    () => (job ? buildModelsProvenance(job) : []),
+    [job],
   )
 
   if (!job && loading) {

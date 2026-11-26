@@ -1,3 +1,4 @@
+import { asNumber, asRecord, buildModelsProvenance, parseGateChecks } from './optimization-report'
 import { formatScore as formatHoldoutScore, holdoutPoints } from './holdout-score'
 import {
   ArrowUpRight,
@@ -34,15 +35,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { OptimizationJobDetail, OptimizationStageTimelineEntry } from '@/lib/api'
 import { fontWeights } from '@/lib/font-weight'
 import { typeClass } from '@/lib/type-scale'
-
-export interface GateCheckRow {
-  name: string
-  label: string
-  passed: boolean
-  actual: unknown
-  threshold: unknown
-  reason: string
-}
 
 interface ParameterDiffRow {
   gate: string
@@ -100,16 +92,6 @@ const SHEET_TABS = {
   logs: 3,
 } as const
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
 function formatScore(value: number | null | undefined, isRlmHundredScale = false): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   const pct = isRlmHundredScale && value > 1.0001 ? value : value * 100
@@ -141,95 +123,6 @@ function formatDuration(seconds: number | null | undefined): string {
   const mins = Math.floor(seconds / 60)
   const rem = Math.round(seconds % 60)
   return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`
-}
-
-function parseGateChecks(job: OptimizationJobDetail): GateCheckRow[] {
-  const report = asRecord(job.report_json)
-  const raw = report?.gate_checks
-  if (Array.isArray(raw) && raw.length > 0) {
-    return raw.flatMap((item): GateCheckRow[] => {
-      const rec = asRecord(item)
-      if (!rec) return []
-      return [
-        {
-          name: typeof rec.name === 'string' ? rec.name : 'gate',
-          label: typeof rec.label === 'string' ? rec.label : String(rec.name ?? 'Gate check'),
-          passed: rec.passed === true,
-          actual: rec.actual,
-          threshold: rec.threshold,
-          reason: typeof rec.reason === 'string' ? rec.reason : '',
-        },
-      ]
-    })
-  }
-
-  // Fallback for legacy runs created before explicit gate_checks telemetry.
-  if (job.status !== 'completed') return []
-  const fallback: GateCheckRow[] = []
-  if (job.baseline_score !== null && job.optimized_score !== null) {
-    const improved = job.optimized_score > job.baseline_score
-    fallback.push({
-      name: 'holdout_score_improved',
-      label: 'Holdout score improved over baseline',
-      passed: improved,
-      actual: job.optimized_score,
-      threshold: `> ${job.baseline_score.toFixed(4)}`,
-      reason: improved
-        ? `Holdout improved from ${formatHoldoutScore(job.baseline_score, job.target)} to ${formatHoldoutScore(job.optimized_score, job.target)}`
-        : `Holdout ${formatHoldoutScore(job.optimized_score, job.target)} did not beat baseline ${formatHoldoutScore(job.baseline_score, job.target)}`,
-    })
-  }
-  if (job.target !== 'rlm') {
-    const fpBefore = asNumber(report?.fp_rate_before)
-    const fpAfter = asNumber(report?.fp_rate_after)
-    if (fpBefore !== null && fpAfter !== null) {
-      const ok = fpAfter <= fpBefore
-      fallback.push({
-        name: 'fp_rate_non_regression',
-        label: 'False-positive rate did not regress',
-        passed: ok,
-        actual: fpAfter,
-        threshold: `<= ${fpBefore.toFixed(4)}`,
-        reason: ok
-          ? `FP rate ${formatScore(fpAfter)} <= baseline ${formatScore(fpBefore)}`
-          : `FP rate regressed from ${formatScore(fpBefore)} to ${formatScore(fpAfter)}`,
-      })
-    }
-  } else {
-    const blockingCount = Array.isArray(report?.blocking_failures)
-      ? report.blocking_failures.length
-      : null
-    const regCount = Array.isArray(report?.paired_regressions)
-      ? report.paired_regressions.length
-      : null
-    if (blockingCount !== null) {
-      fallback.push({
-        name: 'zero_blocking_failures',
-        label: 'Zero blocking case failures',
-        passed: blockingCount === 0,
-        actual: blockingCount,
-        threshold: 0,
-        reason:
-          blockingCount === 0
-            ? 'All blocking holdout cases passed'
-            : `${blockingCount} blocking holdout failure(s)`,
-      })
-    }
-    if (regCount !== null) {
-      fallback.push({
-        name: 'zero_paired_regressions',
-        label: 'Zero paired case regressions',
-        passed: regCount === 0,
-        actual: regCount,
-        threshold: 0,
-        reason:
-          regCount === 0
-            ? 'No holdout case pass rate regressed'
-            : `${regCount} paired regression(s) detected`,
-      })
-    }
-  }
-  return fallback
 }
 
 function parseParameterDiffs(report: Record<string, unknown> | null): ParameterDiffRow[] {
@@ -544,49 +437,6 @@ function formatMatrixDelta(
   return { text, tone: improved ? 'good' : 'bad' }
 }
 
-interface ModelProvenanceRow {
-  role: string
-  model: string
-  dialect: string | null
-  providerName: string | null
-}
-
-function extractModelsProvenance(job: OptimizationJobDetail): ModelProvenanceRow[] {
-  const report = asRecord(job.report_json)
-  const modelsRec = asRecord(report?.models)
-  const roleLabels: Array<[string, string]> = [
-    ['root_lm', 'Root LM'],
-    ['sub_lm', 'Sub LM'],
-    ['reflection_lm', 'Reflection LM'],
-    ['judge_lm', 'Judge LM'],
-    ['decision_lm', 'Decision LM'],
-  ]
-  const rows: ModelProvenanceRow[] = []
-  if (modelsRec) {
-    for (const [key, label] of roleLabels) {
-      const entry = asRecord(modelsRec[key])
-      if (!entry) continue
-      const model = typeof entry.model === 'string' ? entry.model : ''
-      if (!model) continue
-      rows.push({
-        role: label,
-        model,
-        dialect: typeof entry.dialect === 'string' ? entry.dialect : null,
-        providerName: typeof entry.provider_name === 'string' ? entry.provider_name : null,
-      })
-    }
-  }
-  if (rows.length === 0 && job.resolved_decision_model) {
-    rows.push({
-      role: 'Decision LM',
-      model: job.resolved_decision_model,
-      dialect: null,
-      providerName: null,
-    })
-  }
-  return rows
-}
-
 function PredictorDiffCard({
   name,
   diffText,
@@ -703,7 +553,7 @@ export function RunFullDiffContent({
   const caseDeltas = useMemo(() => parseCaseDeltas(report), [report])
   const timeline = useMemo(() => parseTimeline(job), [job])
   const calibrationRows = useMemo(() => buildCalibrationMatrix(job, report), [job, report])
-  const modelsProvenance = useMemo(() => extractModelsProvenance(job), [job])
+  const modelsProvenance = useMemo(() => buildModelsProvenance(job), [job])
 
   const instructionDiffs = asRecord(report?.instruction_diffs)
   const baseInstructions = asRecord(report?.baseline_instructions)
