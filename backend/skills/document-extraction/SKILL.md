@@ -1,10 +1,30 @@
 ---
 name: document-extraction
-description: Extract passages, figures, or tables with page or section citations from PDFs and text documents.
+description: Extract passages, numerical values, illustrations, or tables with page or section citations from PDFs and text documents.
 ---
 
-For PDFs, bind each passage to its physical page as you read it. Use `enumerate(reader.pages, start=1)` with `pypdf.PdfReader` and store each page number alongside its extracted text. For each figure, locate the supporting sentence or table cell in one of those records and cite that record’s number. Build the answer from the matched record. Before submitting, reopen the proposed source page and verify the reported value in its supporting sentence or cell. If the check fails, search the page records again.
+When reporting a quantity, its source is the page where the quantity can be read in context. A “figure” can mean a numerical value. A request for a count and the source page for that figure asks where the count was stated. A request for the location of an illustration asks where the illustration was drawn. Keep those questions distinct.
 
-Track pages requiring OCR separately. A page without extracted text may be blank or contain an image or vector graphics. When the request asks which pages require OCR, identify the pages and stop there. Read the visual content itself when the requested answer depends on it. PDF pages can share a resource dictionary. To locate an image on a page, check the page’s drawing operations (including invoked form objects) or render that page. An image listed in shared resources does not establish where it was drawn. An adjacent image page is evidence for a figure only if you can read the figure there. Read PDFs as binary files through the parser and print short text passages for verification. Keep raw PDF bytes and decoded binary streams out of tool output.
+For PDFs, keep the one-based physical page number attached to its evidence from extraction through submission. For a textual quantity, use a pattern that matches the requested value together with its unit or surrounding label. For example, given a compiled pattern with a named group `value`:
 
-Anchor each reported value to its page and supporting text or visible table cell. Preserve row and column associations when reconstructing tables, and reconcile totals where available. For plain text, use section names or line references that the reader can locate.
+```python
+pages = [(i, page.extract_text() or "") for i, page in enumerate(reader.pages, 1)]
+matches = [
+    (i, match.group("value"), match.group())
+    for i, text in pages
+    for match in pattern.finditer(text)
+]
+```
+
+Choose the tuple that answers the question, checking the label, date, entity and unit when relevant. If several matches remain plausible, preserve that uncertainty. Construct the final quantity and citation directly from the same tuple. In the submission cell, verify that the supporting passage occurs on the cited page:
+
+```python
+page_number, value, passage = chosen_match
+assert passage in (reader.pages[page_number - 1].extract_text() or "")
+```
+
+Use these computed variables when serializing the requested result. Avoid retyping a page number from memory. Apply the same binding to table cells and visually read values, recording the cell or visible passage on its physical page.
+
+Keep the list of pages needing OCR separate from citations. When only that list is requested, identify pages with unresolved image text and stop. PDF pages can share resources; a referenced image is located on a page by its drawing operations or by rendering the page. Use visual inspection when the answer depends on visual evidence. Keep raw bytes out of tool output.
+
+For plain text, cite the section or line that contains the supporting passage.
