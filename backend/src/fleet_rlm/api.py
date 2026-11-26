@@ -7,6 +7,7 @@ import re
 import secrets
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager, closing, suppress
+from contextvars import Context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -187,6 +188,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 await close_dataset_volume_helpers()
         app.state.runtime = None
         await engine.dispose()
+        if settings.mlflow_tracking_uri:
+            await asyncio.to_thread(mlflow.flush_trace_async_logging)
 
 
 class _SettingsCORS:
@@ -1901,7 +1904,10 @@ async def chat(
     background: BackgroundTasks,
 ) -> AsyncIterator[ServerSentEvent]:
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=1)
-    turn.worker = asyncio.create_task(_run_turn(request, runtime, turn, queue, background))
+    # The worker owns its trace through finalization, independently of the HTTP span.
+    turn.worker = asyncio.create_task(
+        _run_turn(request, runtime, turn, queue, background), context=Context()
+    )
     seq = 0
     while not await request.is_disconnected():
         if turn.worker.done() and queue.empty():

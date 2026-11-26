@@ -1386,10 +1386,11 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
         "_chat_sandbox",
         AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
     )
-    response = await offline.client.post(
-        f"{offline.base}/chat",
-        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
-    )
+    with mlflow.start_span("incoming HTTP request") as http_span:
+        response = await offline.client.post(
+            f"{offline.base}/chat",
+            json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
+        )
     assert response.status_code == 200
     frames = [
         json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
@@ -1407,7 +1408,9 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     mlflow.flush_trace_async_logging()
     trace = mlflow.get_trace(trace_id)
     assert trace is not None
+    assert trace_id != http_span.trace_id
     root, acquisition, finalize, cleanup = trace.data.spans
+    assert root.parent_id is None
     assert (root.name, root.attributes["fleet.turn.status"]) == ("fleet.turn", "failed")
     assert root.status.status_code.name == "ERROR"
     assert trace.info.tags["fleet.run_id"] == str(offline.finish.await_args.args[1])
