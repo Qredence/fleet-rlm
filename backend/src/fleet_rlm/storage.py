@@ -89,6 +89,83 @@ class ObjectStorage:
     def new_key(cls, session_id: UUID) -> str:
         return f"{cls.prefix(session_id)}{uuid4().hex}"
 
+    @staticmethod
+    def optimization_artifact_key(job_id: UUID, target: str) -> str:
+        return f"optimizations/artifacts/{job_id}/{target}.json"
+
+    @staticmethod
+    def optimization_dataset_key(dataset_id: UUID) -> str:
+        return f"optimizations/datasets/{dataset_id}.jsonl"
+
+    async def put_object(self, key: str, path: Path) -> tuple[str, int]:
+        """Upload and SHA-256 verify a non-session object, aborting any failed multipart upload."""
+        completed = False
+        cleaned = False
+
+        def begin_upload() -> tuple[str, str, int]:
+            with path.open("rb") as body:
+                digest = hashlib.file_digest(body, "sha256").hexdigest()
+                size = body.tell()
+            upload = self._client.create_multipart_upload(
+                Bucket=self.bucket, Key=key, Metadata={"sha256": digest}
+            )
+            return upload["UploadId"], digest, size
+
+        async def _shielded_cleanup(fn: Callable[[], None]) -> None:
+            task = asyncio.create_task(asyncio.to_thread(fn))
+            while not task.done():
+                with suppress(asyncio.CancelledError):
+                    await asyncio.shield(task)
+            with suppress(Exception):
+                task.result()
+
+        async def abort_initialization(result: tuple[str, str, int]) -> None:
+            await _shielded_cleanup(lambda: self._abort_upload(key, result[0]))
+
+        upload_id, digest, size = await _transfer(begin_upload, on_cancel=abort_initialization)
+
+        def write() -> None:
+            nonlocal completed
+            with path.open("rb") as body:
+                part = self._client.upload_part(
+                    Bucket=self.bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=1,
+                    Body=body,
+                    ContentLength=size,
+                )
+            self._client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": [{"ETag": part["ETag"], "PartNumber": 1}]},
+            )
+            completed = True
+            self._read_verified(key, sha256=digest, size=size)
+
+        async def cleanup_cancelled_write(_result: None) -> None:
+            nonlocal cleaned
+            cleaned = True
+            await _shielded_cleanup(lambda: self._client.delete_object(Bucket=self.bucket, Key=key))
+
+        try:
+            await _transfer(write, on_cancel=cleanup_cancelled_write)
+        except (Exception, asyncio.CancelledError):
+            if not cleaned:
+                if not completed:
+                    await _shielded_cleanup(lambda: self._abort_upload(key, upload_id))
+                else:
+                    await _shielded_cleanup(
+                        lambda: self._client.delete_object(Bucket=self.bucket, Key=key)
+                    )
+            raise
+        return digest, size
+
+    async def delete_object(self, key: str) -> None:
+        """Delete a single object from the workspace bucket."""
+        await _transfer(lambda: self._client.delete_object(Bucket=self.bucket, Key=key))
+
     async def put(
         self, key: str, path: Path, *, register: Callable[[str], Awaitable[None]]
     ) -> tuple[str, int]:

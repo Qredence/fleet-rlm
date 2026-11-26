@@ -74,3 +74,58 @@ The incumbent and proposed action instructions tied at 6/6 on validation. GEPA s
 The native budget was set to 50, and its final three-example batch brought the actual count to 51. The checked-in pilot now reserves room for the next batch and records the library's actual search count. That adjustment was checked offline. The live result above used the original native batching.
 
 [GEPA pilot run](http://127.0.0.1:5001/#/experiments/1/runs/f1333d49e4224ea486074a103a8ec30a)
+
+## Hardened offline optimization cycle (2026-11-25)
+
+The hardened offline harness in `backend/src/fleet_rlm/optimize.py` runs ReAnchor and GEPA against lineage-disjoint JSONL datasets (`backend/eval_datasets/skills.jsonl`, `backend/eval_datasets/memory.jsonl`, `backend/eval_datasets/rlm.jsonl`, and `backend/eval_datasets/fixtures.py`) using an ephemeral Neon branch and canonical `FLEET_SKILLS_DIR=skills`.
+
+```sh
+cd backend
+FLEET_SKILLS_DIR=skills FLEET_MLFLOW_EXPERIMENT=fleet-optimization-20261125 \
+  uv run --locked --env-file .env env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL \
+  python -m fleet_rlm.optimize --target skills --database-url "$NEON_BRANCH_URL" \
+  --dataset eval_datasets/skills.jsonl --output artifacts/skill_selector.json \
+  --log-dir "$FLEET_OPT_LOG_DIR/skills"
+
+FLEET_SKILLS_DIR=skills FLEET_MLFLOW_EXPERIMENT=fleet-optimization-20261125 \
+  uv run --locked --env-file .env env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL \
+  python -m fleet_rlm.optimize --target memory --database-url "$NEON_BRANCH_URL" \
+  --dataset eval_datasets/memory.jsonl --output artifacts/memory_gate.json \
+  --log-dir "$FLEET_OPT_LOG_DIR/memory"
+
+FLEET_DAYTONA_IMAGE=fleet-rlm-hardening-a5a3486ca757 \
+  FLEET_SKILLS_DIR=skills FLEET_MLFLOW_EXPERIMENT=fleet-optimization-20261125 \
+  uv run --locked --env-file .env env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL \
+  python -m fleet_rlm.optimize --target rlm --program rlm --database-url "$NEON_BRANCH_URL" \
+  --dataset eval_datasets/rlm.jsonl --output artifacts/rlm_program.json \
+  --max-metric-calls 80 --holdout-repeats 3 --num-threads 3 \
+  --log-dir "$FLEET_OPT_LOG_DIR/rlm"
+```
+
+### Phase 3 offline optimization results
+
+All runs logged to local MLflow [experiment 41](http://127.0.0.1:5001/#/experiments/41) (`fleet-optimization-20261125`).
+
+| Target | Method | Split (train/val/holdout) | Baseline | Optimized | Gate outcome | MLflow run |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| `skills` (`SkillSelector`) | ReAnchor | 73 / — / 41 | 0.8171 | 0.9512 | Discarded (`fp_rate 0.0 -> 0.25` on 2/8 negatives; `fn_rate 0.303 -> 0.0`) | [skills run](http://127.0.0.1:5001/#/experiments/41/runs/8b5561fefb3444dd8f0eeb6b4724fe90) |
+| `memory` (`MemoryGate`) | ReAnchor | 65 / — / 35 | 0.7714 | 0.8286 | **Saved & qualified** (`fp_rate 0.25 -> 0.25`, `auto_approve_fp_count 0 -> 0`, `fn_rate 0.2105 -> 0.1053`, action/scope accuracy `0.7895 -> 0.8947`) | [memory run](http://127.0.0.1:5001/#/experiments/41/runs/f21e3b4160f14c809960eb9203cc5866) |
+| `rlm` (root `dspy.RLM`) | GEPA (`66/80` search calls, 3 repeats) | 14 / 9 / 11 | 89.73 | 90.15 | Discarded (`instructions_changed=false`; base scored `99.44%` on val; `0` blocking failures, `0` paired regressions) | [rlm run](http://127.0.0.1:5001/#/experiments/41/runs/0fc8a5fe4b6e4fad8f16b25d27cc7e76) |
+
+- `MemoryGate` calibration fitted `worth_saving.threshold = 0.06` and `action.weights = {"insert": 0.7, "update": 1.0, "skip": 1.0}` against resolved TypeSafe model snapshot `jev-1.14.0`, writing the untracked artifact `backend/artifacts/memory_gate.json`.
+- Auditing the RLM holdout report surfaced a latent `_repeat` drop across `dspy.Example.with_inputs()`; fixed in commit `b9ae4bde6` by renaming to `eval_repeat` with a regression test in `backend/tests/test_phase5_optimize.py`.
+
+### Phase 4 paired live HTTP canary and promotion
+
+Both arms ran against isolated Neon branches, branch-scoped Neon Object Storage, isolated temporary `FLEET_SKILLS_DIR` directories (`skills_count=8` via `fallback_to_bundled=True`), `FLEET_DAYTONA_IMAGE=fleet-rlm-hardening-a5a3486ca757`, `openai/deepseek/deepseek-v4.1-flash`, and pinned `FLEET_DECISION_MODEL=typesafe:jev-1.14.0` (verified directly on the wire).
+
+| Canary check | Baseline (`memory_gate_path=None`, [exp 42](http://127.0.0.1:5001/#/experiments/42)) | Candidate (`artifacts/memory_gate.json`, [exp 43](http://127.0.0.1:5001/#/experiments/43)) |
+| --- | --- | --- |
+| Live memory consolidation (8 turns/arm) | `TP=2/4` (`recall=0.50`), `FP=0/4`, `auto_approved_fp=0` | `TP=2/4` (`recall=0.50`), `FP=0/4`, `auto_approved_fp=0` |
+| Duplicate memory turn (`N4`) | Skipped (`action=skip`, `p=0.88`) | Skipped (`action=skip`, `p=0.84`) |
+| Stray post-turn memories after bundled smoke | `1` | `0` |
+| Bundled skills smoke (`--repeats 2`, 6 cases / 14 rows) | `12/14` ([run](http://127.0.0.1:5001/#/experiments/42/runs/92ca109981eb404a959ff143dbff1aec)) | `11/14` ([run](http://127.0.0.1:5001/#/experiments/43/runs/f443b39da21b4c0b99be767235709b33)) |
+| Live Tavily `web-research` + multi-turn follow-up | PASS (`web-research` active on T1, `[]` on T2) | PASS (`web-research` active on T1, `[]` on T2) |
+
+- Both arms missed `route-workbook` (`0/2`, uncalibrated `SkillSelector`); the single `skill-creator-reuse` candidate repeat miss was traced to stochastic LLM authoring variance in the generated `SKILL.md` with zero `MemoryGate` involvement.
+- **Promotion:** Enabled in untracked `backend/.env` with `FLEET_MEMORY_GATE_PATH=artifacts/memory_gate.json`, pinned `FLEET_DECISION_MODEL=typesafe:jev-1.14.0`, and `FLEET_SKILLS_DIR=skills`. `SkillSelector` and root `dspy.RLM` remain unoptimized until future candidates pass their promotion gates.

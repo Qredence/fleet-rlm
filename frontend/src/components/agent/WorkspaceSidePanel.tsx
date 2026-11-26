@@ -1,6 +1,5 @@
 import { Archive, ArrowLeft, Brain, FolderOpen, HardDrive, Upload } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { MotionConfig } from 'motion/react'
 import { Link } from 'react-router'
 import { cn } from 'cn'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -68,20 +67,18 @@ export function WorkspaceSidePanel({
           </Button>
         ) : (
           <>
-            <MotionConfig reducedMotion="user">
-              <Tabs
-                idPrefix={tabsId}
-                selectedIndex={selectedIndex}
-                onSelect={(index) => onTabChange(workspaceTabs[index].value)}
-                size="compact"
-                className="workspace-fluid-tabs min-w-0"
-                aria-label="Workspace views"
-              >
-                {workspaceTabs.map(({ value, label, icon }, index) => (
-                  <TabsItem key={value} index={index} label={label} icon={icon} />
-                ))}
-              </Tabs>
-            </MotionConfig>
+            <Tabs
+              idPrefix={tabsId}
+              selectedIndex={selectedIndex}
+              onSelect={(index) => onTabChange(workspaceTabs[index].value)}
+              size="compact"
+              className="workspace-fluid-tabs min-w-0"
+              aria-label="Workspace views"
+            >
+              {workspaceTabs.map(({ value, label, icon }, index) => (
+                <TabsItem key={value} index={index} label={label} icon={icon} />
+              ))}
+            </Tabs>
             <div className="ml-auto flex shrink-0 items-center gap-1">
               {showUpload && (
                 <Button variant="ghost" size="icon-sm" aria-label="Upload files" title="Upload files"

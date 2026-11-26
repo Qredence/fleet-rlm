@@ -7,5 +7,9 @@ export function useMediaQuery(query: string) {
     return () => media.removeEventListener('change', notify)
   }, [query])
 
-  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches)
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia(query).matches,
+    () => false,
+  )
 }

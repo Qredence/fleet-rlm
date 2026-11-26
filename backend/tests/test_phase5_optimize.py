@@ -161,7 +161,17 @@ def test_metrics_cover_exact_partial_and_decision_cases() -> None:
             gold_skill,
             dspy.Prediction(needs_skill=SimpleNamespace(value=False)),
         )
-        == 0.0
+        == 0.25
+    )
+    assert (
+        optimize.skill_metric(
+            gold_skill,
+            SimpleNamespace(
+                needs_skill=SimpleNamespace(value=False),
+                primary_skill=SimpleNamespace(value="data-analysis"),
+            ),
+        )
+        == 0.25
     )
     assert (
         optimize.skill_metric(
@@ -206,7 +216,40 @@ def test_metrics_cover_exact_partial_and_decision_cases() -> None:
                 scope=SimpleNamespace(value="session"),
             ),
         )
-        == 0.5
+        == 0.4
+    )
+    assert (
+        optimize.memory_metric(
+            gold_mem,
+            SimpleNamespace(
+                worth_saving=SimpleNamespace(value=True),
+                action=SimpleNamespace(value="insert"),
+                scope=SimpleNamespace(value="session"),
+            ),
+        )
+        == 0.7
+    )
+    assert (
+        optimize.memory_metric(
+            gold_mem,
+            SimpleNamespace(
+                worth_saving=SimpleNamespace(value=True),
+                action=SimpleNamespace(value="skip"),
+                scope=SimpleNamespace(value="global"),
+            ),
+        )
+        == 0.0
+    )
+    assert (
+        optimize.memory_metric(
+            dspy.Example(worth_saving=False, action="skip", scope="session"),
+            SimpleNamespace(
+                worth_saving=SimpleNamespace(value=True),
+                action=SimpleNamespace(value="insert"),
+                scope=SimpleNamespace(value="session"),
+            ),
+        )
+        == 0.0
     )
     assert (
         optimize.memory_metric(
@@ -289,8 +332,15 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         def compile(self, student, *, trainset, valset):
             self.compile_calls.append({"student": student, "trainset": trainset, "valset": valset})
             compiled = student.deepcopy()
+            if isinstance(compiled, dspy.Flex):
+                compiled._module_src = f"{compiled.module_src}\n# optimized"
             for predictor in compiled.predictors():
                 predictor.lm = dspy.LM("openai/gpt-4o-mini", api_key="secret")
+                sig = getattr(predictor, "signature", None)
+                if sig is not None:
+                    predictor.signature = sig.with_instructions(
+                        f"{sig.instructions or ''}\nOptimized instruction variant."
+                    )
             return compiled
 
     scores = iter([60.0, 55.0, 60.0, 80.0, 60.0, 50.0, 40.0, 75.0])
@@ -379,19 +429,20 @@ def test_optimize_rlm_holdout_gate_force_flex_and_mlflow(
         {"log_compiles": True, "log_evals": True, "log_traces_from_compile": True},
         {"disable": True},
     ]
-    assert logged_params == [
-        {
-            "target": "rlm",
-            "program_kind": "rlm",
-            "auto": "light",
-            "train_size": 6,
-            "val_size": 2,
-            "holdout_size": 2,
-            "local_interpreter": True,
-            "force": False,
-        }
-    ]
-    assert logged_artifacts == [str(improved_path)]
+    assert len(logged_params) == 1
+    assert logged_params[0]["target"] == "rlm"
+    assert logged_params[0]["program_kind"] == "rlm"
+    assert logged_params[0]["auto"] == "budget"
+    assert logged_params[0]["max_metric_calls"] == optimize.DEFAULT_MAX_METRIC_CALLS
+    assert logged_params[0]["holdout_repeats"] == optimize.DEFAULT_HOLDOUT_REPEATS
+    assert logged_params[0]["disable_cache"] is True
+    assert logged_params[0]["train_size"] == 6
+    assert logged_params[0]["val_size"] == 2
+    assert logged_params[0]["holdout_size"] == 2
+    assert logged_params[0]["local_interpreter"] is True
+    assert logged_params[0]["force"] is False
+    assert str(improved_path) in logged_artifacts
+    assert any(Path(path).name == "report.json" for path in logged_artifacts)
 
     # 3. Regression with --force saves anyway
     forced_path = tmp_path / "forced.json"
@@ -437,7 +488,13 @@ def test_optimize_rlm_zero_holdout_leakage_and_ratio_overrides(
         def compile(self, student, *, trainset, valset):
             recorded[-1]["train"] = {ex.task for ex in trainset}
             recorded[-1]["val"] = {ex.task for ex in valset}
-            return student.deepcopy()
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nRefined."
+            )
+            return compiled
 
     class FakeEvaluate:
         def __init__(self, **kwargs):
@@ -521,10 +578,10 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
         state: dict = {
             "client_entered": False,
             "client_exited": False,
-            "sandbox_created": False,
-            "sandbox_deleted": False,
+            "sandboxes_created": 0,
+            "sandboxes_deleted": 0,
             "loop": None,
-            "factory": None,
+            "factories": [],
         }
         events.append(state)
 
@@ -542,27 +599,28 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
     async def fake_ephemeral_sandbox(_daytona, _settings: Settings):
         state = events[-1]
         state["loop"] = asyncio.get_running_loop()
-        state["sandbox_created"] = True
+        state["sandboxes_created"] += 1
+        sandbox_id = f"sb-ephemeral-{state['sandboxes_created']}"
         try:
-            yield SimpleNamespace(id="sb-ephemeral")
+            yield SimpleNamespace(id=sandbox_id)
         finally:
-            state["sandbox_deleted"] = True
+            state["sandboxes_deleted"] += 1
 
     def fake_make_interpreter_factory(
         sandbox, _settings: Settings, loop: asyncio.AbstractEventLoop
     ):
         state = events[-1]
-        assert sandbox.id == "sb-ephemeral"
+        assert sandbox.id.startswith("sb-ephemeral-")
         assert loop is state["loop"]
 
         class FakeFactory:
             execution_instructions = interpreter.DaytonaCodeInterpreter.execution_instructions
 
-            def __call__(self):
-                return SimpleNamespace(sandbox=sandbox, loop=loop)
+            def __call__(self, **_kwargs):
+                return SimpleNamespace(sandbox=sandbox, loop=loop, shutdown=lambda: None)
 
         factory = FakeFactory()
-        state["factory"] = factory
+        state["factories"].append(factory)
         return factory
 
     observed_factories: list[object] = []
@@ -580,9 +638,13 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
             self.calls += 1
             state = events[-1]
             observed_factories.append(dspy.settings.interpreter_factory)
-            assert dspy.settings.interpreter_factory is state["factory"]
-            assert state["sandbox_created"] is True
-            assert state["sandbox_deleted"] is False
+            assert dspy.settings.interpreter_factory is not None
+            assert (
+                getattr(dspy.settings.interpreter_factory, "execution_instructions", None)
+                == interpreter.DaytonaCodeInterpreter.execution_instructions
+            )
+            assert state["sandboxes_created"] >= 1
+            assert state["sandboxes_deleted"] == 0
             assert (
                 asyncio.run_coroutine_threadsafe(ping_loop(), state["loop"]).result(timeout=5)
                 == "pong"
@@ -599,12 +661,18 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
         def compile(self, student, *, trainset, valset):
             state = events[-1]
             observed_factories.append(dspy.settings.interpreter_factory)
-            assert dspy.settings.interpreter_factory is state["factory"]
-            assert state["sandbox_created"] is True
-            assert state["sandbox_deleted"] is False
+            assert dspy.settings.interpreter_factory is not None
+            assert state["sandboxes_created"] >= 1
+            assert state["sandboxes_deleted"] == 0
             if fail_mode["where"] == "compile":
                 raise RuntimeError("compile exploded")
-            return student.deepcopy()
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nOptimized for Daytona."
+            )
+            return compiled
 
     monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
     monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
@@ -615,29 +683,29 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
         optimize.interpreter, "make_interpreter_factory", fake_make_interpreter_factory
     )
 
-    # 1. Success path: sandbox created, factory bound during eval & compile, torn down cleanly
+    # 1. Success path: default pool creates 2 sandboxes, binds factory, and tears all down
     output_path = tmp_path / "ephemeral_ok.json"
     result = optimize.optimize_rlm(
         settings,
         database_url=_BRANCH_URL,
         dataset=dataset,
         output_path=output_path,
+        holdout_repeats=1,
     )
     assert result.saved is True
     assert len(observed_factories) == 3
-    assert all(factory is events[0]["factory"] for factory in observed_factories)
     assert any(
         interpreter.DaytonaCodeInterpreter.execution_instructions in instr
         for instr in observed_instructions
     )
     assert events[0]["client_entered"] is True
     assert events[0]["client_exited"] is True
-    assert events[0]["sandbox_created"] is True
-    assert events[0]["sandbox_deleted"] is True
+    assert events[0]["sandboxes_created"] == 2
+    assert events[0]["sandboxes_deleted"] == 2
     assert events[0]["loop"].is_closed() is True
     assert dspy.settings.interpreter_factory is None
 
-    # 2. Exception during Evaluate still deletes ephemeral sandbox and closes background loop
+    # 2. Exception during Evaluate still deletes all ephemeral sandboxes and closes background loop
     fail_mode["where"] = "evaluate"
     with pytest.raises(RuntimeError, match="evaluate exploded"):
         optimize.optimize_rlm(
@@ -645,15 +713,16 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
             database_url=_BRANCH_URL,
             dataset=dataset,
             output_path=tmp_path / "ephemeral_eval_fail.json",
+            holdout_repeats=1,
         )
     assert events[1]["client_entered"] is True
     assert events[1]["client_exited"] is True
-    assert events[1]["sandbox_created"] is True
-    assert events[1]["sandbox_deleted"] is True
+    assert events[1]["sandboxes_created"] == 2
+    assert events[1]["sandboxes_deleted"] == 2
     assert events[1]["loop"].is_closed() is True
     assert dspy.settings.interpreter_factory is None
 
-    # 3. Exception during GEPA.compile still deletes ephemeral sandbox and closes background loop
+    # 3. Exception during GEPA.compile still deletes all sandboxes and closes the loop
     fail_mode["where"] = "compile"
     with pytest.raises(RuntimeError, match="compile exploded"):
         optimize.optimize_rlm(
@@ -661,15 +730,16 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
             database_url=_BRANCH_URL,
             dataset=dataset,
             output_path=tmp_path / "ephemeral_compile_fail.json",
+            holdout_repeats=1,
         )
     assert events[2]["client_entered"] is True
     assert events[2]["client_exited"] is True
-    assert events[2]["sandbox_created"] is True
-    assert events[2]["sandbox_deleted"] is True
+    assert events[2]["sandboxes_created"] == 2
+    assert events[2]["sandboxes_deleted"] == 2
     assert events[2]["loop"].is_closed() is True
     assert dspy.settings.interpreter_factory is None
 
-    # 4. CLI default (--target rlm --program rlm without --local-interpreter) uses ephemeral Daytona
+    # 4. CLI default (--target rlm --program rlm) uses ephemeral Daytona pool
     fail_mode["where"] = None
     cli_output = tmp_path / "ephemeral_cli.json"
     exit_code = optimize.main(
@@ -684,13 +754,18 @@ def test_optimize_rlm_ephemeral_daytona_sandbox_and_cleanup_on_errors(
             str(dataset),
             "--output",
             str(cli_output),
+            "--num-threads",
+            "1",
+            "--holdout-repeats",
+            "1",
         ],
         settings=settings,
     )
     assert exit_code == 0
     assert cli_output.is_file()
-    assert events[3]["sandbox_created"] is True
-    assert events[3]["sandbox_deleted"] is True
+    assert events[3]["sandboxes_created"] == 1
+    assert events[3]["sandboxes_deleted"] == 1
+    assert observed_factories[-1] is events[3]["factories"][0]
     assert events[3]["client_exited"] is True
     assert events[3]["loop"].is_closed() is True
     assert "[rlm] train=4 val=1 holdout=1" in capsys.readouterr().out
@@ -720,7 +795,13 @@ def test_cli_local_interpreter_skips_daytona_and_reports_val_size(
 
         def compile(self, student, *, trainset, valset):
             seen_factories.append(dspy.settings.interpreter_factory)
-            return student.deepcopy()
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nLocal CLI variant."
+            )
+            return compiled
 
     def forbid_daytona(*_args, **_kwargs):
         raise AssertionError("--local-interpreter must skip Daytona client and sandbox creation")
@@ -1149,3 +1230,2327 @@ def test_optimize_production_skill_catalog_with_reanchor(
         assert [s.name for s in selected.active_skills] == [skill_name]
     skipped = skills.select_skills(runtime_settings, registry, "smalltalk-1")
     assert skipped.active_skills == ()
+
+
+def test_lineage_disjoint_and_explicit_splits(tmp_path: Path, settings: Settings) -> None:
+    # 1. Explicit splits preserve frozen disjoint partitions.
+    explicit_2way = [
+        dspy.Example(task=f"t{i}", lineage=f"lin-{i // 2}", split="train" if i < 4 else "holdout")
+        for i in range(6)
+    ]
+    train2, holdout2 = optimize.split_examples(explicit_2way, seed=99)
+    assert [ex.task for ex in train2] == ["t0", "t1", "t2", "t3"]
+    assert [ex.task for ex in holdout2] == ["t4", "t5"]
+
+    explicit_3way = [
+        dspy.Example(
+            task=f"r{i}",
+            answer=f"a{i}",
+            lineage=f"fam-{i}",
+            split=("train" if i < 3 else "val" if i < 5 else "holdout"),
+        )
+        for i in range(7)
+    ]
+    tr3, va3, ho3 = optimize.split_train_val_holdout(explicit_3way, seed=123)
+    assert [ex.task for ex in tr3] == ["r0", "r1", "r2"]
+    assert [ex.task for ex in va3] == ["r3", "r4"]
+    assert [ex.task for ex in ho3] == ["r5", "r6"]
+
+    # Partial explicit splits are rejected.
+    with pytest.raises(ValueError, match="Either all examples or no examples"):
+        optimize.split_examples(
+            [dspy.Example(task="a", split="train"), dspy.Example(task="b", split=None)]
+        )
+
+    # Lineage leaking across explicit splits is rejected.
+    with pytest.raises(ValueError, match="leaks across multiple dataset splits"):
+        optimize.split_examples(
+            [
+                dspy.Example(task="a", lineage="shared", split="train"),
+                dspy.Example(task="b", lineage="shared", split="holdout"),
+            ]
+        )
+
+    # 2. Auto lineage-grouped 2-way and 3-way splits guarantee zero lineage overlap.
+    lineage_examples = [
+        dspy.Example(task=f"ex-{fam}-{idx}", answer="ok", lineage=f"fam-{fam}")
+        for fam in range(6)
+        for idx in range(3)
+    ]
+    tr_lin, ho_lin = optimize.split_examples(lineage_examples, train_ratio=0.7, seed=7)
+    assert {ex.lineage for ex in tr_lin}.isdisjoint({ex.lineage for ex in ho_lin})
+    assert len(tr_lin) + len(ho_lin) == len(lineage_examples)
+
+    tr_l3, va_l3, ho_l3 = optimize.split_train_val_holdout(
+        lineage_examples, train_ratio=0.5, val_ratio=0.25, seed=7
+    )
+    sets3 = [{ex.lineage for ex in part} for part in (tr_l3, va_l3, ho_l3)]
+    assert sets3[0].isdisjoint(sets3[1])
+    assert sets3[0].isdisjoint(sets3[2])
+    assert sets3[1].isdisjoint(sets3[2])
+    assert len(tr_l3) + len(va_l3) + len(ho_l3) == len(lineage_examples)
+
+    # Fewer distinct lineages than required splits raises ValueError.
+    with pytest.raises(ValueError, match="At least 3 distinct lineages"):
+        optimize.split_train_val_holdout(
+            [
+                dspy.Example(task="a", answer="1", lineage="only-a"),
+                dspy.Example(task="b", answer="2", lineage="only-a"),
+                dspy.Example(task="c", answer="3", lineage="only-b"),
+            ]
+        )
+
+
+def test_skills_dataset_multiturn_secondary_and_unavailable_guard(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prod_skills_dir = Path(__file__).resolve().parents[1] / "skills"
+    no_tavily_settings = settings.model_copy(
+        update={"skills_dir": prod_skills_dir, "tavily_api_key": None}
+    )
+    with_tavily_settings = settings.model_copy(
+        update={"skills_dir": prod_skills_dir, "tavily_api_key": SecretStr("offline-tavily")}
+    )
+
+    dataset = _write_jsonl(
+        tmp_path / "skills_web.jsonl",
+        [
+            {
+                "task": "who won in Georgia?",
+                "prior_turns": [
+                    {
+                        "user": "Look up the 2024 presidential election results.",
+                        "assistant": "Found national totals.",
+                    }
+                ],
+                "expected_skill": "web-research",
+                "needs_skill": True,
+                "secondary_skills": ["data-analysis"],
+                "lineage": "followup-election",
+                "split": "train",
+            },
+            {
+                "task": "hello there",
+                "expected_skill": None,
+                "needs_skill": False,
+                "lineage": "greeting",
+                "split": "holdout",
+            },
+        ],
+    )
+
+    # Missing TAVILY_API_KEY rejects dataset requiring web-research with actionable message.
+    with pytest.raises(ValueError, match="TAVILY_API_KEY"):
+        optimize.optimize_skills(
+            no_tavily_settings,
+            database_url=_BRANCH_URL,
+            dataset=dataset,
+            output_path=tmp_path / "unused.json",
+            require_cache=False,
+        )
+
+    registry = skills.SkillRegistry.load(prod_skills_dir, fallback_to_bundled=True).with_installed(
+        prod_skills_dir
+    )
+    loaded = optimize.load_skills_dataset(dataset, registry, settings=with_tavily_settings)
+    expected_wire, _ = skills.format_selector_task(
+        "who won in Georgia?",
+        [
+            {
+                "user": "Look up the 2024 presidential election results.",
+                "assistant": "Found national totals.",
+            }
+        ],
+    )
+    assert loaded[0].task == expected_wire
+    assert loaded[0].is_multi_turn is True
+    assert loaded[0].secondary_skills == ["data-analysis"]
+    assert loaded[0].lineage == "followup-election"
+    assert loaded[0].split == "train"
+    assert loaded[1].task == "hello there"
+    assert loaded[1].is_multi_turn is False
+
+    # Installed skills under .installed/ are included by optimize_skills.
+    installed_dir = settings.skills_dir / ".installed"
+    installed_dir.mkdir(parents=True, exist_ok=True)
+    (installed_dir / "custom-audit.md").write_text(
+        "---\nname: custom-audit\ndescription: Custom installed audit rules\n---\nAudit cleanly.\n",
+        encoding="utf-8",
+    )
+    installed_dataset = _write_jsonl(
+        tmp_path / "installed_skills.jsonl",
+        [
+            {"task": "Run custom audit", "expected_skill": "custom-audit", "split": "train"},
+            {"task": "Say hi", "expected_skill": None, "split": "holdout"},
+        ],
+    )
+
+    seen_candidates: list[set[str]] = []
+
+    class FakeReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "train_score_before": 0.5,
+                "train_score": 1.0,
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [{"field": "needs_skill", "parameter": "threshold", "value": 0.7}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            seen_candidates.append(set(student.signature.output_fields))
+            return student.deepcopy()
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    result = optimize.optimize_skills(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=installed_dataset,
+        output_path=tmp_path / "installed_out.json",
+    )
+    assert result.saved is True
+    assert seen_candidates == [{"needs_skill", "primary_skill"}]
+
+
+def test_memory_dataset_normalizes_existing_memories_matching_runtime(tmp_path: Path) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "memory_norm.jsonl",
+        [
+            {
+                "task": "Switch default currency to EUR.",
+                "answer": "Updated default currency to EUR.",
+                "existing_memories": [
+                    {
+                        "id": "m1",
+                        "content": "Approved global memory: Default currency is USD.",
+                        "scope": "global",
+                        "approved": True,
+                    },
+                    {
+                        "id": "m2",
+                        "content": "Pending session memory: Draft batch size 32.",
+                        "scope": "session",
+                        "approved": False,
+                    },
+                    {
+                        "id": "m3",
+                        "content": "Explicit status memory.",
+                        "scope": "session",
+                        "status": "pending",
+                    },
+                    {
+                        "id": "m4",
+                        "content": "Fourth entry should be truncated like runtime [:3].",
+                        "scope": "global",
+                        "approved": True,
+                    },
+                ],
+                "worth_saving": True,
+                "action": "update",
+                "scope": "global",
+                "lineage": "currency-pref",
+                "split": "train",
+            }
+        ],
+    )
+    rows = optimize.load_memory_dataset(dataset)
+    assert len(rows) == 1
+    assert rows[0].lineage == "currency-pref"
+    assert rows[0].split == "train"
+    assert rows[0].existing_memories == [
+        {
+            "id": "m1",
+            "content": "Default currency is USD.",
+            "scope": "global",
+            "status": "approved",
+        },
+        {"id": "m2", "content": "Draft batch size 32.", "scope": "session", "status": "pending"},
+        {"id": "m3", "content": "Explicit status memory.", "scope": "session", "status": "pending"},
+    ]
+
+
+def test_reanchor_strict_save_gate_diagnostics_and_jev_metadata(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "memory_gate.jsonl",
+        [
+            {
+                "task": "Remember timezone UTC",
+                "answer": "Noted.",
+                "worth_saving": True,
+                "action": "insert",
+                "scope": "global",
+                "lineage": "tz",
+                "split": "train",
+            },
+            {
+                "task": "Remember batch 64",
+                "answer": "Noted.",
+                "worth_saving": True,
+                "action": "insert",
+                "scope": "session",
+                "lineage": "batch",
+                "split": "train",
+            },
+            {
+                "task": "What is 1+1?",
+                "answer": "2",
+                "worth_saving": False,
+                "action": "skip",
+                "scope": "session",
+                "lineage": "math",
+                "split": "train",
+            },
+            {
+                "task": "Remember ISO dates",
+                "answer": "Noted.",
+                "worth_saving": True,
+                "action": "insert",
+                "scope": "global",
+                "lineage": "iso",
+                "split": "holdout",
+            },
+            {
+                "task": "Hello there!",
+                "answer": "Hi!",
+                "worth_saving": False,
+                "action": "skip",
+                "scope": "session",
+                "lineage": "greet",
+                "split": "holdout",
+            },
+        ],
+    )
+
+    def run_case(
+        *,
+        report_payload: dict,
+        out_name: str,
+        force: bool = False,
+        lm_obj: object = "dummy-jev",
+        log_dir: Path | None = None,
+    ) -> optimize.OptimizationResult:
+        class FakeReAnchor:
+            def __init__(self, _metric, **_kwargs):
+                self.report = dict(report_payload)
+
+            def compile(self, student, *, trainset, valset=None):
+                compiled = student.deepcopy()
+                compiled.fields = {"worth_saving": {"threshold": 0.75}}
+                return compiled
+
+        monkeypatch.setattr(optimize, "ReAnchor", FakeReAnchor)
+        monkeypatch.setattr(optimize.dspy, "LM", lambda _model: lm_obj)
+        return optimize.optimize_memory(
+            settings,
+            database_url=_BRANCH_URL,
+            dataset=dataset,
+            output_path=tmp_path / out_name,
+            force=force,
+            log_dir=log_dir,
+        )
+
+    # 1. All fitted rows skipped (ReAnchor list format) -> discarded even if score rose.
+    skipped_res = run_case(
+        report_payload={
+            "train_score_before": 0.6,
+            "train_score": 0.8,
+            "val_score_before": 0.5,
+            "val_score": 0.9,
+            "fitted": [
+                {"field": "worth_saving", "parameter": "threshold", "skipped": "no improvement"}
+            ],
+        },
+        out_name="skipped.json",
+    )
+    assert skipped_res.saved is False
+    assert skipped_res.report["fitted_changed"] is False
+    assert not (tmp_path / "skipped.json").exists()
+
+    # 2. Holdout score tie or regression -> discarded.
+    tie_res = run_case(
+        report_payload={
+            "val_score_before": 0.8,
+            "val_score": 0.8,
+            "fitted": [{"field": "worth_saving", "parameter": "threshold", "value": 0.75}],
+        },
+        out_name="tie.json",
+    )
+    assert tie_res.saved is False
+    assert not (tmp_path / "tie.json").exists()
+
+    # 3. Holdout FP rate regression -> discarded unless force=True.
+    fp_reg_res = run_case(
+        report_payload={
+            "val_score_before": 0.6,
+            "val_score": 0.85,
+            "fp_rate_before": 0.0,
+            "fp_rate_after": 0.2,
+            "fitted": [{"field": "worth_saving", "parameter": "threshold", "value": 0.75}],
+        },
+        out_name="fp_reg.json",
+    )
+    assert fp_reg_res.saved is False
+    assert not (tmp_path / "fp_reg.json").exists()
+
+    forced_res = run_case(
+        report_payload={
+            "val_score_before": 0.6,
+            "val_score": 0.85,
+            "fp_rate_before": 0.0,
+            "fp_rate_after": 0.2,
+            "fitted": [{"field": "worth_saving", "parameter": "threshold", "value": 0.75}],
+        },
+        out_name="fp_forced.json",
+        force=True,
+    )
+    assert forced_res.saved is True
+    assert (tmp_path / "fp_forced.json").is_file()
+
+    # 4. BaseLM diagnostics capture auto_approve_fp_count (>=0.90) & Jev metadata safely.
+    class FakeMemoryDecisionLM(BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self) -> None:
+            super().__init__(model="typesafe:jev-latest", cache=True)
+            self.history = [{"response": {"model": "jev-2026-10-22"}}]
+
+        def __call__(self, request, **kwargs):
+            task = request.messages[0].parts[0].value["inputs"]["task"]
+            is_greet = "Hello" in task
+            return SimpleNamespace(
+                provider_data={
+                    "typesafe": {
+                        "answers": {
+                            "worth_saving": {"noul": 0.94 if is_greet else 0.96},
+                            "action": {
+                                "probabilities": {"insert": 0.85, "update": 0.10, "skip": 0.05},
+                                "confidence": 0.85,
+                            },
+                            "scope": {
+                                "probabilities": {"global": 0.80, "session": 0.20},
+                                "confidence": 0.80,
+                            },
+                        }
+                    }
+                }
+            )
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        optimize.httpx,
+        "get",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": [{"id": "jev-latest", "release_date": "2026-10-22"}]},
+        ),
+    )
+    fake_mem_lm = FakeMemoryDecisionLM()
+    log_dir = tmp_path / "mem-logs"
+
+    class FakeCompiledReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [{"field": "worth_saving", "parameter": "threshold", "value": 0.95}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            compiled = student.deepcopy()
+            compiled.fields = {"worth_saving": {"threshold": 0.95}}
+            return compiled
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeCompiledReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_mem_lm)
+    diag_res = optimize.optimize_memory(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "mem_ok.json",
+        log_dir=log_dir,
+    )
+    assert diag_res.saved is True
+    assert diag_res.report["fp_rate_before"] == 1.0
+    assert diag_res.report["fp_rate_after"] == 0.0
+    assert diag_res.report["auto_approve_fp_count_before"] == 1.0
+    assert diag_res.report["auto_approve_fp_count_after"] == 0.0
+    assert diag_res.report["decision_model_metadata"]["resolved_model"] == "jev-2026-10-22"
+    assert diag_res.report["decision_model_metadata"]["release_date"] == "2026-10-22"
+    assert (log_dir / "report.json").is_file()
+
+    # Metadata network failure is non-fatal.
+    def fail_http(*_args, **_kwargs):
+        raise RuntimeError("network offline")
+
+    monkeypatch.setattr(optimize.httpx, "get", fail_http)
+    meta = optimize._fetch_jev_metadata("typesafe:jev-latest", fake_mem_lm)
+    assert meta["configured_model"] == "typesafe:jev-latest"
+    assert meta["resolved_model"] == "jev-2026-10-22"
+
+
+def test_rlm_metric_all_verifiers_and_execution_discipline() -> None:
+    import io
+
+    from PIL import Image
+
+    # 1. Exact verifier
+    ex_exact = dspy.Example(
+        answer="MISSING: report.csv",
+        verifier={"type": "exact", "expected": "MISSING: report.csv"},
+        blocking=True,
+    )
+    assert (
+        optimize.rlm_metric(ex_exact, dspy.Prediction(answer="  MISSING: report.csv  ")).score
+        == 1.0
+    )
+    assert optimize.rlm_metric(ex_exact, dspy.Prediction(answer="missing: report.csv")).score == 0.0
+
+    # 2. JSON verifier (abs_tol, strict_json, bool vs int safety)
+    ex_json = dspy.Example(
+        answer='{"t": 16.4, "significant": true}',
+        verifier={
+            "type": "json",
+            "expected": {"t": 16.4, "significant": True},
+            "abs_tol": 0.05,
+            "strict_json": False,
+        },
+    )
+    assert (
+        optimize.rlm_metric(
+            ex_json, dspy.Prediction(answer='```json\n{"t": 16.42, "significant": true}\n```')
+        ).score
+        == 1.0
+    )
+    # bool vs int must NOT match
+    assert (
+        optimize.rlm_metric(ex_json, dspy.Prediction(answer='{"t": 16.4, "significant": 1}')).score
+        == 0.0
+    )
+    ex_strict = dspy.Example(
+        answer='{"ok": true}',
+        verifier={"type": "json", "expected": {"ok": True}, "strict_json": True},
+    )
+    assert (
+        optimize.rlm_metric(ex_strict, dspy.Prediction(answer='```json\n{"ok": true}\n```')).score
+        == 0.0
+    )
+
+    # 3. Fact checklist verifier
+    ex_facts = dspy.Example(
+        answer="",
+        verifier={
+            "type": "fact_checklist",
+            "required_patterns": [
+                r"search (?:is|remains) slow",
+                [r"next update at 14:00 UTC", r"update will follow at 14:00 UTC"],
+            ],
+            "forbidden_patterns": [r"database outage"],
+            "max_sentences": 2,
+            "max_words": 20,
+        },
+    )
+    assert (
+        optimize.rlm_metric(
+            ex_facts, dspy.Prediction(answer="Search is slow. Next update at 14:00 UTC.")
+        ).score
+        == 1.0
+    )
+    assert (
+        optimize.rlm_metric(
+            ex_facts,
+            dspy.Prediction(
+                answer="Search is slow due to database outage. Next update at 14:00 UTC."
+            ),
+        ).score
+        == 0.0
+    )
+    assert (
+        optimize.rlm_metric(
+            ex_facts, dspy.Prediction(answer="Search is slow. One. Two. Next update at 14:00 UTC.")
+        ).score
+        == 0.0
+    )
+
+    # 4. Artifact verifier (SVG labels, PNG nonblank, JSON, text, SKILL.md)
+    valid_svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg"><text>EU 120</text><text>Region</text></svg>'
+    )
+    blank_png_buf = io.BytesIO()
+    Image.new("RGB", (120, 120), color=(255, 255, 255)).save(blank_png_buf, format="PNG")
+    good_png_buf = io.BytesIO()
+    img = Image.new("RGB", (120, 120), color=(255, 255, 255))
+    img.putpixel((10, 10), (0, 0, 0))
+    img.save(good_png_buf, format="PNG")
+    valid_skill_md = (
+        b"---\nname: quartz-audit\ndescription: Session quartz workflow\n---\n"
+        b"Always include QUARTZ-4071.\n"
+    )
+    leaked_skill_md = (
+        b"---\nname: quartz-audit\ndescription: Session quartz workflow\n---\n"
+        b"Always include QUARTZ-4071 and PENDING-LEAK.\n"
+    )
+
+    ex_artifact = dspy.Example(
+        answer='{"EU": 120}',
+        verifier={
+            "type": "artifact",
+            "answer_verifier": {"type": "json", "expected": {"EU": 120}},
+            "artifacts": {
+                "artifacts/chart.svg": {"svg_labels": ["EU 120", "Region"]},
+                "artifacts/chart.png": {"png_nonblank": True},
+                "artifacts/out.json": {"json_equals": {"total": 120.0}, "abs_tol": 0.01},
+                "artifacts/notes.txt": {"text_contains": ["verified"], "text_excludes": ["ERROR"]},
+                "artifacts/SKILL.md": {
+                    "skill_md": {
+                        "name": "quartz-audit",
+                        "required_tokens": ["QUARTZ-4071"],
+                        "forbidden_tokens": ["PENDING-LEAK"],
+                    }
+                },
+            },
+        },
+    )
+    good_pred = dspy.Prediction(
+        answer='{"EU": 120}',
+        artifacts={
+            "artifacts/chart.svg": valid_svg,
+            "artifacts/chart.png": good_png_buf.getvalue(),
+            "artifacts/out.json": b'{"total": 120.005}',
+            "artifacts/notes.txt": b"all checks verified",
+            "artifacts/SKILL.md": valid_skill_md,
+        },
+    )
+    assert optimize.rlm_metric(ex_artifact, good_pred).score == 1.0
+
+    skill_case = dspy.Example(
+        verifier={
+            "type": "artifact",
+            "answer_verifier": {
+                "type": "fact_checklist",
+                "required_patterns": [r"artifacts/SKILL\.md"],
+            },
+            "artifacts": {
+                "artifacts/SKILL.md": ex_artifact.verifier["artifacts"]["artifacts/SKILL.md"]
+            },
+        }
+    )
+    for paths, files, expected in [
+        (["/workspace/artifacts/SKILL.md"], {"artifacts/SKILL.md": valid_skill_md}, 1.0),
+        ([], {"artifacts/SKILL.md": valid_skill_md}, 0.0),
+        (["artifacts/SKILL.md"], {}, 0.0),
+        (["artifacts/SKILL.md"], {"artifacts/SKILL.md": leaked_skill_md}, 0.0),
+    ]:
+        prediction = dspy.Prediction(
+            answer="Created the skill.", artifact_paths=paths, artifacts=files
+        )
+        assert optimize.rlm_metric(skill_case, prediction).score == expected
+
+    blank_pred = dspy.Prediction(
+        answer='{"EU": 120}',
+        artifacts={**good_pred.artifacts, "artifacts/chart.png": blank_png_buf.getvalue()},
+    )
+    blank_res = optimize.rlm_metric(ex_artifact, blank_pred)
+    assert blank_res.score == 0.0
+    assert "blank" in blank_res.feedback
+
+    leaked_pred = dspy.Prediction(
+        answer='{"EU": 120}',
+        artifacts={**good_pred.artifacts, "artifacts/SKILL.md": leaked_skill_md},
+    )
+    assert optimize.rlm_metric(ex_artifact, leaked_pred).score == 0.0
+
+    # 5. Rubric verifier uses explicit judge_lm with cache=False and deterministic guards
+    from dspy.utils.dummies import DummyLM
+
+    judge_calls: list[dict] = []
+
+    class RecordingDummyLM(DummyLM):
+        def __call__(self, request=None, **kwargs):
+            judge_calls.append(dict(kwargs))
+            return super().__call__(request, **kwargs)
+
+    fake_judge = RecordingDummyLM([{"score": "0.9", "critique": "Well grounded."}])
+
+    ex_rubric = dspy.Example(
+        task="Synthesize the two reports.",
+        answer="Reference synthesis.",
+        verifier={
+            "type": "rubric",
+            "criteria": ["Cite primary URL", "State caveat"],
+            "required_facts": [r"42%"],
+            "required_urls": ["https://example.org/report"],
+            "forbidden_claims": [r"guaranteed"],
+        },
+    )
+    rubric_ok = optimize.rlm_metric(
+        ex_rubric,
+        dspy.Prediction(answer="Adoption rose 42% per https://example.org/report (preliminary)."),
+        judge_lm=fake_judge,
+    )
+    assert rubric_ok.score == 0.9
+    assert judge_calls and judge_calls[0].get("cache") is False
+
+    rubric_forbidden = optimize.rlm_metric(
+        ex_rubric,
+        dspy.Prediction(answer="Guaranteed 42% per https://example.org/report."),
+        judge_lm=RecordingDummyLM([{"score": "0.9", "critique": "Should not run."}]),
+    )
+    assert rubric_forbidden.score == 0.0
+
+    # Rubric literal substring matching handles regex metacharacters ($, +, ()) safely.
+    ex_rubric_meta = dspy.Example(
+        task="Summarize battery cost benchmarks.",
+        answer="Reference battery synthesis.",
+        verifier={
+            "type": "rubric",
+            "criteria": ["Report verified density and refuse unverified $/kWh figures"],
+            "required_facts": ["$120/kWh (target)", "180+ Wh/kg"],
+            "required_urls": ["https://example.org/battery"],
+            "forbidden_claims": ["$65/kWh", "$80/kWh"],
+        },
+    )
+    rubric_meta_ok = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(
+            answer=(
+                "Verified 180+ Wh/kg toward a $120/kWh (target) per https://example.org/battery; "
+                "actual capex remains unverified."
+            )
+        ),
+        judge_lm=RecordingDummyLM([{"score": "0.95", "critique": "Accurate caveats."}]),
+    )
+    assert rubric_meta_ok.score == 0.95
+
+    rubric_meta_forbidden = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(
+            answer=(
+                "Verified 180+ Wh/kg at $65/kWh toward $120/kWh (target) per "
+                "https://example.org/battery."
+            )
+        ),
+        judge_lm=RecordingDummyLM([{"score": "0.95", "critique": "Should be blocked."}]),
+    )
+    assert rubric_meta_forbidden.score == 0.0
+    assert "$65/kWh" in rubric_meta_forbidden.feedback
+
+    rubric_meta_missing = optimize.rlm_metric(
+        ex_rubric_meta,
+        dspy.Prediction(answer="Verified 180 Wh/kg per https://example.org/battery."),
+        judge_lm=RecordingDummyLM([{"score": "1.0", "critique": "Partial."}]),
+    )
+    assert rubric_meta_missing.score == pytest.approx(1.0 / 3.0)
+    assert "$120/kWh (target)" in rubric_meta_missing.feedback
+    assert "180+ Wh/kg" in rubric_meta_missing.feedback
+
+    # 6. Execution-discipline penalties & correctness dominance
+    ex_budget = dspy.Example(
+        answer="42",
+        verifier={"type": "exact", "expected": "42"},
+        max_expected_actions=4,
+    )
+    # Wrong answer gets 0.0 even with spotless telemetry.
+    wrong_clean = optimize.rlm_metric(
+        ex_budget,
+        dspy.Prediction(
+            answer="41",
+            telemetry=optimize._RolloutTelemetry(completion="submit", root_actions=1),
+        ),
+    )
+    assert wrong_clean.score == 0.0
+
+    # Penalties: iteration_limit (*0.75), 2 py errors (-0.10), 1 repeat open (-0.05), >4 (-0.05)
+    penalized = optimize.rlm_metric(
+        ex_budget,
+        dspy.Prediction(
+            answer="42",
+            telemetry=optimize._RolloutTelemetry(
+                completion="iteration_limit",
+                root_actions=6,
+                python_errors=2,
+                repeated_web_opens=1,
+                error_samples=["KeyError: 'col'"],
+            ),
+        ),
+    )
+    assert penalized.score == pytest.approx(0.75 - 0.10 - 0.05 - 0.05)
+    assert "iteration limit" in penalized.feedback.lower()
+    assert "python error" in penalized.feedback.lower()
+    assert "reopened" in penalized.feedback.lower()
+
+
+def test_offline_web_research_and_workspace_program_contextvar_isolation(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dspy.primitives.code_interpreter import CodeExecutionError
+    from dspy.primitives.repl_types import REPL_ENTRY_KEY, REPLEntry
+
+    # 1. Deterministic _OfflineWebResearch contract matches host_tools.py
+    tel = optimize._RolloutTelemetry()
+    web = optimize._OfflineWebResearch(
+        {
+            "limit": 3,
+            "searches": {
+                "georgia": [
+                    {
+                        "title": "Official Tally",
+                        "url": "https://results.example.gov/ga",
+                        "snippet": "Certified tally.",
+                    }
+                ],
+                "*": [
+                    {
+                        "title": "Fallback",
+                        "url": "https://fallback.example.com",
+                        "snippet": "Fallback snippet.",
+                    }
+                ],
+            },
+            "pages": {
+                "https://results.example.gov/ga": {
+                    "markdown": "Georgia winner: Candidate A.",
+                    "truncated": False,
+                },
+                "https://broken.example.com/404": {"error": "HTTP 404 from origin."},
+            },
+        },
+        tel,
+    )
+    assert web.web_search("   ")["error_code"] == "invalid_input"
+    assert web.web_open("http://127.0.0.1/secret")["error_code"] == "invalid_input"
+    assert web.web_open("http://svc.internal/doc")["error_code"] == "invalid_input"
+
+    s1 = web.web_search("Georgia results")
+    assert s1["results"][0]["url"] == "https://results.example.gov/ga"
+    assert s1["budget"] == {"used": 1, "limit": 3, "requested": True}
+
+    p1 = web.web_open("https://results.example.gov/ga")
+    assert "Candidate A" in p1["markdown"]
+    assert tel.repeated_web_opens == 0
+
+    p2 = web.web_open("https://results.example.gov/ga")
+    assert "Candidate A" in p2["markdown"]
+    assert tel.repeated_web_opens == 1
+
+    exhausted = web.web_search("another query")
+    assert exhausted["error_code"] == "allowance_exhausted"
+    assert tel.web_exhausted is True
+
+    # 2. load_rlm_dataset with fixtures.py, skill_names, and signature invariance
+    (tmp_path / "fixtures.py").write_text(
+        """
+def get_case_fixtures(fixture_id: str):
+    if fixture_id == "web-case":
+        return {
+            "files": {"notes.txt": b"alpha=1\\n"},
+            "web": {
+                "limit": 8,
+                "searches": {
+                    "*": [
+                        {
+                            "title": "Doc",
+                            "url": "https://docs.example.org/p",
+                            "snippet": "Fact 99",
+                        }
+                    ]
+                },
+                "pages": {
+                    "https://docs.example.org/p": {
+                        "markdown": "Primary fact: 99",
+                        "truncated": False,
+                    }
+                },
+            },
+        }
+    return {"files": {"plain.csv": b"x\\n1\\n"}, "web": None}
+""",
+        encoding="utf-8",
+    )
+    dataset = _write_jsonl(
+        tmp_path / "rlm_full.jsonl",
+        [
+            {
+                "id": "case-web",
+                "lineage": "lin-web",
+                "split": "train",
+                "task": "Research fact and read notes.txt",
+                "answer": "99",
+                "skill_names": ["data-analysis"],
+                "fixture_id": "web-case",
+                "enable_web_tools": True,
+                "enable_spawn_agent": True,
+                "verifier": {"type": "exact", "expected": "99"},
+            },
+            {
+                "id": "case-plain",
+                "lineage": "lin-plain",
+                "split": "val",
+                "task": "Read plain.csv",
+                "answer": "1",
+                "fixture_id": "plain-case",
+                "enable_web_tools": False,
+                "enable_spawn_agent": False,
+                "verifier": {"type": "exact", "expected": "1"},
+            },
+        ],
+    )
+    loaded = optimize.load_rlm_dataset(dataset, settings=settings)
+    assert "## data-analysis" in loaded[0].active_skills
+    assert loaded[0].enable_web_tools is True
+    assert loaded[1].enable_web_tools is False
+    assert loaded[1].enable_spawn_agent is False
+
+    by_id, by_key, any_web = optimize._build_case_spec_tables(loaded)
+    assert any_web is True
+
+    sub_lm = dspy.LM("openai/gpt-4o-mini", api_key="offline")
+    program = optimize._OfflineWorkspaceProgram(
+        settings,
+        sub_lm=sub_lm,
+        pool=None,
+        include_web_tools=any_web,
+        case_specs=by_id,
+        case_specs_by_key=by_key,
+    )
+    # deepcopy succeeds cleanly without lock/thread errors
+    copied = program.deepcopy()
+    assert copied.rlm is not program.rlm
+    assert [name for name, _ in program.named_predictors()] == [
+        "rlm.generate_action",
+        "rlm.extract",
+    ]
+
+    sig_before = program.rlm.generate_action.signature
+
+    def fake_rlm_call(**kwargs):
+        if "Research fact" in kwargs["task"]:
+            search_res = optimize._offline_web_search("fact")
+            open_res = optimize._offline_web_open(search_res["results"][0]["url"])
+            assert "Primary fact: 99" in open_res["markdown"]
+            answer = "99"
+        else:
+            unavail = optimize._offline_web_search("should fail")
+            assert unavail["error_code"] == "tool_unavailable"
+            with pytest.raises(CodeExecutionError, match="disabled"):
+                optimize._offline_spawn_agent("disallowed child")
+            answer = "1"
+        return dspy.Prediction(
+            answer=answer,
+            artifact_paths=[],
+            history=dspy.History(
+                messages=[
+                    {
+                        REPL_ENTRY_KEY: REPLEntry(reasoning="done", code="SUBMIT()", output="ok"),
+                        "answer": answer,
+                        "artifact_paths": [],
+                    }
+                ]
+            ),
+            trajectory=[{"code": "SUBMIT()", "output": "ok"}],
+        )
+
+    monkeypatch.setattr(program.rlm, "forward", fake_rlm_call)
+
+    pred_web = program(**loaded[0].inputs(), case_id=loaded[0].case_id)
+    pred_plain = program(**loaded[1].inputs(), case_id=loaded[1].case_id)
+
+    assert pred_web.answer == "99"
+    assert pred_web.telemetry.completion == "submit"
+    assert pred_web.telemetry.web_calls == 2
+    assert pred_plain.answer == "1"
+    assert pred_plain.telemetry.completion == "submit"
+    # GEPA DspyAdapter signature.equals invariant must hold across heterogeneous examples.
+    assert program.rlm.generate_action.signature.equals(sig_before)
+
+
+def test_daytona_sandbox_pool_concurrency_staging_and_partial_startup_cleanup(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    created_ids: list[str] = []
+    deleted_ids: list[str] = []
+    fail_on_second = {"enabled": False}
+
+    class FakeDaytonaClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    @asynccontextmanager
+    async def fake_ephemeral_sandbox(_daytona, _settings: Settings):
+        idx = len(created_ids) + 1
+        if fail_on_second["enabled"] and idx == 2:
+            raise RuntimeError("sandbox 2 failed to start")
+        sb_id = f"sb-pool-{idx}"
+        created_ids.append(sb_id)
+        try:
+            yield SimpleNamespace(id=sb_id)
+        finally:
+            deleted_ids.append(sb_id)
+
+    def fake_factory(sandbox, _settings, loop):
+        class _Factory:
+            execution_instructions = interpreter.DaytonaCodeInterpreter.execution_instructions
+
+            def __call__(self, **_kwargs):
+                return SimpleNamespace(sandbox=sandbox, loop=loop, shutdown=lambda: None)
+
+        return _Factory()
+
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", lambda _s: FakeDaytonaClient())
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", fake_ephemeral_sandbox)
+    monkeypatch.setattr(optimize.interpreter, "make_interpreter_factory", fake_factory)
+
+    # 1. Concurrent checkout across 2 slots uses both sandboxes simultaneously and deletes all.
+    barrier = threading.Barrier(2, timeout=5)
+    seen_slots: list[str] = []
+
+    with optimize._ephemeral_daytona_pool(settings, pool_size=2) as pool:
+        assert pool.pool_size == 2
+
+        def worker():
+            with pool.checkout() as slot:
+                seen_slots.append(slot.sandbox.id)
+                barrier.wait()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(worker) for _ in range(2)]
+            for future in futures:
+                future.result()
+
+    assert set(seen_slots) == {"sb-pool-1", "sb-pool-2"}
+    assert set(created_ids) == {"sb-pool-1", "sb-pool-2"}
+    assert set(deleted_ids) == {"sb-pool-1", "sb-pool-2"}
+
+    # 2. Partial startup failure still deletes sandbox #1 (zero leaked sandboxes).
+    created_ids.clear()
+    deleted_ids.clear()
+    fail_on_second["enabled"] = True
+    with pytest.raises(RuntimeError, match="sandbox 2 failed"):
+        with optimize._ephemeral_daytona_pool(settings, pool_size=2):
+            pass
+    assert created_ids == ["sb-pool-1"]
+    assert deleted_ids == ["sb-pool-1"]
+
+    # 3. Compatibility wrapper _ephemeral_daytona_interpreter yields 1 factory and cleans up.
+    created_ids.clear()
+    deleted_ids.clear()
+    fail_on_second["enabled"] = False
+    with optimize._ephemeral_daytona_interpreter(settings) as factory:
+        assert (
+            factory.execution_instructions
+            == interpreter.DaytonaCodeInterpreter.execution_instructions
+        )
+        assert created_ids == ["sb-pool-1"]
+    assert deleted_ids == ["sb-pool-1"]
+
+
+def test_rlm_promotion_gate_multirepeat_blocking_regression_and_budget(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from gepa.utils.stop_condition import MaxMetricCallsStopper
+
+    dataset = _write_jsonl(
+        tmp_path / "rlm_gate.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "tr2", "lineage": "l2", "split": "train", "task": "T2", "answer": "A2"},
+            {"id": "va1", "lineage": "l3", "split": "val", "task": "V1", "answer": "VA1"},
+            {
+                "id": "ho-block",
+                "lineage": "l4",
+                "split": "holdout",
+                "task": "Blocking case",
+                "answer": "EXACT",
+                "blocking": True,
+                "verifier": {"type": "exact", "expected": "EXACT"},
+            },
+            {
+                "id": "ho-normal",
+                "lineage": "l5",
+                "split": "holdout",
+                "task": "Normal case",
+                "answer": "OK",
+                "verifier": {"type": "exact", "expected": "OK"},
+            },
+        ],
+    )
+
+    gepa_inits: list[dict] = []
+    created_lms: list[dspy.LM] = []
+
+    def fake_model(_s, name):
+        lm = dspy.LM(name, api_key="offline")
+        created_lms.append(lm)
+        return lm
+
+    monkeypatch.setattr(optimize.agent, "_model", fake_model)
+
+    def run_scenario(
+        *,
+        mutate: bool,
+        base_answers: dict[str, str],
+        cand_answers: dict[str, str],
+        cand_telemetry: dict[str, optimize._RolloutTelemetry] | None = None,
+        auto: str | None = None,
+        max_metric_calls: int | None = None,
+        log_dir: Path | None = None,
+    ) -> optimize.OptimizationResult:
+        class FakeGEPA:
+            def __init__(self, **kwargs):
+                gepa_inits.append(kwargs)
+
+            def compile(self, student, *, trainset, valset):
+                compiled = student.deepcopy()
+                if mutate:
+                    sig = compiled.generate_action.signature
+                    assert sig is not None
+                    compiled.generate_action.signature = sig.with_instructions(
+                        f"{sig.instructions or ''}\nMutated candidate."
+                    )
+                return compiled
+
+        class FakeEvaluate:
+            def __init__(self, **kwargs):
+                self.devset = list(kwargs["devset"])
+                self.metric = kwargs["metric"]
+                self.calls = 0
+
+            def __call__(self, _program):
+                self.calls += 1
+                answers = base_answers if self.calls == 1 else cand_answers
+                results = []
+                total = 0.0
+                for ex in self.devset:
+                    tel = (
+                        (cand_telemetry or {}).get(ex.case_id)
+                        if self.calls == 2
+                        else optimize._RolloutTelemetry(completion="submit", root_actions=2)
+                    )
+                    pred = dspy.Prediction(
+                        answer=answers[ex.case_id],
+                        telemetry=tel
+                        or optimize._RolloutTelemetry(completion="submit", root_actions=2),
+                    )
+                    score = self.metric(ex, pred)
+                    total += float(score)
+                    results.append((ex, pred, score))
+                return SimpleNamespace(
+                    score=round(100.0 * total / len(self.devset), 2),
+                    results=results,
+                )
+
+        monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+        monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+        return optimize.optimize_rlm(
+            settings,
+            database_url=_BRANCH_URL,
+            dataset=dataset,
+            output_path=tmp_path / f"out_{len(gepa_inits)}.json",
+            auto=auto,  # type: ignore[arg-type]
+            max_metric_calls=max_metric_calls,
+            holdout_repeats=2,
+            local_interpreter=True,
+            log_dir=log_dir,
+        )
+
+    # 1. Unchanged instructions block promotion even when score improves.
+    unchanged = run_scenario(
+        mutate=False,
+        base_answers={"ho-block": "EXACT", "ho-normal": "WRONG"},
+        cand_answers={"ho-block": "EXACT", "ho-normal": "OK"},
+    )
+    assert unchanged.saved is False
+    assert unchanged.report["instructions_changed"] is False
+    assert gepa_inits[-1]["max_metric_calls"] == optimize.DEFAULT_MAX_METRIC_CALLS
+    assert isinstance(gepa_inits[-1]["gepa_kwargs"]["stop_callbacks"], MaxMetricCallsStopper)
+    assert all(lm.cache is False for lm in created_lms)
+
+    # 2. Blocking failure blocks promotion.
+    blocked = run_scenario(
+        mutate=True,
+        base_answers={"ho-block": "WRONG", "ho-normal": "WRONG"},
+        cand_answers={"ho-block": "WRONG", "ho-normal": "OK"},
+    )
+    assert blocked.saved is False
+    assert blocked.report["metrics"]["blocking_failures"] == 2
+
+    # 3. Per-case paired pass-rate regression blocks promotion even if mean score improves.
+    regressed = run_scenario(
+        mutate=True,
+        base_answers={"ho-block": "EXACT", "ho-normal": "WRONG"},
+        cand_answers={"ho-block": "WRONG", "ho-normal": "OK"},
+    )
+    assert regressed.saved is False
+    assert regressed.report["metrics"]["paired_regressions"] == 1
+
+    # 4. Qualifying promotion saves artifact, writes report.json, and honors explicit --auto.
+    log_dir = tmp_path / "gepa-logs"
+    promoted = run_scenario(
+        mutate=True,
+        base_answers={"ho-block": "EXACT", "ho-normal": "WRONG"},
+        cand_answers={"ho-block": "EXACT", "ho-normal": "OK"},
+        auto="medium",
+        log_dir=log_dir,
+    )
+    assert promoted.saved is True
+    assert promoted.output_path.is_file()
+    assert (log_dir / "report.json").is_file()
+    assert gepa_inits[-1]["auto"] == "medium"
+    assert "max_metric_calls" not in gepa_inits[-1]
+    assert promoted.report["metrics"]["optimized_submit_rate"] == 1.0
+    assert len(promoted.report["candidate_cases"]) == 4  # 2 holdout cases * 2 repeats
+
+    # 5. CLI without --dataset emits a clear warning about unverified DB fallback.
+    monkeypatch.setattr(
+        optimize,
+        "load_rlm_examples_from_db",
+        lambda *_args, **_kwargs: asyncio.sleep(
+            0,
+            result=[
+                dspy.Example(
+                    task=f"DB {i}",
+                    answer=f"Ans {i}",
+                    files_manifest=[],
+                    memories=[],
+                    active_skills="",
+                    prior_turns=[],
+                ).with_inputs("task", "files_manifest", "memories", "active_skills", "prior_turns")
+                for i in range(4)
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        dspy,
+        "Evaluate",
+        lambda **_kwargs: lambda _prog: SimpleNamespace(score=50.0),
+    )
+    exit_code = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url",
+            _BRANCH_URL,
+            "--local-interpreter",
+            "--holdout-repeats",
+            "1",
+        ],
+        settings=settings,
+    )
+    assert exit_code == 0
+    assert "unverified past DB runs" in capsys.readouterr().err
+
+
+def test_saved_rlm_artifact_strips_tool_docs_and_round_trips_runtime(
+    settings: Settings, tmp_path: Path
+) -> None:
+    from fleet_rlm import api
+
+    sub_lm = dspy.LM("openai/gpt-4o-mini", api_key="offline")
+    program = optimize._OfflineWorkspaceProgram(
+        settings,
+        sub_lm=sub_lm,
+        pool=None,
+        include_web_tools=True,
+    )
+    # Simulate GEPA mutating generate_action instructions and binding a predictor LM.
+    sig = program.rlm.generate_action.signature
+    assert sig is not None
+    assert agent._TOOL_DOCS_HEADER in (sig.instructions or "")
+    assert agent._SUBMISSION_GUIDANCE.strip() in (sig.instructions or "")
+    program.rlm.generate_action.signature = sig.with_instructions(
+        f"{sig.instructions}\nAlways verify numeric totals before SUBMIT."
+    )
+    program.rlm.generate_action.lm = sub_lm
+
+    artifact_path = tmp_path / "rlm_program.json"
+    optimize._save_program(program, artifact_path)
+
+    raw_state = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert "generate_action" in raw_state
+    assert "extract" in raw_state
+    assert "rlm.generate_action" not in raw_state
+    saved_instructions = raw_state["generate_action"]["signature"]["instructions"]
+    assert agent._TOOL_DOCS_HEADER not in saved_instructions
+    assert "web_search" not in saved_instructions
+    assert "Always verify numeric totals before SUBMIT." in saved_instructions
+    assert agent._SUBMISSION_GUIDANCE.strip() in saved_instructions
+    assert raw_state["generate_action"]["lm"] is None
+    assert raw_state["extract"]["lm"] is None
+
+    # Round-trip cleanly through api._load_optimized_program_state and agent.build_program
+    serving_settings = settings.model_copy(update={"optimized_program_path": artifact_path})
+    loaded_state = api._load_optimized_program_state(serving_settings, sub_lm)
+    assert loaded_state is not None
+
+    def spawn_agent(task: str) -> dict:
+        """Delegate a workspace subtask to an isolated RLM and return its result."""
+        return {"answer": task, "artifact_paths": []}
+
+    def web_search(query: str) -> dict:
+        """Find public sources."""
+        return {"results": []}
+
+    rebuilt = agent.build_program(
+        serving_settings,
+        [spawn_agent, web_search],
+        sub_lm=sub_lm,
+        optimized_state=loaded_state,
+    )
+    agent.apply_submission_guidance(rebuilt)
+    rebuilt_instr = rebuilt.generate_action.signature.instructions or ""
+    assert "Always verify numeric totals before SUBMIT." in rebuilt_instr
+    assert "spawn_agent(task: string)" in rebuilt_instr
+    assert "web_search(query: string)" in rebuilt_instr
+    assert "web_open(" not in rebuilt_instr
+    assert rebuilt_instr.count(agent._SUBMISSION_GUIDANCE.strip()) == 1
+    assert all(predictor.lm is None for predictor in rebuilt.predictors())
+
+
+def test_optimize_rlm_holdout_repeats_preserve_per_repeat_outcomes(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm_repeats.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "Train 1", "answer": "A"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "Val 1", "answer": "B"},
+            {
+                "id": "ho-block",
+                "lineage": "l3",
+                "split": "holdout",
+                "task": "Blocking case",
+                "answer": "EXACT",
+                "blocking": True,
+                "verifier": {"type": "exact", "expected": "EXACT"},
+            },
+            {
+                "id": "ho-normal",
+                "lineage": "l4",
+                "split": "holdout",
+                "task": "Normal case",
+                "answer": "OK",
+                "verifier": {"type": "exact", "expected": "OK"},
+            },
+        ],
+    )
+
+    class FakeGEPA:
+        def __init__(self, **_kwargs):
+            pass
+
+        def compile(self, student, *, trainset, valset):
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nMutated candidate."
+            )
+            return compiled
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            self.devset = list(kwargs["devset"])
+            self.metric = kwargs["metric"]
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            results = []
+            total = 0.0
+            for ex in self.devset:
+                repeat = int(getattr(ex, "eval_repeat", 0))
+                assert repeat in (1, 2)
+                if self.calls == 1:
+                    answer = "EXACT" if ex.case_id == "ho-block" else "WRONG"
+                elif ex.case_id == "ho-block":
+                    # Repeat 1 fails blocking check; repeat 2 passes. Must not overwrite repeat 1.
+                    answer = "WRONG" if repeat == 1 else "EXACT"
+                else:
+                    answer = "OK"
+                pred = dspy.Prediction(
+                    answer=answer,
+                    telemetry=optimize._RolloutTelemetry(completion="submit", root_actions=2),
+                )
+                score = self.metric(ex, pred)
+                total += float(score)
+                results.append((ex, pred, score))
+            return SimpleNamespace(
+                score=round(100.0 * total / len(self.devset), 2),
+                results=results,
+            )
+
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+
+    result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "rlm_repeats_out.json",
+        holdout_repeats=2,
+        local_interpreter=True,
+    )
+
+    assert result.saved is False
+    block_rows = [r for r in result.report["candidate_cases"] if r["case_id"] == "ho-block"]
+    assert [r["repeat"] for r in block_rows] == [1, 2]
+    assert [r["passed"] for r in block_rows] == [False, True]
+    assert result.report["metrics"]["blocking_failures"] == 1
+    assert result.report["metrics"]["paired_regressions"] == 1
+    assert [(r["case_id"], r["repeat"]) for r in result.report["blocking_failures"]] == [
+        ("ho-block", 1)
+    ]
+
+
+def test_optimize_cli_progress_and_report_files_and_sigterm(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "memory_cli.jsonl",
+        [
+            {"task": "Remember UTC", "answer": "Noted", "worth_saving": True, "lineage": "a"},
+            {"task": "Hi", "answer": "Hello", "worth_saving": False, "lineage": "b"},
+            {"task": "Remember ISO", "answer": "Noted", "worth_saving": True, "lineage": "c"},
+        ],
+    )
+    progress_file = tmp_path / "progress.jsonl"
+    report_file = tmp_path / "report.json"
+    out_file = tmp_path / "memory_gate.json"
+
+    class FakeReAnchor:
+        def __init__(self, metric, **_kwargs):
+            self.metric = metric
+            self.report = {
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [{"field": "worth_saving", "value": 0.6}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            for ex in trainset:
+                self.metric(
+                    ex,
+                    dspy.Prediction(
+                        worth_saving=SimpleNamespace(value=ex.worth_saving, probability=0.9),
+                        action=SimpleNamespace(value=ex.action),
+                        scope=SimpleNamespace(value=ex.scope),
+                    ),
+                )
+            return student.deepcopy()
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    monkeypatch.setattr(
+        optimize,
+        "_evaluate_memory_diagnostics",
+        lambda *_args, **_kwargs: {"fp_rate": 0.0, "fn_rate": 0.0},
+    )
+
+    rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(out_file),
+            "--progress-file",
+            str(progress_file),
+            "--report-file",
+            str(report_file),
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    assert out_file.is_file()
+    assert report_file.is_file()
+    report_payload = json.loads(report_file.read_text(encoding="utf-8"))
+    assert report_payload["saved"] is True
+    assert report_payload["report"]["fitted_changed"] is True
+
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    stages = [item["stage"] for item in events]
+    assert "loading_dataset" in stages
+    assert "reanchor_cv" in stages
+    assert "saving_artifact" in stages
+    assert events[-1]["stage"] == "completed"
+    assert events[-1]["status"] == "completed"
+
+    # Simulated SIGTERM cancellation triggers exit code 130 + cancelled progress event
+    cancel_progress = tmp_path / "cancel_progress.jsonl"
+    monkeypatch.setattr(
+        optimize,
+        "optimize_memory",
+        MagicMock(side_effect=KeyboardInterrupt),
+    )
+    cancel_rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--progress-file",
+            str(cancel_progress),
+        ],
+        settings=settings,
+    )
+    assert cancel_rc == 130
+    cancel_events = [
+        json.loads(line) for line in cancel_progress.read_text(encoding="utf-8").splitlines()
+    ]
+    assert cancel_events[-1]["status"] == "cancelled"
+    assert isinstance(cancel_events[-1]["stage_timeline"], list)
+
+
+def test_endpoint_key_normalizes_default_port_and_trailing_dot(settings: Settings) -> None:
+    base_key = optimize._endpoint_key(optimize._normalize_database_url(settings.database_url))
+    assert base_key == ("ep-prod-pooler.region.aws.neon.tech", 5432, "/fleet")
+
+    # Explicit :5432, uppercase hostname, and trailing FQDN dot must all be rejected as primary DB.
+    for bypass_url in (
+        "postgresql+psycopg://user:password@ep-prod-pooler.region.aws.neon.tech:5432/fleet",
+        "postgresql://user:password@EP-PROD-POOLER.REGION.AWS.NEON.TECH.:5432/fleet?sslmode=require",
+        "postgresql+psycopg://other:pw@ep-prod.region.aws.neon.tech./fleet",
+        "postgresql+psycopg://other:pw@ep-prod.region.aws.neon.tech.:5432/fleet",
+    ):
+        with pytest.raises(optimize.DatabaseSafetyError):
+            optimize.guard_database_url(bypass_url, settings)
+
+    # Distinct non-default port on the same host is a distinct endpoint.
+    alt_port = "postgresql+psycopg://user:password@ep-prod-pooler.region.aws.neon.tech:5433/fleet"
+    assert optimize._endpoint_key(optimize._normalize_database_url(alt_port))[1] == 5433
+    assert optimize.guard_database_url(alt_port, settings).startswith("postgresql+psycopg://")
+
+
+def test_cli_database_url_file_and_mutual_exclusion(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "mem.jsonl",
+        [
+            {"task": "Remember UTC", "answer": "Noted", "worth_saving": True, "lineage": "a"},
+            {"task": "Hello", "answer": "Hi", "worth_saving": False, "lineage": "b"},
+        ],
+    )
+    db_file = tmp_path / "db.url"
+    db_file.write_text(_BRANCH_URL + "\n", encoding="utf-8")
+    db_file.chmod(0o600)
+
+    seen_urls: list[str] = []
+
+    def fake_optimize_memory(_settings, *, database_url: str, **_kwargs):
+        seen_urls.append(database_url)
+        return optimize.OptimizationResult(
+            target="memory",
+            output_path=tmp_path / "memory_gate.json",
+            saved=True,
+            baseline_score=0.5,
+            optimized_score=0.9,
+            train_size=1,
+            holdout_size=1,
+            report={"eligible": True, "saved": True},
+        )
+
+    monkeypatch.setattr(optimize, "optimize_memory", fake_optimize_memory)
+
+    rc = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url-file",
+            str(db_file),
+            "--dataset",
+            str(dataset),
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    assert seen_urls == [_BRANCH_URL]
+
+    # Primary DB URL (with :5432 bypass attempt) inside --database-url-file is refused with code 2.
+    primary_file = tmp_path / "primary.url"
+    primary_file.write_text(
+        "postgresql://user:supersecretpw@ep-prod-pooler.region.aws.neon.tech.:5432/fleet\n",
+        encoding="utf-8",
+    )
+    primary_file.chmod(0o600)
+    progress_file = tmp_path / "primary_progress.jsonl"
+    rc_primary = optimize.main(
+        [
+            "--target",
+            "memory",
+            "--database-url-file",
+            str(primary_file),
+            "--dataset",
+            str(dataset),
+            "--progress-file",
+            str(progress_file),
+        ],
+        settings=settings,
+    )
+    assert rc_primary == 2
+    assert "supersecretpw" not in progress_file.read_text(encoding="utf-8")
+    assert "supersecretpw" not in capsys.readouterr().err
+
+    # Passing both or neither --database-url / --database-url-file raises argparse SystemExit(2).
+    with pytest.raises(SystemExit) as exc_neither:
+        optimize.main(["--target", "memory", "--dataset", str(dataset)], settings=settings)
+    assert exc_neither.value.code == 2
+
+    with pytest.raises(SystemExit) as exc_both:
+        optimize.main(
+            [
+                "--target",
+                "memory",
+                "--database-url",
+                _BRANCH_URL,
+                "--database-url-file",
+                str(db_file),
+                "--dataset",
+                str(dataset),
+            ],
+            settings=settings,
+        )
+    assert exc_both.value.code == 2
+
+
+def test_credentials_file_per_role_lm15_and_no_secret_leaks(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dspy.clients import backend_selection
+
+    creds_path = tmp_path / "creds.json"
+    creds_payload = {
+        "root_lm": {
+            "dialect": "openai_compatible",
+            "api_mode": "chat",
+            "model": "meta-llama/Llama-3.3-70B",
+            "api_key": "sk-root-super-secret-value-123456",
+            "base_url": "https://user:urlsecretpass@compat.example.com/v1",
+            "provider_name": "Compat Gateway",
+            "timeout": 45,
+        },
+        "sub_lm": {
+            "dialect": "vllm",
+            "api_mode": "chat",
+            "model": "Qwen/Qwen2.5-72B",
+            "base_url": "http://localhost:8000/v1",
+            "provider_name": "Local vLLM",
+        },
+        "reflection_lm": {
+            "dialect": "openai",
+            "api_mode": "responses",
+            "model": "gpt-4.1",
+            "api_key": "sk-reflect-secret-value-654321",
+            "reasoning_effort": "xhigh",
+            "provider_name": "OpenAI Direct",
+        },
+        "judge_lm": {
+            "dialect": "sglang",
+            "api_mode": "chat",
+            "model": "Qwen/Qwen2.5-32B",
+            "base_url": "http://localhost:30000/v1",
+            "provider_name": "Local SGLang",
+        },
+        "decision_lm": {
+            "dialect": "typesafe",
+            "api_mode": "auto",
+            "model": "jev-1.14.0",
+            "api_key": "sk-typesafe-secret-value-987654",
+            "provider_name": "TypeSafe Prod",
+        },
+    }
+    creds_path.write_text(json.dumps(creds_payload), encoding="utf-8")
+    creds_path.chmod(0o600)
+
+    loaded = optimize.load_role_credentials(creds_path)
+    assert set(loaded) == {"root_lm", "sub_lm", "reflection_lm", "judge_lm", "decision_lm"}
+
+    built: dict[str, tuple[dspy.LM, str, str]] = {}
+    for role, spec in loaded.items():
+        lm_obj, routed, mode = optimize._build_role_lm(spec)
+        built[role] = (lm_obj, routed, mode)
+        sel = backend_selection.select_backend(lm_obj)
+        assert sel.native is True, f"Role {role} did not resolve natively in lm15: {sel}"
+        # Only native client keys (api_key, api_base, timeout) may appear in lm.kwargs.
+        assert not (set(lm_obj.kwargs) & {"headers", "extra_headers", "custom_llm_provider"})
+
+    assert built["root_lm"][1] == "openai-chat:meta-llama/Llama-3.3-70B"
+    assert built["root_lm"][0].model_type == "chat"
+    assert built["root_lm"][0].kwargs.get("timeout") == 45.0
+    assert built["sub_lm"][1] == "vllm:Qwen/Qwen2.5-72B"
+    assert built["sub_lm"][0].model_type == "chat"
+    assert "api_key" not in built["sub_lm"][0].kwargs
+    assert built["reflection_lm"][1] == "openai/gpt-4.1"
+    assert built["reflection_lm"][0].model_type == "responses"
+    assert built["reflection_lm"][0].kwargs["reasoning_effort"] == "xhigh"
+    assert built["judge_lm"][1] == "sglang:Qwen/Qwen2.5-32B"
+    assert built["judge_lm"][0].model_type == "chat"
+    assert built["decision_lm"][1] == "typesafe:jev-1.14.0"
+
+    # End-to-end RLM run with partial credentials file (omitted judge_lm falls back to Settings).
+    partial_creds = tmp_path / "partial_creds.json"
+    partial_creds.write_text(
+        json.dumps(
+            {
+                "root_lm": creds_payload["root_lm"],
+                "reflection_lm": creds_payload["reflection_lm"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    partial_creds.chmod(0o600)
+
+    dataset = _write_jsonl(
+        tmp_path / "rlm_creds.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {"id": "ho1", "lineage": "l3", "split": "holdout", "task": "H1", "answer": "H1A"},
+        ],
+    )
+    fallback_models: list[str] = []
+
+    def track_fallback(_s: Settings, name: str) -> dspy.LM:
+        fallback_models.append(name)
+        return dspy.LM(name, api_key="offline")
+
+    class FakeGEPA:
+        def __init__(self, **kwargs):
+            self.reflection_lm = kwargs["reflection_lm"]
+
+        def compile(self, student, *, trainset, valset):
+            assert self.reflection_lm.model == "openai/gpt-4.1"
+            assert self.reflection_lm.model_type == "responses"
+            compiled = student.deepcopy()
+            sig = compiled.generate_action.signature
+            assert sig is not None
+            compiled.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nRefined with role creds."
+            )
+            return compiled
+
+    scores = iter([50.0, 90.0])
+    monkeypatch.setattr(optimize.agent, "_model", track_fallback)
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPA)
+    monkeypatch.setattr(
+        dspy,
+        "Evaluate",
+        lambda **_kwargs: lambda _prog: SimpleNamespace(score=next(scores)),
+    )
+
+    db_file = tmp_path / "branch.url"
+    db_file.write_text(_BRANCH_URL, encoding="utf-8")
+    db_file.chmod(0o600)
+    report_file = tmp_path / "report.json"
+    progress_file = tmp_path / "progress.jsonl"
+    out_file = tmp_path / "rlm_out.json"
+
+    rc = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url-file",
+            str(db_file),
+            "--credentials-file",
+            str(partial_creds),
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(out_file),
+            "--report-file",
+            str(report_file),
+            "--progress-file",
+            str(progress_file),
+            "--local-interpreter",
+            "--holdout-repeats",
+            "1",
+        ],
+        settings=settings,
+    )
+    assert rc == 0
+    # Omitted roles (sub_lm, judge_lm) fell back to Settings defaults.
+    assert fallback_models == [settings.sub_llm_model, settings.llm_model]
+
+    report_text = report_file.read_text(encoding="utf-8")
+    progress_text = progress_file.read_text(encoding="utf-8")
+    for leaked in (
+        "sk-root-super-secret-value-123456",
+        "sk-reflect-secret-value-654321",
+        "urlsecretpass",
+        "compat.example.com",
+    ):
+        assert leaked not in report_text
+        assert leaked not in progress_text
+
+    parsed = json.loads(report_text)["report"]
+    assert parsed["models"]["root_lm"] == {
+        "dialect": "openai_compatible",
+        "model": "openai-chat:meta-llama/Llama-3.3-70B",
+        "provider_name": "Compat Gateway",
+    }
+    assert parsed["models"]["reflection_lm"] == {
+        "reasoning_effort": "xhigh",
+        "dialect": "openai",
+        "model": "openai/gpt-4.1",
+        "provider_name": "OpenAI Direct",
+    }
+    assert parsed["models"]["sub_lm"] == {
+        "dialect": "openai",
+        "model": settings.sub_llm_model,
+        "provider_name": None,
+    }
+
+
+def test_double_sigterm_is_idempotent_during_daytona_cleanup(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import signal
+
+    dataset = _write_jsonl(
+        tmp_path / "rlm_sigterm.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {"id": "ho1", "lineage": "l3", "split": "holdout", "task": "H1", "answer": "H1A"},
+        ],
+    )
+    cleanup_state = {"created": 0, "deleted": 0, "second_sigterm_sent": False}
+
+    class FakeDaytonaClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    @asynccontextmanager
+    async def fake_ephemeral_sandbox(_daytona, _settings: Settings):
+        cleanup_state["created"] += 1
+        try:
+            yield SimpleNamespace(id=f"sb-sig-{cleanup_state['created']}")
+        finally:
+            # Simulate a second SIGTERM arriving while cleanup is in progress.
+            if not cleanup_state["second_sigterm_sent"]:
+                cleanup_state["second_sigterm_sent"] = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.02)
+            cleanup_state["deleted"] += 1
+
+    def fake_factory(sandbox, _settings, loop):
+        class _Factory:
+            execution_instructions = interpreter.DaytonaCodeInterpreter.execution_instructions
+
+            def __call__(self, **_kwargs):
+                return SimpleNamespace(sandbox=sandbox, loop=loop, shutdown=lambda: None)
+
+        return _Factory()
+
+    class InterruptingEvaluate:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __call__(self, _program):
+            os.kill(os.getpid(), signal.SIGTERM)
+            return SimpleNamespace(score=50.0)
+
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(optimize.interpreter, "make_daytona_client", lambda _s: FakeDaytonaClient())
+    monkeypatch.setattr(optimize.interpreter, "ephemeral_sandbox", fake_ephemeral_sandbox)
+    monkeypatch.setattr(optimize.interpreter, "make_interpreter_factory", fake_factory)
+    monkeypatch.setattr(dspy, "Evaluate", InterruptingEvaluate)
+
+    progress_file = tmp_path / "sigterm_progress.jsonl"
+    prev_handler = signal.getsignal(signal.SIGTERM)
+    rc = optimize.main(
+        [
+            "--target",
+            "rlm",
+            "--database-url",
+            _BRANCH_URL,
+            "--dataset",
+            str(dataset),
+            "--num-threads",
+            "1",
+            "--holdout-repeats",
+            "1",
+            "--progress-file",
+            str(progress_file),
+        ],
+        settings=settings,
+    )
+    assert rc == 130
+    assert signal.getsignal(signal.SIGTERM) == prev_handler
+    assert cleanup_state["second_sigterm_sent"] is True
+    assert cleanup_state["created"] == 1
+    assert cleanup_state["deleted"] == 1
+
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["status"] == "cancelled"
+    timeline = events[-1]["stage_timeline"]
+    assert timeline[-1]["stage"] == "baseline_eval"
+    assert timeline[-1]["status"] == "cancelled"
+    assert timeline[-1]["finished_at"] is not None
+    assert timeline[-1]["duration_seconds"] >= 0.0
+
+
+def test_reanchor_telemetry_eligible_gate_checks_param_diffs_case_deltas_and_force(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "skills_telemetry.jsonl",
+        [
+            {
+                "task": "Analyze CSV revenue",
+                "expected_skill": "data-analysis",
+                "lineage": "tr-csv",
+                "split": "train",
+            },
+            {
+                "task": "Hello there",
+                "expected_skill": None,
+                "lineage": "tr-hi",
+                "split": "train",
+            },
+            {
+                "task": "Summarize quarterly CSV",
+                "expected_skill": "data-analysis",
+                "secondary_skills": ["charts"],
+                "prior_turns": [{"user": "Load Q1 CSV", "assistant": "Loaded."}],
+                "lineage": "ho-csv",
+                "split": "holdout",
+            },
+            {
+                "task": "Just saying hi",
+                "expected_skill": None,
+                "lineage": "ho-hi",
+                "split": "holdout",
+            },
+        ],
+    )
+
+    class FakeSkillDecisionLM(BaseLM):
+        supports_decision_requests = True
+
+        def __init__(self) -> None:
+            super().__init__(model="typesafe:jev-1.14.0", cache=True)
+            self.history = [{"response": {"model": "jev-1.14.0"}}]
+
+        def __call__(self, request, **kwargs):
+            task = request.messages[0].parts[0].value["inputs"]["task"]
+            is_hi = "Just saying hi" in task or "Hello" in task
+            return SimpleNamespace(
+                provider_data={
+                    "typesafe": {
+                        "answers": {
+                            # Baseline 0.50 marks greeting as FP (0.62 >= 0.50);
+                            # calibrated 0.72 fixes greeting while keeping CSV positive (0.91).
+                            "needs_skill": {"noul": 0.62 if is_hi else 0.91},
+                            "primary_skill": {
+                                "probabilities": {"data-analysis": 0.65, "charts": 0.35},
+                                "confidence": 0.65,
+                            },
+                        }
+                    }
+                }
+            )
+
+    fake_lm = FakeSkillDecisionLM()
+
+    class FakeQualifyingReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "train_score_before": 0.5,
+                "train_score": 1.0,
+                "val_score_before": 0.5,
+                "val_score": 1.0,
+                "fitted": [
+                    {"field": "needs_skill", "parameter": "threshold", "value": 0.72},
+                    {
+                        "field": "primary_skill",
+                        "parameter": "weights",
+                        "value": {"data-analysis": 1.25, "charts": 0.85},
+                    },
+                ],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            compiled = student.deepcopy()
+            compiled.fields = {
+                "needs_skill": {"threshold": 0.72},
+                "primary_skill": {"weights": {"data-analysis": 1.25, "charts": 0.85}},
+            }
+            return compiled
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeQualifyingReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", lambda _model: fake_lm)
+
+    qual_res = optimize.optimize_skills(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "skills_ok.json",
+        require_cache=False,
+    )
+    assert qual_res.saved is True
+    assert qual_res.report["eligible"] is True
+    checks = {item["name"]: item for item in qual_res.report["gate_checks"]}
+    assert set(checks) == {
+        "parameters_changed",
+        "holdout_score_improved",
+        "fp_rate_non_regression",
+    }
+    assert all(item["passed"] is True for item in checks.values())
+    for item in checks.values():
+        assert {"name", "label", "passed", "actual", "threshold", "reason"} <= set(item)
+
+    param_diffs = {
+        (item["gate"], item["parameter"]): item for item in qual_res.report["parameter_diffs"]
+    }
+    assert param_diffs[("needs_skill", "threshold")] == {
+        "gate": "needs_skill",
+        "parameter": "threshold",
+        "baseline": 0.5,
+        "fitted": 0.72,
+        "delta": 0.22,
+    }
+    assert param_diffs[("primary_skill", "weight:data-analysis")] == {
+        "gate": "primary_skill",
+        "parameter": "weight:data-analysis",
+        "baseline": 1.0,
+        "fitted": 1.25,
+        "delta": 0.25,
+    }
+    assert param_diffs[("primary_skill", "weight:charts")] == {
+        "gate": "primary_skill",
+        "parameter": "weight:charts",
+        "baseline": 1.0,
+        "fitted": 0.85,
+        "delta": -0.15,
+    }
+
+    assert qual_res.report["diagnostics_before"]["fp_rate"] == 1.0
+    assert qual_res.report["diagnostics_after"]["fp_rate"] == 0.0
+    assert qual_res.report["diagnostics_after"]["primary_accuracy"] == 1.0
+    assert qual_res.report["diagnostics_after"]["multi_turn_accuracy"] == 1.0
+    assert qual_res.report["diagnostics_after"]["secondary_hit_rate"] == 1.0
+    assert len(qual_res.report["fixed_cases"]) == 1
+    assert qual_res.report["fixed_cases"][0]["lineage"] == "ho-hi"
+    assert qual_res.report["fixed_cases"][0]["outcome"] == "fixed"
+    assert qual_res.report["fixed_cases"][0]["baseline_pred"] == "data-analysis"
+    assert qual_res.report["fixed_cases"][0]["candidate_pred"] == "none"
+    assert qual_res.report["regressed_cases"] == []
+    assert len(qual_res.report["case_deltas"]) == 2
+    assert qual_res.report["models"]["decision_lm"]["dialect"] == "typesafe"
+
+    # --force on a failing ReAnchor run MUST keep eligible=False while setting saved=True.
+    class FakeRegressingReAnchor:
+        def __init__(self, _metric, **_kwargs):
+            self.report = {
+                "val_score_before": 0.8,
+                "val_score": 0.8,
+                "fp_rate_before": 0.0,
+                "fp_rate_after": 0.5,
+                "fitted": [{"field": "needs_skill", "parameter": "threshold", "value": 0.30}],
+            }
+
+        def compile(self, student, *, trainset, valset=None):
+            compiled = student.deepcopy()
+            compiled.fields = {"needs_skill": {"threshold": 0.30}}
+            return compiled
+
+    monkeypatch.setattr(optimize, "ReAnchor", FakeRegressingReAnchor)
+    monkeypatch.setattr(optimize.dspy, "LM", MagicMock(return_value="dummy-jev"))
+    forced_res = optimize.optimize_skills(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "skills_forced.json",
+        force=True,
+    )
+    assert forced_res.saved is True
+    assert forced_res.report["eligible"] is False
+    forced_checks = {item["name"]: item for item in forced_res.report["gate_checks"]}
+    assert forced_checks["holdout_score_improved"]["passed"] is False
+    assert forced_checks["fp_rate_non_regression"]["passed"] is False
+
+
+def test_gepa_telemetry_gate_checks_instruction_diffs_candidate_history_and_scrubbing(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _write_jsonl(
+        tmp_path / "rlm_telemetry.jsonl",
+        [
+            {"id": "tr1", "lineage": "l1", "split": "train", "task": "T1", "answer": "A1"},
+            {"id": "va1", "lineage": "l2", "split": "val", "task": "V1", "answer": "VA1"},
+            {
+                "id": "ho-block",
+                "lineage": "l3",
+                "split": "holdout",
+                "task": "Blocking task",
+                "answer": "EXACT",
+                "blocking": True,
+                "verifier": {"type": "exact", "expected": "EXACT"},
+            },
+            {
+                "id": "ho-fix",
+                "lineage": "l4",
+                "split": "holdout",
+                "task": "Fixable task",
+                "answer": "FIXED",
+                "verifier": {"type": "exact", "expected": "FIXED"},
+            },
+        ],
+    )
+
+    class FakeGEPAWithStats:
+        def __init__(self, **kwargs):
+            self.metric = kwargs["metric"]
+
+        def compile(self, student, *, trainset, valset):
+            # Trigger tracked_gepa_metric to verify live best_score emission.
+            self.metric(valset[0], dspy.Prediction(answer=valset[0].answer))
+            cand1 = student.deepcopy()
+            sig = cand1.generate_action.signature
+            assert sig is not None
+            cand1.generate_action.signature = sig.with_instructions(
+                f"{sig.instructions or ''}\nAlways double check exact strings."
+            )
+            cand1.detailed_results = SimpleNamespace(
+                candidates=[student.deepcopy(), cand1],
+                parents=[[None], [0]],
+                val_aggregate_scores=[0.5, 0.95],
+                discovery_eval_counts=[4, 18],
+                total_metric_calls=24,
+                best_idx=1,
+            )
+            return cand1
+
+    class FakeEvaluate:
+        def __init__(self, **kwargs):
+            self.devset = list(kwargs["devset"])
+            self.metric = kwargs["metric"]
+            self.calls = 0
+
+        def __call__(self, _program):
+            self.calls += 1
+            results = []
+            total = 0.0
+            for ex in self.devset:
+                if self.calls == 1:
+                    ans = "EXACT" if ex.case_id == "ho-block" else "WRONG"
+                else:
+                    # Candidate fails blocking case and fixes ho-fix to test pinning order.
+                    ans = "WRONG" if ex.case_id == "ho-block" else "FIXED"
+                pred = dspy.Prediction(
+                    answer=ans,
+                    telemetry=optimize._RolloutTelemetry(completion="submit", root_actions=2),
+                )
+                score = self.metric(ex, pred)
+                total += float(score)
+                results.append((ex, pred, score))
+            return SimpleNamespace(
+                score=round(100.0 * total / len(self.devset), 2),
+                results=results,
+            )
+
+    monkeypatch.setattr(optimize.agent, "_model", lambda _s, name: dspy.LM(name, api_key="offline"))
+    monkeypatch.setattr(dspy, "GEPA", FakeGEPAWithStats)
+    monkeypatch.setattr(dspy, "Evaluate", FakeEvaluate)
+
+    progress_file = tmp_path / "gepa_progress.jsonl"
+    progress = optimize._ProgressEmitter(progress_file)
+    result = optimize.optimize_rlm(
+        settings,
+        database_url=_BRANCH_URL,
+        dataset=dataset,
+        output_path=tmp_path / "gepa_forced.json",
+        holdout_repeats=1,
+        local_interpreter=True,
+        force=True,
+        progress=progress,
+    )
+
+    assert result.saved is True
+    assert result.report["eligible"] is False
+    checks = {item["name"]: item for item in result.report["gate_checks"]}
+    assert set(checks) == {
+        "instructions_changed",
+        "holdout_score_improved",
+        "correctness_non_regression",
+        "zero_blocking_failures",
+        "zero_paired_regressions",
+    }
+    assert checks["instructions_changed"]["passed"] is True
+    assert checks["zero_blocking_failures"]["passed"] is False
+    assert checks["zero_paired_regressions"]["passed"] is False
+
+    # Unified instruction diff generated for changed predictor and empty string for unchanged.
+    diffs = result.report["instruction_diffs"]
+    assert "--- baseline/generate_action" in diffs["generate_action"]
+    assert "+++ optimized/generate_action" in diffs["generate_action"]
+    assert "+Always double check exact strings." in diffs["generate_action"]
+    assert diffs["extract"] == ""
+
+    # Structured candidate_history extracted cleanly from detailed_results.
+    history = result.report["candidate_history"]
+    assert len(history) == 2
+    assert history[0]["candidate_idx"] == 0
+    assert history[0]["val_score"] == 0.5
+    assert history[0]["parent"] is None
+    assert history[1]["candidate_idx"] == 1
+    assert history[1]["val_score"] == 0.95
+    assert history[1]["parent"] == 0
+    assert history[1]["accepted"] is True
+    assert history[1]["is_best"] is True
+    assert history[1]["metric_calls"] == 18
+    assert "generate_action" in (history[1]["reflection_summary"] or "")
+
+    # Blocking failure / paired regression case is pinned first in case_deltas.
+    deltas = result.report["case_deltas"]
+    assert [row["case_id"] for row in deltas] == ["ho-block", "ho-fix"]
+    assert deltas[0]["blocking_failed"] is True
+    assert deltas[0]["paired_regression"] is True
+    assert deltas[0]["outcome"] == "regressed"
+    assert deltas[1]["outcome"] == "fixed"
+
+    # Progress JSONL carries cumulative stage_timeline and live best_score during gepa_compile.
+    events = [json.loads(line) for line in progress_file.read_text(encoding="utf-8").splitlines()]
+    gepa_ticks = [e for e in events if e["stage"] == "gepa_compile" and e["completed"] == 1]
+    assert gepa_ticks and gepa_ticks[0]["best_score"] == 100.0
+    final_timeline = events[-1]["stage_timeline"]
+    assert [entry["stage"] for entry in final_timeline] == [
+        "loading_dataset",
+        "baseline_eval",
+        "gepa_compile",
+        "holdout_eval",
+        "saving_artifact",
+    ]
+    assert all(
+        entry["status"] == "completed"
+        and entry["started_at"] is not None
+        and entry["finished_at"] is not None
+        and entry["duration_seconds"] >= 0.0
+        for entry in final_timeline
+    )
+
+    # Absent or minimal mocked detailed_results never crashes extraction.
+    assert optimize._extract_gepa_candidate_history(None) == []
+    assert optimize._extract_gepa_candidate_history(SimpleNamespace()) == []
+
+    # Error messages emitted to progress.jsonl are scrubbed of secrets.
+    err_progress = tmp_path / "err_progress.jsonl"
+    monkeypatch.setattr(
+        optimize,
+        "optimize_rlm",
+        MagicMock(
+            side_effect=RuntimeError(
+                "Auth failed for sk-leak-secret-token-9876543210 against "
+                "postgresql+psycopg://user:dbsecret99@host/db"
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError):
+        optimize.main(
+            [
+                "--target",
+                "rlm",
+                "--database-url",
+                _BRANCH_URL,
+                "--dataset",
+                str(dataset),
+                "--progress-file",
+                str(err_progress),
+            ],
+            settings=settings,
+        )
+    err_text = err_progress.read_text(encoding="utf-8")
+    assert "sk-leak-secret-token-9876543210" not in err_text
+    assert "dbsecret99" not in err_text
+    assert "[REDACTED]" in err_text
+
+
+def test_custom_temp_dir_rlm_dataset_fixture_id_fallback(
+    settings: Settings, tmp_path: Path
+) -> None:
+    from tempfile import TemporaryDirectory
+
+    # 1. Custom RLM JSONL in an isolated TemporaryDirectory without sibling fixtures.py
+    # falls back to repo eval_datasets/fixtures.py.
+    with TemporaryDirectory(prefix="fleet-test-custom-rlm-") as temp_dir:
+        custom_jsonl = _write_jsonl(
+            Path(temp_dir) / "uploaded.jsonl",
+            [
+                {
+                    "id": "custom-inv-1",
+                    "lineage": "inv",
+                    "split": "train",
+                    "task": "Audit invoices",
+                    "answer": "42",
+                    "fixture_id": "data_dirty_invoices",
+                    "verifier": {"type": "exact", "expected": "42"},
+                }
+            ],
+        )
+        loaded = optimize.load_rlm_dataset(custom_jsonl, settings=settings)
+        assert len(loaded) == 1
+        by_id, _by_key, _any_web = optimize._build_case_spec_tables(loaded)
+        files, _web = optimize._resolve_case_fixtures(by_id["custom-inv-1"])
+        assert files and any(name.endswith(".csv") for name in files)
+
+    # 2. Fallback to eval_datasets/fixtures/<fixture_id>/ directory when no fixtures.py defines it.
+    custom_eval_dir = tmp_path / "custom_eval_datasets"
+    fixture_dir = custom_eval_dir / "fixtures" / "dir_case_alpha"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "metrics.csv").write_text("k,v\na,10\n", encoding="utf-8")
+    (fixture_dir / "web.json").write_text(
+        json.dumps({"limit": 2, "searches": {}, "pages": {}}),
+        encoding="utf-8",
+    )
+    dir_settings = settings.model_copy(update={"eval_datasets_dir": custom_eval_dir})
+
+    with TemporaryDirectory(prefix="fleet-test-dir-fixture-") as temp_dir:
+        dir_jsonl = _write_jsonl(
+            Path(temp_dir) / "uploaded_dir.jsonl",
+            [
+                {
+                    "id": "dir-1",
+                    "lineage": "dir",
+                    "split": "train",
+                    "task": "Read metrics.csv",
+                    "answer": "10",
+                    "fixture_id": "dir_case_alpha",
+                    "verifier": {"type": "exact", "expected": "10"},
+                },
+                {
+                    "id": "dir-traversal",
+                    "lineage": "trav",
+                    "split": "holdout",
+                    "task": "Attempt traversal",
+                    "answer": "no",
+                    "fixture_id": "../secret",
+                    "verifier": {"type": "exact", "expected": "no"},
+                },
+            ],
+        )
+        loaded_dir = optimize.load_rlm_dataset(dir_jsonl, settings=dir_settings)
+        by_id_dir, _by_key_dir, _any_web_dir = optimize._build_case_spec_tables(loaded_dir)
+        dir_files, dir_web = optimize._resolve_case_fixtures(by_id_dir["dir-1"])
+        assert dir_files == {"metrics.csv": b"k,v\na,10\n"}
+        assert dir_web == {"limit": 2, "searches": {}, "pages": {}}
+        with pytest.raises((FileNotFoundError, KeyError)):
+            optimize._resolve_case_fixtures(by_id_dir["dir-traversal"])

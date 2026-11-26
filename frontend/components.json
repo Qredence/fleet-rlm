@@ -22,6 +22,7 @@
   "menuColor": "default",
   "menuAccent": "subtle",
   "registries": {
-    "@beui": "https://beui.dev/r/{name}.json"
+    "@beui": "https://beui.dev/r/{name}.json",
+    "@fluid": "https://www.fluidfunctionalism.com/r/{name}.json"
   }
 }
