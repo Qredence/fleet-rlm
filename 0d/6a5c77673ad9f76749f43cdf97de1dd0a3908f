@@ -1,0 +1,27 @@
+AGENTS.md
+  s_4c5656a3b33387::t_ca066a86a12c1c 1,3,5,7,9,11-14,16,18,20,22-25,27-31
+README.md
+  s_4c5656a3b33387::t_d446976b6042c2 11,38,119
+docs/architecture.md
+  s_4c5656a3b33387::t_d2c4635a87d148 1,3,5,7,9,11,13,15,17
+docs/daytona-v2-migration.md
+  s_4c5656a3b33387::t_647c45ba16108a 1,3,5,12,24
+docs/evaluation-baseline.md
+  s_4c5656a3b33387::t_64e1566592c3f1 3-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0d6a5c77673ad9f76749f43cdf97de1dd0a3908f",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
