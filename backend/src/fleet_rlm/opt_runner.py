@@ -1286,6 +1286,35 @@ def _rlm_arguments(spec: JobRunSpec, dataset_arg: Path | None) -> list[str]:
     return cmd
 
 
+async def _poll_job_cancellation(
+    sessionmaker: store.SessionFactory, job_id: UUID, event: asyncio.Event
+) -> bool:
+    if event.is_set():
+        return True
+    try:
+        if await store.is_optimization_job_cancel_requested(sessionmaker, job_id):
+            event.set()
+    except Exception as error:
+        _LOG.warning(
+            "Transient DB error polling cancel flag for job %s (%s)", job_id, type(error).__name__
+        )
+    return event.is_set()
+
+
+def _unsuccessful_exit(
+    cancelled: bool, returncode: int | None, log_tail: str
+) -> tuple[Literal["cancelled", "failed"], str] | None:
+    if cancelled or returncode == 130:
+        return "cancelled", "Cancelled by user"
+    if returncode == 0:
+        return None
+    message = next(
+        (line.strip() for line in reversed(log_tail.splitlines()) if line.strip()),
+        f"Optimizer exited with code {returncode}",
+    )
+    return "failed", message[:500]
+
+
 async def supervise_optimization_job(
     runtime: OptimizationRuntimeLike,
     job_id: UUID,
@@ -1536,21 +1565,9 @@ async def supervise_optimization_job(
                             type(db_error).__name__,
                         )
 
-                    cancel_now = cancel_event.is_set()
-                    if not cancel_now:
-                        try:
-                            cancel_now = await store.is_optimization_job_cancel_requested(
-                                runtime.sessionmaker, job_id
-                            )
-                            if cancel_now:
-                                cancel_event.set()
-                        except Exception as db_error:
-                            _LOG.warning(
-                                "Transient DB error polling cancel flag for job %s (%s)",
-                                job_id,
-                                type(db_error).__name__,
-                            )
-
+                    cancel_now = await _poll_job_cancellation(
+                        runtime.sessionmaker, job_id, cancel_event
+                    )
                     if cancel_now:
                         cancelled = True
                         if not terminate_sent:
@@ -1620,33 +1637,18 @@ async def supervise_optimization_job(
                     if isinstance(parsed_report, dict):
                         report_payload = opt_datasets.scrub_secrets(parsed_report, extra_secrets)
 
-            if cancelled or proc.returncode == 130:
+            unsuccessful = _unsuccessful_exit(cancelled, proc.returncode, scrubbed_log_tail)
+            if unsuccessful is not None:
+                status, message = unsuccessful
                 await store.finish_optimization_job(
                     runtime.sessionmaker,
                     job_id,
-                    status="cancelled",
-                    stage="cancelled",
-                    progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
+                    status=status,
+                    stage=status,
+                    progress_json={**progress_state, "stage": status, "label": status.capitalize()},
                     report_json=report_payload,
                     log_tail=scrubbed_log_tail,
-                    error="Cancelled by user",
-                )
-                return
-
-            if proc.returncode != 0:
-                last_line = next(
-                    (ln.strip() for ln in reversed(scrubbed_log_tail.splitlines()) if ln.strip()),
-                    f"Optimizer exited with code {proc.returncode}",
-                )
-                await store.finish_optimization_job(
-                    runtime.sessionmaker,
-                    job_id,
-                    status="failed",
-                    stage="failed",
-                    progress_json={**progress_state, "stage": "failed", "label": "Failed"},
-                    report_json=report_payload,
-                    log_tail=scrubbed_log_tail,
-                    error=opt_datasets.scrub_secrets(last_line[:500], extra_secrets),
+                    error=opt_datasets.scrub_secrets(message, extra_secrets),
                 )
                 return
 
