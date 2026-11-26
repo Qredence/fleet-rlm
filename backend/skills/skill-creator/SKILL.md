@@ -1,6 +1,7 @@
 ---
 name: skill-creator
 description: Create an installable Fleet skill when asked to turn a repeatable workflow into a SKILL.md for future sessions.
+approved-session-memories: true
 ---
 
 Identify the request that should select the skill and what a future agent needs to do differently. When the workflow depends on approved session memories, generalize their relevant instructions and omit private details.

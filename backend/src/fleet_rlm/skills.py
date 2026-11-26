@@ -34,18 +34,24 @@ class SkillDefinition:
     body: str
     path: Path
     allowed_tools: tuple[str, ...] = ()
-    mcp_servers: tuple[str, ...] = ()
+    requires_host_tools: bool = False
+    required_settings: tuple[str, ...] = ()
+    handles_direct_urls: bool = False
+    companion_skills: tuple[str, ...] = ()
+    approved_session_memories: bool = False
 
     def unavailable_reason(self, settings: Settings) -> str | None:
-        if self.name != "web-research" or not {"web_search", "web_open"}.intersection(
-            self.allowed_tools
-        ):
-            return None
-        if _host_tools_path(self) is None:
-            return "Fleet's host web tools require the bundled web-research skill."
-        if not settings.tavily_api_key:
-            return "Configure TAVILY_API_KEY on the Fleet host to use web-research."
+        if self.requires_host_tools and _host_tools_path(self) is None:
+            return f"Fleet's host tools require the bundled {self.name} skill."
+        for name in self.required_settings:
+            if not getattr(settings, name):
+                return f"Configure {_setting_env_name(name)} on the Fleet host to use {self.name}."
         return None
+
+
+def _setting_env_name(name: str) -> str:
+    alias = Settings.model_fields[name].validation_alias
+    return alias if isinstance(alias, str) else Settings.model_config["env_prefix"] + name.upper()
 
 
 @dataclass(frozen=True)
@@ -158,8 +164,11 @@ def _parse_skill(content: bytes, path: Path, *, strict: bool) -> SkillDefinition
             raise ValueError(f"{path}: {key} must be a nonempty string")
         return value.strip()
 
+    def field(key: str, default):
+        return metadata.get(key, metadata.get(key.replace("_", "-"), default))
+
     def names(key: str) -> tuple[str, ...]:
-        value = metadata.get(key, [])
+        value = field(key, [])
         if isinstance(value, str):
             value = value.split()
         if not isinstance(value, list) or any(
@@ -167,6 +176,12 @@ def _parse_skill(content: bytes, path: Path, *, strict: bool) -> SkillDefinition
         ):
             raise ValueError(f"{path}: {key} must contain nonempty names")
         return tuple(dict.fromkeys(item.strip() for item in value))
+
+    def flag(key: str) -> bool:
+        value = field(key, False)
+        if not isinstance(value, bool):
+            raise ValueError(f"{path}: {key} must be true or false")
+        return value
 
     name, description = required("name"), required("description")
     body = "".join(lines[end + 1 :]).strip()
@@ -179,13 +194,20 @@ def _parse_skill(content: bytes, path: Path, *, strict: bool) -> SkillDefinition
             raise ValueError("Skill description must be at most 1024 characters")
         if not body:
             raise ValueError("SKILL.md must include instructions after its frontmatter")
+    required_settings = names("required_settings")
+    if unknown := set(required_settings) - Settings.model_fields.keys():
+        raise ValueError(f"{path}: unknown required_settings: {', '.join(sorted(unknown))}")
     return SkillDefinition(
         name,
         description,
         body,
         path,
-        names("allowed_tools" if "allowed_tools" in metadata else "allowed-tools"),
-        names("mcp_servers"),
+        allowed_tools=names("allowed_tools"),
+        requires_host_tools=flag("requires_host_tools"),
+        required_settings=required_settings,
+        handles_direct_urls=flag("handles_direct_urls"),
+        companion_skills=names("companion_skills"),
+        approved_session_memories=flag("approved_session_memories"),
     )
 
 
@@ -413,7 +435,7 @@ def select_skills(
             (
                 skill
                 for skill in available
-                if skill.name == "web-research" and _host_tools_path(skill) is not None
+                if skill.handles_direct_urls and _host_tools_path(skill) is not None
             ),
             None,
         )
@@ -469,12 +491,10 @@ def select_skills(
             if isinstance(primary, str) and primary in by_name:
                 active = (by_name[primary],)
                 scores.setdefault(primary, float(probabilities.get(primary, 1.0)))
-    if len(active) == 1 and active[0].name in {"data-analysis", "chart-visualization"}:
-        pair = ("data-analysis", "chart-visualization")
+    if len(active) == 1 and active[0].companion_skills and _analysis_and_chart(task):
         by_name = {skill.name: skill for skill in candidates}
-        if all(name in by_name for name in pair) and _analysis_and_chart(task):
-            primary = active[0]
-            companion = next(name for name in pair if name != primary.name)
-            active = (primary, by_name[companion])
+        companion = next((name for name in active[0].companion_skills if name in by_name), None)
+        if companion is not None:
+            active = (active[0], by_name[companion])
             scores.setdefault(companion, 0.0)
     return _selection(active, scores, required=web)

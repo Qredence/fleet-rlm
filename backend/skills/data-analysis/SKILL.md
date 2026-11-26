@@ -1,6 +1,7 @@
 ---
 name: data-analysis
 description: Filter, group, reconcile, or summarize tabular records from CSV, Parquet, or spreadsheet exports. Use for derived tables and aggregate figures.
+companion-skills: chart-visualization
 ---
 
 Read inputs from `/workspace/files`. Inspect column types, units and missing values before choosing grouping keys. Decide whether a missing key forms its own group or excludes a row and report that choice when it affects the result.
