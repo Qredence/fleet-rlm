@@ -1,0 +1,25 @@
+.circleci/smoke-wheel.sh
+  s_4c5656a3b33387::t_14b182b4a32760 11,17-20,22-29
+backend/pyproject.toml
+  s_4c5656a3b33387::t_5f4e5f7b3d7ffd 169,175
+backend/src/fleet_rlm/opt_runner.py
+  s_4c5656a3b33387::t_298eed6202d473 253-258
+backend/src/fleet_rlm/optimize.py
+  s_4c5656a3b33387::t_8c7b814143f97e 1697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7519f98fc75c1e4597cc4cedd7ff95beb8055253",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
