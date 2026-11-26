@@ -1,0 +1,19 @@
+backend/tests/test_optimization_ui_api.py
+  s_4c5656a3b33387::t_90e343403f1083 1817-1853
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ea948dbc3670400dcffc3d5f9a2c350ef4113baa",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
