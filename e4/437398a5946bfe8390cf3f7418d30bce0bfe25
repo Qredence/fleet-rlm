@@ -1,0 +1,24 @@
+frontend/src/components/agent/WorkspaceSidePanel.tsx
+  h_f276322eb5eb9f 70-81
+frontend/src/components/optimization/ActiveRunBanner.tsx
+  h_f276322eb5eb9f 1,3,35,52-62,69-74,98-146,152-186,201,205,220-229,231-262,277-285,315,317,327-336,348-349,355-377,381-401,434-442
+frontend/src/components/optimization/ModelCombobox.tsx
+  h_f276322eb5eb9f 1-434
+frontend/src/hooks/use-optimizations.test.ts
+  h_f276322eb5eb9f 1-672
+frontend/src/hooks/use-optimizations.ts
+  h_f276322eb5eb9f 3,17-42,45-130,190-316,322-324,329,333,335-356,361,364-368,371-376,382-384,391,394-399,402-403,405-410,417-419,427-466,470-493,496-497,500,504-510,514-516,518,520-545,547-565,569-605,608-611,613-620,622-623,625-638,649-650
+frontend/src/index.css
+  h_f276322eb5eb9f 87-91,94-97,100-103,106-109,112-115,117-118,144,247,269-276,279-284,323-363,416,419-420,422,425-429,431,512,516,530,534-539,542,561-564,567-568,572-573,577-580,583-584,587-588,591-592,595-596,599-600,603-604,607-608,611-612,615-616,619-620,623-624,627-628,631-632,636-637,641-642,645-646,650-651,654-655,659-672,675-681,684-687,690-691,693-699,701-703,705-724
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4437398a5946bfe8390cf3f7418d30bce0bfe25",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
