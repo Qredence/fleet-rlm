@@ -12,7 +12,11 @@ help:
 
 check: check-backend check-frontend
 
-check-backend:
+.PHONY: check-hygiene
+check-hygiene:
+	uv run --locked --project backend python scripts/check_hygiene.py
+
+check-backend: check-hygiene
 	cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports && uv run ty check src && uv run pytest
 
 check-frontend:
