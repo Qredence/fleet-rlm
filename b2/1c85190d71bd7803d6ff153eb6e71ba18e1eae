@@ -1,0 +1,16 @@
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 10,191-192,1907-1910
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 1389-1393,1411,1413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b21c85190d71bd7803d6ff153eb6e71ba18e1eae",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
