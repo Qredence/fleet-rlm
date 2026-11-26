@@ -131,3 +131,105 @@ Both arms ran against isolated Neon branches, branch-scoped Neon Object Storage,
 
 - Both arms missed `route-workbook` (`0/2`, uncalibrated `SkillSelector`); the single `skill-creator-reuse` candidate repeat miss was traced to stochastic LLM authoring variance in the generated `SKILL.md` with zero `MemoryGate` involvement.
 - **Promotion:** Enabled in untracked `backend/.env` with `FLEET_MEMORY_GATE_PATH=artifacts/memory_gate.json`, pinned `FLEET_DECISION_MODEL=typesafe:jev-1.14.0`, and `FLEET_SKILLS_DIR=skills`. `SkillSelector` and root `dspy.RLM` remain unoptimized until future candidates pass their promotion gates.
+
+## Five-repeat routing release qualification, 2026-11-26
+
+The candidate was merged main at `e665bff6a`. The reference was `d6bcbc84f`, immediately before the two Jev routing fixes. Both ran Daytona v2 using the same image and model settings on separate disposable Neon branches with branch-specific object storage, separate skills directories and separate MLflow experiments. DSPy memory and disk model caches were disabled. This comparison measures the routing release on v2. The historical v0 cutover is a separate qualification.
+
+### Jev routing
+
+| Metric | Reference | Candidate |
+| --- | ---: | ---: |
+| Primary skill present or correct abstention | 155/205 | 205/205 |
+| Exact ordered skill list | 145/205 | 205/205 |
+| Exact matches per 41-case repeat | 30, 30, 27, 29, 29 | 41, 41, 41, 41, 41 |
+
+Each arm used its own bundled registry. The reference numbers exclude a preliminary run that loaded the candidate checkout's skill directory, which affected recognition of bundled host tools. The five passes reuse the same 41 labeled cases. They measure repeatability on that corpus.
+
+### Live HTTP workflows
+
+**Release decision — hold.** Candidate routing passed every automatic-selection case, but the candidate cleared only 56 of 70 scheduled bundled checks and 7 of 10 recovery checks with verified traces. Eight bundled case/repeat pairs that passed on the reference did not pass on the candidate. Diagnostic replays are excluded from all qualification totals.
+
+Both deployments reported `openai/deepseek/deepseek-v4.1-flash` for the root and child model, `typesafe:jev-1.14.0` for decisions, image `img_MDWBfg4msegHiPCgBbJh7W`, 20 iterations, 50 LM calls, and maximum depth 4. The bundled runner starts five repeat lanes concurrently per arm. The recovery runner runs both cases concurrently within each repeat. [Reference bundled run](http://127.0.0.1:5001/#/experiments/49/runs/cb438e02703646e99e189472c8390c95) · [Candidate bundled run](http://127.0.0.1:5001/#/experiments/50/runs/da17f90b8bb446a598ae8e04cca5877a)
+
+| Workflow (passes out of five) | Reference | Candidate |
+| --- | ---: | ---: |
+| Null-key data analysis | 4 | 5 |
+| PDF page evidence | 2 | 2 |
+| Workbook missing formula cache | 3 | 4 |
+| SVG chart | 5 | 4 |
+| PNG chart | 5 | 3 |
+| Welch reference / invalid input | 5 / 5 | 4 / 4 |
+| Recursive artifacts | 5 | 4 |
+| Automatic data-and-chart / workbook | 5 / 3 | 5 / 5 |
+| Automatic no-skill / greeting | 5 / 5 | 5 / 5 |
+| Create skill / reuse installed skill | 2 / 2 | 4 / 2 |
+| CSV recovery after forced VM replacement, including traces | 2 | 4 |
+| Recursive reconciliation, including traces | 4 | 3 |
+
+**Bundled denominators.** The reference had 56 passes, seven scored failures, four unscored errors, and three reuse checks blocked by failed creation. The candidate had 56 passes, three scored failures, ten unscored errors, and one blocked reuse. The runner attached traces with Daytona execution evidence to 45/63 scored reference turns and 43/59 scored candidate turns.
+
+**Paired regressions and diagnosis**
+
+- Seven reference passes became unscored on the candidate: PNG repeats 1 and 4, SVG repeat 2, PDF repeat 1, recursive artifacts repeat 5, Welch invalid repeat 1, and Welch reference repeat 4. Nine of the ten candidate execution errors were HTTP 503 on file upload. The remaining one failed during the turn; the candidate server logged `NoSuchUpload`. The reference also logged two `NoSuchUpload` failures. The storage endpoints and credentials were distinct between arms.
+- A controlled probe on candidate storage created two multipart uploads under sibling prefixes. A list restricted to the first prefix returned **both** keys. Fleet's [session cleanup](../backend/src/fleet_rlm/storage.py) aborts every upload returned by that list without checking its key. This establishes a mechanism by which cleanup can abort a neighboring session's upload. The individual HTTP 503s do not expose enough provider detail to attribute each one conclusively. Before release, verify each key belongs to the deleting session, then exercise concurrent upload and deletion on staged Neon storage.
+- The eighth paired regression was skill reuse repeat 1. The expected generated skill was active, but its instructions required merchant, date, and total for every receipt. The approved rule only required three receipts. Given four IDs, the agent returned `NOT APPROVED`. Candidate reuse repeat 5 similarly returned `NEEDS_REVIEW` after the generated skill added mandatory fields and blocking checks. Candidate creation repeat 3 produced an installable document that omitted the required approval token, blocking its reuse check. These failures occurred after skill selection. Verify generated rules preserve the approved condition before counting installation as successful. [Repeat 1 trace](http://127.0.0.1:5001/#/experiments/50/traces?traceId=tr-8e9e4400f61fd426987fcced0514abb7) · [Repeat 5 trace](http://127.0.0.1:5001/#/experiments/50/traces?traceId=tr-5cfd829747666cf6dd57f86ed4e0d7f8)
+- Both arms passed the answer, artifact, trajectory, and HTTP session-cleanup assertions on all ten recovery cases before trace verification. The reference lost five of 15 turn traces across four cases. The candidate lost three across three cases: reconciliation repeats 3 and 5, and CSV repeat 4. All three candidate cases passed on the reference. Direct lookup of all eight SSE-advertised trace IDs returned `RESOURCE_DOES_NOT_EXIST` from MLflow. Increasing the search result limit alone cannot recover them. Both servers also logged span-start warnings; the exporter failure mechanism remains unresolved.
+- In the available recovery traces, maximum sandbox acquisition was 3.57 seconds on the reference (10 observations) and 4.83 seconds on the candidate (12), below the 120-second bound. Median Python cell duration after the first execution on each worker was 0.815 seconds (146 reference cells) and 0.793 seconds (147 candidate cells). The observed medians clear the 25% slowdown threshold; missing traces limit coverage.
+
+A single-lane diagnostic replay of PDF page evidence and automatic workbook routing passed both cases on both arms. The replay supports an intermittent failure and does not replace the original attempts. [Reference replay](http://127.0.0.1:5001/#/experiments/49/runs/dd16320cabdf43ea864e8bfaa5951804) · [Candidate replay](http://127.0.0.1:5001/#/experiments/50/runs/b0153e30e0124f1dbf626f6a192eee6c)
+
+Both Neon branches were deleted. The final Daytona inventory contained no matches for the recorded test VM IDs or run-derived VM names. Private per-repeat JSON is retained locally under `.fleet-evidence/qualification-e665bff6a/{baseline,candidate}/`. Requalification requires a fresh five-repeat run after the multipart isolation, trace export, and generated-skill fidelity issues are addressed.
+
+## Multipart, tracing, and skill fidelity requalification, 2026-11-26
+
+Compared merged main `e665bff6a` with the runtime and skills at `4bf6b19ff`. Each arm had a separate Neon database and object-storage endpoint, skill installation directory, and MLflow experiment. Both used the same Daytona image, serving and decision models, disabled DSPy caches, fixture set, and repeat counts as the preceding qualification.
+
+| Check | Fresh main | Corrected candidate |
+| --- | ---: | ---: |
+| Exact primary, secondary and abstain routing across five 41-case holdouts | 205/205 | 205/205 |
+| CSV replacement and recursive reconciliation, including trace verification | 4/10 | 10/10 |
+| Recovery trace IDs retrieved directly from SSE links | 8/15 | 15/15 |
+| Maximum sandbox acquisition in retrievable recovery traces | 2.87 s (8 observations) | 21.56 s (15 observations) |
+| Median Python execution after each worker's first cell | 0.473 s (110 cells) | 0.475 s (201 cells) |
+
+The 15 candidate recovery traces each had an independent `fleet.turn` root, the expected run tag, and Daytona execution spans. A separate client disconnect produced a retrievable cancelled root and the test session was deleted (HTTP 204). One previously missing ID on main had spans in the tracker database beneath the incoming FastAPI HTTP request while direct lookup reported incomplete export. Giving the worker its own root resolved the observed recovery failure. Occasional MLflow span-start warnings for `Predict.forward` remained. [Cancelled trace](http://127.0.0.1:5001/#/experiments/53/traces?traceId=tr-a388a8523cd5171d42e5296f1e5c904d)
+
+On staged Neon storage, a sibling upload remained open while Fleet deleted the first session. Completing the sibling upload and reading its original bytes succeeded. Offline coverage additionally exercised a foreign-only page followed by owned keys and two upload IDs for the same key.
+
+An independent generated-skill probe used an approved queue-label rule. The generated skill installed, and a fresh session returned the exact required handoff token from the label alone. All four opt-in live engine tests passed with the bundled skill registry. A preliminary test invocation pointed at an empty installation directory and failed on a missing `data-analysis` entry. The full local `make check` passed with 246 backend and 41 frontend tests. The four opt-in cases were skipped by the offline command. [Handoff experiment](http://127.0.0.1:5001/#/experiments/53/runs/b6900868ff51466298423ea962f7e3e5)
+
+**Release decision — hold.** The corrected candidate passed **68/70** scheduled bundled checks. Fresh main passed **65/70**. Both candidate misses were paired regressions in the PDF workflow. Diagnostic probes are excluded from these totals. [Reference bundled run](http://127.0.0.1:5001/#/experiments/51/runs/ec8f6534b2894271b41af72e7d59a0e3) · [Candidate bundled run](http://127.0.0.1:5001/#/experiments/53/runs/227f672da03f4baea28d7805e45394d9)
+
+| Bundled workflow | Main passes | Candidate passes |
+| --- | ---: | ---: |
+| PDF page evidence | 4/5 | 3/5 |
+| Automatic workbook routing | 4/5 | 5/5 |
+| Create skill from approved session rules | 5/5 | 5/5 |
+| Reuse installed skill in a fresh session | 2/5 | 5/5 |
+| Each of the other ten workflows | 5/5 | 5/5 |
+
+All 69 scored candidate turns had correlated traces with Daytona evidence, compared with 48 of 69 scored reference turns. Each arm had one unscored turn. On main, workbook routing repeat 3 hit a sandbox startup error. Three reference reuse answers withheld approval despite the four supplied receipt IDs. The candidate returned the approved token in all five fresh sessions and on a separate check at the exact three-receipt boundary. The candidate server recorded no HTTP 503 or `NoSuchUpload` during this qualification.
+
+- **PDF repeat 1** returned the correct count of 42 and correctly marked page 2 for OCR, but also attributed the count to page 2. The fixture places the sentence on page 1 and an image on page 2. The expected skill was active.
+- **PDF repeat 4** disconnected without a final response. PostgreSQL rejected a NUL character during the JSONB update of `runs.ui_parts`. On the candidate database, the affected run belonged to the repeat-4 PDF session and still had status `running`. Its bound VM required manual cleanup. Daytona subsequently reported `destroyed`, and it was absent from the active inventory. Release follow-up must cover finalization with binary-derived tool output, terminal run state, automatic VM cleanup, and correct page attribution.
+
+Private evidence is retained locally under `.fleet-evidence/requalification-4bf6b19ff/`. The reference, candidate, intermediate diagnostic, and offline-check Neon branches were disposed of after their runs.
+
+## PDF attribution and binary transcript finalization, 2026-11-26
+
+The earlier incorrect citation came from a PDF with shared image resources. The parser had correctly extracted “North depot shipped 42 crates” from physical page 1, while the image resource was discoverable from both pages. The extraction skill now verifies the figure against its own page and distinguishes resource references from content drawn on that page.
+
+A controlled probe used the production HTTP, Neon and Daytona paths with a synthetic agent result. An embedded NUL in the answer, history and nested tool output completed with a visible `␀` in PostgreSQL. A second turn deliberately supplied an invalid JSON key after starting a child. PostgreSQL rejected the write. The fallback persisted a failed root, terminated the child, retired the VM and admitted a successful retry on a different VM. Deleting the test session returned HTTP 204. The database regression test also covers literal backslash-u text.
+
+Fresh main `e665bff6a` passed 3/10 recovery workflows including traces and 43/70 scheduled bundled cases. Six of its 15 advertised recovery traces resolved directly. Its bundled results comprised 43 passes, three scored failures, 23 execution errors and one dependent reuse case blocked by creation. [Fresh main bundled run](http://127.0.0.1:5001/#/experiments/54/runs/3b576a328352482ba5989063bb22c5d0)
+
+An intermediate candidate at `2083be75b` passed 10/10 recovery cases with all 15 traces retrievable. A reuse answer appended a global-memory token to the exact code requested by the user. The installed rule contained the correct code. The revised workspace instructions give the explicit output request precedence over recalled preferences.
+
+The completed intermediate bundled runs scored 68/70 at `2083be75b` (one PDF timeout and one extra reuse token), 69/70 at `d342db443` (one wrong physical page), and 69/70 at `52a64392f` (one CSV source-total error). The wrong-page trace showed a correct passage on page 1 followed by a manually typed page 2 in the submitted JSON. The revised PDF skill carries the matched value, supporting passage and page number together into submission. On the CSV miss, €200 included only rows in the regional breakdown. The unfiltered file contained another €7 without a region and €13 in a void row. The revised data-analysis skill checks the €220 source total independently of grouped values. The prompts, fixtures and scorers used for the runs were unchanged.
+
+**Final candidate `681600907` — release on hold.** Recovery and bundled workflows ran on separate fresh staging branches in parallel. All 10 recovery cases passed, and all 15 SSE-advertised IDs resolved to independent Fleet roots with matching run tags and Daytona execution evidence. Maximum acquisition time was 4.83 seconds across 15 observations. Median warm Python execution was 0.468 seconds across 181 cells (fresh main: 0.466 seconds across 139 cells). The offline `make check` passed 247 backend and 41 frontend tests. Three of four opt-in live engine tests passed on this candidate. The two-turn CSV test reached its history-growth check with three messages before and after the second turn; the assertion required an increase. The independent routing holdouts on main and on the earlier candidate both matched 205/205 expected decisions.
+
+**Bundled workflows: 65/70 passed on the final candidate.** All five CSV repeats returned the correct regional amounts and €220 source total. All five PDF answers reported 42 crates and cited physical page 1. Repeats 3 and 5 returned an empty OCR list instead of flagging page 2, leaving the complete PDF gate at 3/5. All 67 scored turns had correlated traces. Two further cases were unscored after HTTP 503 on session deletion (installed-skill reuse repeat 5 and automatic no-skill repeat 2); both deletions subsequently returned HTTP 204. Automatic greeting repeat 2 was unscored after a workspace startup failure. Cleanup retries do not change the qualification totals. [Final bundled run](http://127.0.0.1:5001/#/experiments/62/runs/2f99b05c1c7a4daebd892a9ec077b01b)
+
+The qualification gate remains in force. PR #760 is held on its branch. Private per-repeat reports and cleanup evidence are retained under `.fleet-evidence/pdf-csv-qualification-681600907/`.

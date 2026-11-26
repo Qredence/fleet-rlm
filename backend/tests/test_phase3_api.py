@@ -789,6 +789,49 @@ async def test_download_requires_a_safe_registered_path(offline):
 
 
 @pytest.mark.asyncio
+async def test_session_cleanup_filters_each_provider_page(offline, monkeypatch):
+    session = uuid4()
+    owned = ObjectStorage.new_key(session)
+    foreign = ObjectStorage.new_key(uuid4())
+    uploads = Mock()
+    uploads.paginate.return_value = [
+        {"Uploads": [{"Key": foreign, "UploadId": "sibling"}]},
+        {"Uploads": [{"Key": owned, "UploadId": token} for token in ("first", "second")]},
+    ]
+    objects = Mock()
+    objects.paginate.return_value = [
+        {"Contents": [{"Key": foreign}]},
+        {"Contents": [{"Key": owned}, {"Key": foreign}]},
+    ]
+    sdk = Mock()
+    sdk.get_paginator.side_effect = {
+        "list_multipart_uploads": uploads,
+        "list_objects_v2": objects,
+    }.__getitem__
+    sdk.delete_objects.return_value = {}
+    monkeypatch.setattr("fleet_rlm.storage.boto3.client", Mock(return_value=sdk))
+    settings = offline.settings.model_copy(
+        update={
+            "s3_endpoint_url": "https://storage.example.test",
+            "s3_access_key_id": SecretStr("offline"),
+            "s3_secret_access_key": SecretStr("offline"),
+        }
+    )
+    storage = ObjectStorage(settings)
+    await storage.delete_session(session)
+    for paginator in (uploads, objects):
+        paginator.paginate.assert_called_once_with(
+            Bucket=storage.bucket, Prefix=storage.prefix(session)
+        )
+    assert [call.kwargs for call in sdk.abort_multipart_upload.call_args_list] == [
+        {"Bucket": storage.bucket, "Key": owned, "UploadId": token} for token in ("first", "second")
+    ]
+    sdk.delete_objects.assert_called_once_with(
+        Bucket=storage.bucket, Delete={"Objects": [{"Key": owned}], "Quiet": True}
+    )
+
+
+@pytest.mark.asyncio
 async def test_storage_checks_persisted_bytes_with_botocore_streaming_body(monkeypatch, tmp_path):
     content = b"verified workspace file"
     digest = hashlib.sha256(content).hexdigest()
@@ -1343,10 +1386,11 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
         "_chat_sandbox",
         AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
     )
-    response = await offline.client.post(
-        f"{offline.base}/chat",
-        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
-    )
+    with mlflow.start_span("incoming HTTP request") as http_span:
+        response = await offline.client.post(
+            f"{offline.base}/chat",
+            json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
+        )
     assert response.status_code == 200
     frames = [
         json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
@@ -1364,7 +1408,9 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     mlflow.flush_trace_async_logging()
     trace = mlflow.get_trace(trace_id)
     assert trace is not None
+    assert trace_id != http_span.trace_id
     root, acquisition, finalize, cleanup = trace.data.spans
+    assert root.parent_id is None
     assert (root.name, root.attributes["fleet.turn.status"]) == ("fleet.turn", "failed")
     assert root.status.status_code.name == "ERROR"
     assert trace.info.tags["fleet.run_id"] == str(offline.finish.await_args.args[1])
@@ -1495,6 +1541,27 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     assert offline.store.session.history_json == {"messages": [{"task": "Analyze @table"}]}
     assert not offline.store.active and offline.store.checkouts == 0
     offline.memory.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rejected_transcript_releases_run_and_retires_vm(offline, monkeypatch):
+    async def reject_once(*args, **kwargs):
+        offline.finish.side_effect = offline.store.finish
+        raise api.SQLAlchemyError("rejected transcript")
+
+    async def interrupt(*_args, **_kwargs):
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(api.agent, "run_workspace_task", interrupt)
+    offline.finish.side_effect = reject_once
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.text.endswith("data: [DONE]\n\n")
+    terminal = offline.finish.await_args.kwargs
+    assert terminal["status"] == "failed"
+    assert [part["type"] for part in terminal["ui_parts"]] == ["data-turn-details"]
+    assert terminal["retire_sandbox_id"] == "test-sandbox"
+    assert not offline.store.active
+    offline.daytona.v2.delete.assert_awaited_once_with("test-sandbox", timeout=30)
 
 
 @pytest.mark.parametrize(

@@ -125,7 +125,9 @@ class WorkspaceTask(dspy.Signature):
     memories: list[str] = dspy.InputField(
         desc=(
             "Approved facts and procedures relevant to this task. Use a procedure when it applies "
-            "and follow the current task, skill instructions, and tool limits. If the preview is "
+            "and follow the current task, skill instructions, and tool limits. The user’s "
+            "requested output format takes precedence over recalled preferences. When asked for "
+            "only the result of a selected procedure, return that result alone. If the preview is "
             "truncated, read the full memories variable in bounded slices."
         )
     )
