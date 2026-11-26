@@ -180,3 +180,38 @@ Both deployments reported `openai/deepseek/deepseek-v4.1-flash` for the root and
 A single-lane diagnostic replay of PDF page evidence and automatic workbook routing passed both cases on both arms. The replay supports an intermittent failure and does not replace the original attempts. [Reference replay](http://127.0.0.1:5001/#/experiments/49/runs/dd16320cabdf43ea864e8bfaa5951804) · [Candidate replay](http://127.0.0.1:5001/#/experiments/50/runs/b0153e30e0124f1dbf626f6a192eee6c)
 
 Both Neon branches were deleted. The final Daytona inventory contained no matches for the recorded test VM IDs or run-derived VM names. Private per-repeat JSON is retained locally under `.fleet-evidence/qualification-e665bff6a/{baseline,candidate}/`. Requalification requires a fresh five-repeat run after the multipart isolation, trace export, and generated-skill fidelity issues are addressed.
+
+## Multipart, tracing, and skill fidelity requalification, 2026-11-26
+
+Compared merged main `e665bff6a` with the runtime and skills at `4bf6b19ff`. Each arm had a separate Neon database and object-storage endpoint, skill installation directory, and MLflow experiment. Both used the same Daytona image, serving and decision models, disabled DSPy caches, fixture set, and repeat counts as the preceding qualification.
+
+| Check | Fresh main | Corrected candidate |
+| --- | ---: | ---: |
+| Exact primary, secondary and abstain routing across five 41-case holdouts | 205/205 | 205/205 |
+| CSV replacement and recursive reconciliation, including trace verification | 4/10 | 10/10 |
+| Recovery trace IDs retrieved directly from SSE links | 8/15 | 15/15 |
+| Maximum sandbox acquisition in retrievable recovery traces | 2.87 s (8 observations) | 21.56 s (15 observations) |
+| Median Python execution after each worker's first cell | 0.473 s (110 cells) | 0.475 s (201 cells) |
+
+The 15 candidate recovery traces each had an independent `fleet.turn` root, the expected run tag, and Daytona execution spans. A separate client disconnect produced a retrievable cancelled root and the test session was deleted (HTTP 204). One previously missing ID on main had spans in the tracker database beneath the incoming FastAPI HTTP request while direct lookup reported incomplete export. Giving the worker its own root resolved the observed recovery failure. Occasional MLflow span-start warnings for `Predict.forward` remained. [Cancelled trace](http://127.0.0.1:5001/#/experiments/53/traces?traceId=tr-a388a8523cd5171d42e5296f1e5c904d)
+
+On staged Neon storage, a sibling upload remained open while Fleet deleted the first session. Completing the sibling upload and reading its original bytes succeeded. Offline coverage additionally exercised a foreign-only page followed by owned keys and two upload IDs for the same key.
+
+An independent generated-skill probe used an approved queue-label rule. The generated skill installed, and a fresh session returned the exact required handoff token from the label alone. All four opt-in live engine tests passed with the bundled skill registry. A preliminary test invocation pointed at an empty installation directory and failed on a missing `data-analysis` entry. The full local `make check` passed with 246 backend and 41 frontend tests. The four opt-in cases were skipped by the offline command. [Handoff experiment](http://127.0.0.1:5001/#/experiments/53/runs/b6900868ff51466298423ea962f7e3e5)
+
+**Release decision — hold.** The corrected candidate passed **68/70** scheduled bundled checks. Fresh main passed **65/70**. Both candidate misses were paired regressions in the PDF workflow. Diagnostic probes are excluded from these totals. [Reference bundled run](http://127.0.0.1:5001/#/experiments/51/runs/ec8f6534b2894271b41af72e7d59a0e3) · [Candidate bundled run](http://127.0.0.1:5001/#/experiments/53/runs/227f672da03f4baea28d7805e45394d9)
+
+| Bundled workflow | Main passes | Candidate passes |
+| --- | ---: | ---: |
+| PDF page evidence | 4/5 | 3/5 |
+| Automatic workbook routing | 4/5 | 5/5 |
+| Create skill from approved session rules | 5/5 | 5/5 |
+| Reuse installed skill in a fresh session | 2/5 | 5/5 |
+| Each of the other ten workflows | 5/5 | 5/5 |
+
+All 69 scored candidate turns had correlated traces with Daytona evidence, compared with 48 of 69 scored reference turns. Each arm had one unscored turn. On main, workbook routing repeat 3 hit a sandbox startup error. Three reference reuse answers withheld approval despite the four supplied receipt IDs. The candidate returned the approved token in all five fresh sessions and on a separate check at the exact three-receipt boundary. The candidate server recorded no HTTP 503 or `NoSuchUpload` during this qualification.
+
+- **PDF repeat 1** returned the correct count of 42 and correctly marked page 2 for OCR, but also attributed the count to page 2. The fixture places the sentence on page 1 and an image on page 2. The expected skill was active.
+- **PDF repeat 4** disconnected without a final response. PostgreSQL rejected a NUL character during the JSONB update of `runs.ui_parts`. On the candidate database, the affected run belonged to the repeat-4 PDF session and still had status `running`. Its bound VM required manual cleanup. Daytona subsequently reported `destroyed`, and it was absent from the active inventory. Release follow-up must cover finalization with binary-derived tool output, terminal run state, automatic VM cleanup, and correct page attribution.
+
+Private evidence is retained locally under `.fleet-evidence/requalification-4bf6b19ff/`. The reference, candidate, intermediate diagnostic, and offline-check Neon branches were disposed of after their runs.
