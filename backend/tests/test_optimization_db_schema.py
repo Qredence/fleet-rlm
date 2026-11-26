@@ -179,6 +179,7 @@ async def test_touch_heartbeat_and_progress_update_refresh_heartbeat_at() -> Non
 @pytest.mark.asyncio
 async def test_create_optimization_job_locks_dataset_and_provider_for_key_share() -> None:
     ds_id = uuid4()
+    dataset = SimpleNamespace(id=ds_id, summary_json={})
     prov_id = uuid4()
     get_calls: list[tuple[Any, UUID, Any]] = []
     added: list[Any] = []
@@ -187,7 +188,7 @@ async def test_create_optimization_job_locks_dataset_and_provider_for_key_share(
         async def get(self, model: Any, identity: UUID, *, with_for_update: Any = None):
             get_calls.append((model, identity, with_for_update))
             if model is db.OptimizationDataset and identity == ds_id:
-                return SimpleNamespace(id=ds_id)
+                return dataset
             if model is db.LLMProvider and identity == prov_id:
                 return SimpleNamespace(id=prov_id)
             return None
@@ -213,6 +214,20 @@ async def test_create_optimization_job_locks_dataset_and_provider_for_key_share(
         (db.OptimizationDataset, ds_id, {"key_share": True}),
         (db.LLMProvider, prov_id, {"key_share": True}),
     ]
+
+    dataset.summary_json["deletion_pending"] = True
+    with pytest.raises(db.OptimizationConflictError, match="deletion is pending"):
+        await db.create_optimization_job(
+            factory,  # type: ignore[arg-type]
+            target="skills",
+            program_kind=None,
+            dataset_source="custom",
+            dataset_name="custom.jsonl",
+            dataset_id=ds_id,
+            config_json={},
+            mlflow_experiment="exp",
+        )
+    assert added == [job]
 
     # Missing dataset raises LookupError
     with pytest.raises(LookupError, match="dataset"):

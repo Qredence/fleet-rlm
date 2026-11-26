@@ -150,9 +150,14 @@ export function TargetSummaryGrid({
           const meta = TARGET_META[summary.target]
           const Icon = meta.icon
           const badge = SOURCE_BADGE[summary.source]
+          const scored = summary.latest_scored_job ?? (
+            summary.latest_job?.status === 'completed' && summary.latest_job.optimized_score != null
+              ? summary.latest_job
+              : null
+          )
           const delta = formatDelta(
-            summary.latest_job?.baseline_score,
-            summary.latest_job?.optimized_score,
+            scored?.baseline_score,
+            scored?.optimized_score,
           )
           const hasActive = Boolean(summary.active_job)
           const shaShort = summary.active_promotion?.artifact_sha256.slice(0, 12)
@@ -232,7 +237,7 @@ export function TargetSummaryGrid({
 
               {/* Subgrid Row 3: Latest holdout performance */}
               <div className="flex min-w-0 items-baseline justify-between gap-2 border-t border-border/60 pt-2.5">
-                {summary.latest_job ? (
+                {scored ? (
                   <>
                     <div className="flex flex-col">
                       <span className={`${typeClass('caption')} text-muted-foreground`}>
@@ -242,7 +247,7 @@ export function TargetSummaryGrid({
                         className={`${typeClass('title')} tabular-nums text-foreground`}
                         style={{ fontVariationSettings: fontWeights.semibold }}
                       >
-                        {formatScore(summary.latest_job.optimized_score)}
+                        {formatScore(scored.optimized_score)}
                       </span>
                     </div>
                     <div className="text-right">
@@ -252,13 +257,13 @@ export function TargetSummaryGrid({
                         </div>
                       )}
                       <div className={`${typeClass('caption')} tabular-nums text-muted-foreground`}>
-                        base {formatScore(summary.latest_job.baseline_score)}
+                        base {formatScore(scored.baseline_score)}
                       </div>
                     </div>
                   </>
                 ) : (
                   <span className={`${typeClass('caption')} text-muted-foreground`}>
-                    No completed optimization runs yet
+                    No scored optimization runs yet
                   </span>
                 )}
               </div>

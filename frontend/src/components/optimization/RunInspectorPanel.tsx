@@ -302,6 +302,8 @@ export function RunInspectorPanel({
     ? null
     : isFlexEvaluationOnly
       ? 'dspy.Flex runs are evaluation-only; chat serving requires dspy.RLM artifacts.'
+      : job.status === 'cancelled' || job.status === 'failed'
+        ? 'Re-run this evaluation to produce a candidate for promotion.'
       : job.status !== 'completed'
         ? 'Wait for the run to complete before promoting.'
         : !job.artifact_object_key || !job.artifact_sha256

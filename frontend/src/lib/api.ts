@@ -181,6 +181,7 @@ export interface LLMProviderRefreshModelsResponse {
 }
 
 export interface LMRoleSelection {
+  reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh'
   provider_id?: string | null
   model?: string | null
 }
@@ -271,6 +272,7 @@ export interface TargetStatusSummary {
   previous_promotion?: OptimizationPromotionView | null
   can_rollback_previous: boolean
   can_rollback_env: boolean
+  latest_scored_job?: OptimizationJobSummary | null
   latest_job: OptimizationJobSummary | null
   active_job: OptimizationJobSummary | null
 }
@@ -309,6 +311,7 @@ export interface OptimizationDatasetSummary {
   size_bytes: number
   sha256: string | null
   summary_json: {
+    deletion_pending?: boolean
     row_count?: number
     splits?: Record<string, number>
     lineage_count?: number

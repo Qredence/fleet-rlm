@@ -1,20 +1,17 @@
 """Stateless HTTP and native POST SSE for the Fleet backend."""
 
 import asyncio
-import hashlib
 import json
 import logging
-import os
 import re
 import secrets
-import sys
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
-from contextlib import asynccontextmanager, closing, suppress
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager, closing, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, gettempdir
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
@@ -25,6 +22,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     FastAPI,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -39,23 +37,26 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
 from mlflow.entities.trace_location import MlflowExperimentLocation
 from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import agent, ui_stream
+from . import agent, llm_registry, opt_datasets, opt_runner, ui_stream
 from . import db as store
 from .config import Settings
 from .interpreter import (
     WORKSPACE,
     AsyncDaytona,
     AsyncSandbox,
+    DatasetVolumeError,
+    DatasetVolumeObjectMissing,
     DaytonaError,
     SandboxStartupError,
     WorkspaceBrowseLimit,
     allocate_session_sandbox,
+    close_dataset_volume_helpers,
     delete_pending_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
@@ -75,7 +76,6 @@ from .interpreter import (
 from .skills import (
     MAX_SKILL_BYTES,
     SkillRegistry,
-    build_skill_selector,
     load_host_tools,
     select_skills,
 )
@@ -98,12 +98,15 @@ class Runtime:
     turn_semaphore: asyncio.Semaphore
     optimized_program_state: dict[str, Any] | None
     mlflow_experiment_id: str | None = None
+    volume_daytona: AsyncDaytona | None = None
     artifact_cache_dir: Path = field(
         default_factory=lambda: Path(gettempdir()) / "fleet-rlm-artifacts"
     )
     rlm_state_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     optimization_tasks: dict[UUID, asyncio.Task[None]] = field(default_factory=dict)
     optimization_procs: dict[UUID, Any] = field(default_factory=dict)
+    optimization_cancel_events: dict[UUID, asyncio.Event] = field(default_factory=dict)
+    shutdown_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> dict[str, Any] | None:
@@ -120,82 +123,6 @@ def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> di
     return state
 
 
-async def _materialize_artifact(
-    runtime: Runtime,
-    *,
-    object_key: str,
-    sha256: str,
-    size_bytes: int,
-) -> Path:
-    runtime.artifact_cache_dir.mkdir(parents=True, exist_ok=True)
-    cached = runtime.artifact_cache_dir / f"{sha256}.json"
-    if cached.is_file():
-        with cached.open("rb") as handle:
-            if hashlib.file_digest(handle, "sha256").hexdigest() == sha256:
-                return cached
-    with NamedTemporaryFile(
-        dir=runtime.artifact_cache_dir, prefix=f"{sha256[:12]}-", suffix=".tmp", delete=False
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-    try:
-        await runtime.storage.download(object_key, tmp_path, sha256=sha256, size=size_bytes)
-        os.replace(tmp_path, cached)
-    except BaseException:
-        with suppress(OSError):
-            tmp_path.unlink()
-        raise
-    return cached
-
-
-async def _resolve_active_artifacts(
-    runtime: Runtime,
-    effective: Settings,
-) -> tuple[Settings, dict[str, Any] | None]:
-    """Overlay live promoted artifacts from Neon/Object Storage per turn without worker restart."""
-    promotions = await store.list_active_optimization_promotions(runtime.sessionmaker)
-    updated = effective
-    rlm_state = runtime.optimized_program_state
-
-    if (skills_promo := promotions.get("skills")) is not None:
-        path = await _materialize_artifact(
-            runtime,
-            object_key=skills_promo.artifact_object_key,
-            sha256=skills_promo.artifact_sha256,
-            size_bytes=skills_promo.artifact_size_bytes,
-        )
-        updated = updated.model_copy(update={"skill_selector_path": path})
-
-    if (memory_promo := promotions.get("memory")) is not None:
-        path = await _materialize_artifact(
-            runtime,
-            object_key=memory_promo.artifact_object_key,
-            sha256=memory_promo.artifact_sha256,
-            size_bytes=memory_promo.artifact_size_bytes,
-        )
-        updated = updated.model_copy(update={"memory_gate_path": path})
-
-    if (rlm_promo := promotions.get("rlm")) is not None:
-        cached_state = runtime.rlm_state_cache.get(rlm_promo.artifact_sha256)
-        if cached_state is None:
-            path = await _materialize_artifact(
-                runtime,
-                object_key=rlm_promo.artifact_object_key,
-                sha256=rlm_promo.artifact_sha256,
-                size_bytes=rlm_promo.artifact_size_bytes,
-            )
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(loaded, dict):
-                raise ValueError("Promoted RLM artifact must be a JSON object")
-            agent.build_program(updated, [], sub_lm=runtime.sub_lm, optimized_state=loaded)
-            if len(runtime.rlm_state_cache) >= 8:
-                runtime.rlm_state_cache.pop(next(iter(runtime.rlm_state_cache)))
-            runtime.rlm_state_cache[rlm_promo.artifact_sha256] = loaded
-            cached_state = loaded
-        rlm_state = cached_state
-
-    return updated, rlm_state
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = Settings()
@@ -204,7 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     try:
         await store.reap_stale_runs(sessionmaker, settings.stale_run_timeout_seconds)
         await store.reap_stale_optimization_jobs(
-            sessionmaker, settings.optimization_stale_timeout_seconds
+            sessionmaker, settings.optimization_heartbeat_stale_seconds
         )
         experiment_id = None
         if settings.mlflow_tracking_uri:
@@ -222,14 +149,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         decision_lm = dspy.LM(settings.decision_model)
         optimized_program_state = _load_optimized_program_state(settings, sub_lm)
         turn_semaphore = asyncio.Semaphore(settings.max_concurrent_turns_per_worker)
-        cache_dir = settings.artifact_cache_dir or (Path(gettempdir()) / "fleet-rlm-artifacts")
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir = opt_runner.ensure_private_cache_dir(
+            settings.artifact_cache_dir or (Path(gettempdir()) / "fleet-rlm-artifacts")
+        )
         with closing(ObjectStorage(settings)) as storage:
-            async with make_daytona_client(settings) as daytona:
+            async with AsyncExitStack() as clients:
+                daytona = await clients.enter_async_context(make_daytona_client(settings))
+                volume_daytona = daytona
+                if settings.daytona_service_key and settings.daytona_service_key.get_secret_value():
+                    volume_settings = settings.model_copy(
+                        update={"daytona_api_key": settings.daytona_service_key}
+                    )
+                    volume_daytona = await clients.enter_async_context(
+                        make_daytona_client(volume_settings)
+                    )
                 runtime = Runtime(
                     settings=settings,
                     sessionmaker=sessionmaker,
                     daytona=daytona,
+                    volume_daytona=volume_daytona,
                     storage=storage,
                     skills=skills,
                     lm=lm,
@@ -240,23 +178,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     mlflow_experiment_id=experiment_id,
                     artifact_cache_dir=cache_dir,
                 )
+                clients.push_async_callback(opt_runner.shutdown_optimization_runtime, runtime)
                 app.state.runtime = runtime
                 yield
     finally:
-        if runtime is not None:
-            for proc in list(runtime.optimization_procs.values()):
-                with suppress(ProcessLookupError, OSError):
-                    proc.terminate()
-            for task in list(runtime.optimization_tasks.values()):
-                task.cancel()
-            if runtime.optimization_tasks:
-                with suppress(Exception):
-                    await asyncio.wait_for(
-                        asyncio.gather(
-                            *runtime.optimization_tasks.values(), return_exceptions=True
-                        ),
-                        timeout=5.0,
-                    )
+        if runtime is None:
+            with suppress(Exception):
+                await close_dataset_volume_helpers()
         app.state.runtime = None
         await engine.dispose()
 
@@ -556,6 +484,22 @@ async def missing_storage_object(_request: Request, _error: StorageObjectMissing
 @app.exception_handler(StorageError)
 async def storage_error(_request: Request, _error: StorageError) -> JSONResponse:
     return JSONResponse({"detail": "Workspace storage unavailable"}, status_code=503)
+
+
+@app.exception_handler(DatasetVolumeObjectMissing)
+async def missing_volume_dataset(
+    _request: Request, _error: DatasetVolumeObjectMissing
+) -> JSONResponse:
+    return JSONResponse({"detail": "Dataset not found in Daytona volume"}, status_code=404)
+
+
+@app.exception_handler(DatasetVolumeError)
+async def volume_dataset_error(_request: Request, error: DatasetVolumeError) -> JSONResponse:
+    _LOG.warning(
+        "Daytona dataset volume request failed (%s)",
+        type(error.__cause__ or error).__name__,
+    )
+    return JSONResponse({"detail": "Daytona dataset volume unavailable"}, status_code=503)
 
 
 async def _session(
@@ -1496,8 +1440,11 @@ async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list
 
     try:
         effective = await _effective_settings(runtime)
-        effective, _ = await _resolve_active_artifacts(runtime, effective)
-        decision_lm = _request_decision_lm(runtime, effective)
+        active_artifacts = await opt_runner.resolve_active_artifacts(runtime, effective)
+        effective = active_artifacts.settings
+        decision_lm = active_artifacts.memory_decision_lm or _request_decision_lm(
+            runtime, effective
+        )
         candidates = await store.search_memories(
             runtime.sessionmaker,
             turn.session_id,
@@ -1664,7 +1611,9 @@ async def _execute_turn(
     try:
         async with asyncio.timeout_at(turn.deadline):
             effective = await _effective_settings(runtime)
-            effective, optimized_program_state = await _resolve_active_artifacts(runtime, effective)
+            active_artifacts = await opt_runner.resolve_active_artifacts(runtime, effective)
+            effective = active_artifacts.settings
+            optimized_program_state = active_artifacts.rlm_state
             # Read history after acquiring the root so it includes the previous completed turn.
             async with sessionmaker() as db:
                 session = await _session(db, turn.session_id)
@@ -1692,7 +1641,9 @@ async def _execute_turn(
                     runtime, sandbox, files, effective.daytona_exec_timeout_seconds
                 )
             hydrated = True
-            decision_lm = _request_decision_lm(runtime, effective)
+            decision_lm = active_artifacts.skills_decision_lm or _request_decision_lm(
+                runtime, effective
+            )
             selection = await asyncio.to_thread(
                 select_skills,
                 effective,
@@ -1950,32 +1901,11 @@ async def chat(
 
 
 # ---------------------------------------------------------------------------
-# Optimization Control Plane (datasets, isolated runner, SSE, promotions)
+# Optimization Control Plane (datasets, providers, isolated runner, SSE, promotions)
 # ---------------------------------------------------------------------------
 
-OptimizationTarget = Literal["rlm", "skills", "memory"]
-OptimizationBranchMode = Literal[
-    "auto_neon", "configured_branch", "custom_branch", "direct_readonly"
-]
-_VALID_OPT_TARGETS: tuple[OptimizationTarget, ...] = ("skills", "memory", "rlm")
-_BUILTIN_DATASETS: dict[OptimizationTarget, tuple[str, str]] = {
-    "skills": ("builtin:skills", "skills.jsonl"),
-    "memory": ("builtin:memory", "memory.jsonl"),
-    "rlm": ("builtin:rlm", "rlm.jsonl"),
-}
-_OPT_LOG_MAX_BYTES = 32 * 1024
-_SECRET_SCAN_RE = re.compile(
-    r"(?:"
-    r"sk-[A-Za-z0-9_-]{16,}"
-    r"|dtn_[A-Za-z0-9_-]{12,}"
-    r"|tvly-[A-Za-z0-9_-]{12,}"
-    r"|AIza[0-9A-Za-z_-]{20,}"
-    r"|ghp_[A-Za-z0-9]{20,}"
-    r"|postgres(?:ql)?(?:\+psycopg)?://[^\s\"']+"
-    r"|Bearer\s+[A-Za-z0-9._-]{16,}"
-    r")"
-)
-_NEON_API_BASE = "https://console.neon.tech/api/v2"
+OptimizationTarget = opt_datasets.OptimizationTarget
+OptimizationBranchMode = opt_runner.OptimizationBranchMode
 
 
 class OptimizationPromotionView(BaseModel):
@@ -1988,6 +1918,11 @@ class OptimizationPromotionView(BaseModel):
     artifact_sha256: str
     artifact_size_bytes: int
     resolved_decision_model: str | None = None
+    decision_provider_id: UUID | None = None
+    decision_provider_name: str | None = None
+    program_kind: str | None = None
+    optimized_score: float | None = None
+    baseline_score: float | None = None
     active: bool
     promoted_at: datetime
     rolled_back_at: datetime | None = None
@@ -2004,6 +1939,7 @@ class OptimizationJobSummary(BaseModel):
     dataset_source: store.OptimizationDatasetSource
     dataset_name: str | None = None
     dataset_id: UUID | None = None
+    decision_provider_id: UUID | None = None
     config_json: dict[str, Any] = Field(default_factory=dict)
     progress_json: dict[str, Any] = Field(default_factory=dict)
     saved: bool | None = None
@@ -2036,8 +1972,10 @@ class TargetStatusSummary(BaseModel):
     source: Literal["promoted", "env", "default"]
     env_path: str | None = None
     active_promotion: OptimizationPromotionView | None = None
+    previous_promotion: OptimizationPromotionView | None = None
     can_rollback_previous: bool = False
     can_rollback_env: bool = False
+    latest_scored_job: OptimizationJobSummary | None = None
     latest_job: OptimizationJobSummary | None = None
     active_job: OptimizationJobSummary | None = None
 
@@ -2052,6 +1990,12 @@ class OptimizationCapabilities(BaseModel):
     decision_model: str
     llm_model: str
     sub_llm_model: str
+    neon_storage_enabled: bool
+    daytona_volume_enabled: bool
+    daytona_dataset_volume: str
+    credentials_encryption_enabled: bool
+    allow_private_llm_endpoints: bool
+    allow_local_interpreter: bool
 
 
 class OptimizationOverview(BaseModel):
@@ -2064,6 +2008,8 @@ class OptimizationDatasetSummary(BaseModel):
     name: str
     target: OptimizationTarget
     source: Literal["builtin", "custom"]
+    storage_backend: opt_runner.DatasetStorageBackend = "neon"
+    storage_volume: str | None = None
     row_count: int
     size_bytes: int
     sha256: str | None = None
@@ -2076,6 +2022,87 @@ class OptimizationDatasetPreview(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class LLMProviderModelItem(BaseModel):
+    id: str
+    label: str | None = None
+    owned_by: str | None = None
+
+
+class LLMProviderView(BaseModel):
+    id: UUID
+    name: str
+    dialect: llm_registry.ProviderDialect
+    api_mode: llm_registry.ProviderApiMode
+    base_url: str | None = None
+    has_api_key: bool
+    api_key_hint: str | None = None
+    default_model: str | None = None
+    cached_models: list[LLMProviderModelItem] = Field(default_factory=list)
+    last_tested_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LLMProviderListResponse(BaseModel):
+    providers: list[LLMProviderView]
+    encryption_configured: bool
+    allow_private_endpoints: bool
+
+
+class LLMProviderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    dialect: llm_registry.ProviderDialect
+    api_mode: llm_registry.ProviderApiMode | None = None
+    base_url: str | None = None
+    api_key: SecretStr | None = Field(default=None, repr=False)
+    default_model: str | None = None
+
+
+class LLMProviderUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    dialect: llm_registry.ProviderDialect | None = None
+    api_mode: llm_registry.ProviderApiMode | None = None
+    base_url: str | None = None
+    api_key: SecretStr | None = Field(default=None, repr=False)
+    clear_api_key: bool = False
+    default_model: str | None = None
+
+
+class LLMProviderProbeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_id: UUID | None = None
+    dialect: llm_registry.ProviderDialect | None = None
+    api_mode: llm_registry.ProviderApiMode | None = None
+    base_url: str | None = None
+    api_key: SecretStr | None = Field(default=None, repr=False)
+
+
+class LLMProviderProbeResponse(BaseModel):
+    ok: bool
+    models: list[LLMProviderModelItem] = Field(default_factory=list)
+    count: int = 0
+    error: str | None = None
+
+
+class LLMProviderModelsResponse(BaseModel):
+    provider: LLMProviderView
+    models: list[LLMProviderModelItem]
+    count: int
+
+
+class LMRoleSelection(BaseModel):
+    reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    provider_id: UUID | None = None
+    model: str | None = None
+
+
 class OptimizationJobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -2083,7 +2110,7 @@ class OptimizationJobCreate(BaseModel):
     dataset_id: str | None = None
     program_kind: Literal["rlm", "flex"] = "rlm"
     branch_mode: OptimizationBranchMode | None = None
-    custom_database_url: str | None = Field(default=None, repr=False)
+    custom_database_url: SecretStr | None = Field(default=None, repr=False)
     allow_direct_opt_in: bool = False
     train_ratio: float | None = Field(default=None, gt=0.0, lt=1.0)
     val_ratio: float | None = Field(default=None, gt=0.0, lt=1.0)
@@ -2098,6 +2125,11 @@ class OptimizationJobCreate(BaseModel):
     force: bool = False
     reflection_lm: str | None = None
     judge_lm: str | None = None
+    root_lm: LMRoleSelection | None = None
+    sub_lm: LMRoleSelection | None = None
+    reflection_lm_config: LMRoleSelection | None = None
+    judge_lm_config: LMRoleSelection | None = None
+    decision_lm: LMRoleSelection | None = None
 
 
 class PromoteJobRequest(BaseModel):
@@ -2113,92 +2145,32 @@ class RollbackTargetRequest(BaseModel):
     mode: Literal["previous", "env"] = "previous"
 
 
-def _coerce_target(value: str) -> OptimizationTarget:
-    if value == "rlm":
-        return "rlm"
-    if value == "skills":
-        return "skills"
-    if value == "memory":
-        return "memory"
-    raise ValueError(f"Unsupported optimization target: {value!r}")
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
 
 
-def _backend_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-def _resolve_eval_datasets_dir(settings: Settings) -> Path:
-    configured = settings.eval_datasets_dir
-    if configured.is_absolute() or configured.is_dir():
-        return configured
-    candidate = _backend_root() / configured
-    return candidate if candidate.is_dir() else configured
-
-
-def _scrub_secrets(text: str, extra_secrets: Sequence[str] = ()) -> str:
-    cleaned = _SECRET_SCAN_RE.sub("[REDACTED]", text)
-    for secret in extra_secrets:
-        if secret:
-            cleaned = cleaned.replace(secret, "[REDACTED]")
+def _clean_display_name(raw: str, *, field_label: str, max_length: int = 120) -> str:
+    cleaned = raw.strip()
+    if not cleaned or len(cleaned) > max_length:
+        raise HTTPException(422, f"{field_label} must be between 1 and {max_length} characters")
+    if _has_control_chars(cleaned):
+        raise HTTPException(422, f"{field_label} must not contain control characters")
     return cleaned
 
 
-def _redact_db_label(url: str) -> str:
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return "configured-branch"
-    host = parsed.hostname or "branch"
-    dbname = parsed.path.lstrip("/") or "neondb"
-    return f"{host}/{dbname}"
-
-
-def _normalize_pg_url(url: str) -> str:
-    raw = url.strip()
-    if raw.startswith("postgresql://"):
-        raw = raw.replace("postgresql://", "postgresql+psycopg://", 1)
-    if not raw.startswith("postgresql+psycopg://"):
-        raise HTTPException(
-            422, "Database URL must start with postgresql:// or postgresql+psycopg://"
-        )
-    return raw
-
-
-def _same_db_endpoint(candidate: str, settings: Settings) -> bool:
-    def key(raw: str) -> tuple[str | None, int | None, str]:
-        parsed = urlsplit(_normalize_pg_url(raw))
-        return (parsed.hostname.lower() if parsed.hostname else None, parsed.port, parsed.path)
-
-    cand_key = key(candidate)
-    return cand_key in {key(settings.database_url), key(settings.database_direct_url)}
-
-
-def _mlflow_run_url(
-    runtime: Runtime, experiment_name: str | None, run_id: str | None
-) -> str | None:
-    tracking_uri = runtime.settings.mlflow_tracking_uri
-    if not tracking_uri or not run_id:
-        return None
-    try:
-        uri = urlsplit(tracking_uri)
-        if uri.scheme not in {"http", "https"} or not uri.hostname or uri.username is not None:
-            return None
-    except ValueError:
-        return None
-    exp_id = (
-        runtime.mlflow_experiment_id
-        if runtime.mlflow_experiment_id
-        and (experiment_name is None or experiment_name == runtime.settings.mlflow_experiment)
-        else "0"
-    )
-    return urlunsplit(
-        (
-            uri.scheme,
-            uri.netloc,
-            uri.path.rstrip("/") + "/",
-            "",
-            f"/experiments/{quote(exp_id, safe='')}/runs/{quote(run_id, safe='')}",
-        )
+def _promotion_view(
+    promo: store.OptimizationPromotion,
+    *,
+    job: store.OptimizationJob | None = None,
+    provider_name: str | None = None,
+) -> OptimizationPromotionView:
+    base = OptimizationPromotionView.model_validate(promo)
+    return base.model_copy(
+        update={
+            "decision_provider_name": provider_name,
+            "baseline_score": job.baseline_score if job is not None else None,
+            "optimized_score": job.optimized_score if job is not None else None,
+        }
     )
 
 
@@ -2206,7 +2178,9 @@ def _job_summary(runtime: Runtime, job: store.OptimizationJob) -> OptimizationJo
     data = OptimizationJobSummary.model_validate(job)
     return data.model_copy(
         update={
-            "mlflow_run_url": _mlflow_run_url(runtime, job.mlflow_experiment, job.mlflow_run_id)
+            "mlflow_run_url": opt_runner.mlflow_run_url(
+                runtime, job.mlflow_experiment, job.mlflow_run_id
+            )
         }
     )
 
@@ -2220,198 +2194,64 @@ def _job_detail(runtime: Runtime, job: store.OptimizationJob) -> OptimizationJob
     )
 
 
-def _validate_and_summarize_jsonl(
-    raw_bytes: bytes,
-    target: OptimizationTarget,
-    available_skills: set[str],
-    *,
-    strict_secrets: bool = True,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    try:
-        text_body = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise HTTPException(422, "Dataset must be UTF-8 encoded JSONL") from error
-
-    if strict_secrets and _SECRET_SCAN_RE.search(text_body):
-        raise HTTPException(
-            422,
-            "Dataset appears to contain raw credentials or API keys; "
-            "remove secrets before uploading",
-        )
-
-    rows: list[dict[str, Any]] = []
-    splits: dict[str, int] = {"train": 0, "val": 0, "holdout": 0, "unspecified": 0}
-    lineages: set[str] = set()
-    positive_count = 0
-    negative_count = 0
-    blocking_count = 0
-
-    for line_no, raw_line in enumerate(text_body.splitlines(), 1):
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        if len(rows) >= 2000:
-            raise HTTPException(422, "Dataset cannot exceed 2000 rows")
-        try:
-            row = json.loads(stripped)
-        except json.JSONDecodeError as error:
-            raise HTTPException(422, f"Line {line_no}: invalid JSON ({error.msg})") from error
-        if not isinstance(row, dict):
-            raise HTTPException(422, f"Line {line_no}: each JSONL line must be a JSON object")
-
-        split = row.get("split")
-        if split is not None and split != "":
-            if not isinstance(split, str) or split not in {"train", "val", "holdout"}:
-                raise HTTPException(
-                    422,
-                    f"Line {line_no}: invalid split {split!r} (expected train, val, or holdout)",
+def _provider_view(provider: store.LLMProvider) -> LLMProviderView:
+    raw_models = provider.cached_models_json or []
+    models: list[LLMProviderModelItem] = []
+    for entry in raw_models:
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]:
+            models.append(
+                LLMProviderModelItem(
+                    id=entry["id"],
+                    label=entry.get("label") if isinstance(entry.get("label"), str) else None,
+                    owned_by=(
+                        entry.get("owned_by") if isinstance(entry.get("owned_by"), str) else None
+                    ),
                 )
-            splits[split] += 1
-        else:
-            splits["unspecified"] += 1
-
-        lineage = row.get("lineage")
-        if isinstance(lineage, str) and lineage.strip():
-            lineages.add(lineage.strip())
-
-        if target == "skills":
-            task = row.get("task")
-            if not isinstance(task, str) or not task.strip():
-                raise HTTPException(422, f"Line {line_no}: skill rows require a nonempty 'task'")
-            raw_expected = row.get("expected_skill", row.get("primary_skill"))
-            needs_skill = (
-                bool(row["needs_skill"])
-                if "needs_skill" in row
-                else (isinstance(raw_expected, str) and bool(raw_expected.strip()))
             )
-            if needs_skill:
-                positive_count += 1
-                if not isinstance(raw_expected, str) or not raw_expected.strip():
-                    raise HTTPException(
-                        422, f"Line {line_no}: rows with needs_skill=true require 'expected_skill'"
-                    )
-                cleaned = raw_expected.removeprefix("@").strip()
-                if available_skills and cleaned not in available_skills:
-                    raise HTTPException(422, f"Line {line_no}: unknown skill {cleaned!r}")
-            else:
-                negative_count += 1
-        elif target == "memory":
-            exchange = row.get("turn_exchange")
-            has_task = isinstance(row.get("task"), str) and bool(row["task"].strip())
-            has_exchange = (isinstance(exchange, str) and bool(exchange.strip())) or (
-                isinstance(exchange, dict)
-                and isinstance(exchange.get("task"), str)
-                and bool(exchange["task"].strip())
-            )
-            if not (has_task or has_exchange):
-                raise HTTPException(
-                    422, f"Line {line_no}: memory rows require 'task' or 'turn_exchange'"
-                )
-            if "worth_saving" not in row and "should_save" not in row:
-                raise HTTPException(
-                    422, f"Line {line_no}: memory rows require 'worth_saving' or 'should_save'"
-                )
-            worth = bool(row.get("worth_saving", row.get("should_save")))
-            if worth:
-                positive_count += 1
-            else:
-                negative_count += 1
-            action = row.get("action")
-            if action is not None and action not in {"insert", "update", "skip"}:
-                raise HTTPException(422, f"Line {line_no}: invalid action {action!r}")
-            scope = row.get("scope")
-            if scope is not None and scope not in {"global", "session"}:
-                raise HTTPException(422, f"Line {line_no}: invalid scope {scope!r}")
-        else:
-            task = row.get("task")
-            if not isinstance(task, str) or not task.strip():
-                raise HTTPException(422, f"Line {line_no}: RLM rows require a nonempty 'task'")
-            verifier = row.get("verifier")
-            has_answer = isinstance(row.get("answer"), str) and bool(row["answer"].strip())
-            has_expected = isinstance(row.get("expected_answer"), str) and bool(
-                row["expected_answer"].strip()
-            )
-            if not (has_answer or has_expected or isinstance(verifier, dict)):
-                raise HTTPException(
-                    422,
-                    f"Line {line_no}: RLM rows require 'answer', 'expected_answer', or 'verifier'",
-                )
-            if row.get("blocking"):
-                blocking_count += 1
-
-        rows.append(row)
-
-    if not rows:
-        raise HTTPException(422, "Dataset contains zero JSONL rows")
-
-    summary: dict[str, Any] = {
-        "row_count": len(rows),
-        "splits": splits,
-        "lineage_count": len(lineages),
-    }
-    if target in {"skills", "memory"}:
-        summary["positive_count"] = positive_count
-        summary["negative_count"] = negative_count
-    else:
-        summary["blocking_count"] = blocking_count
-    return rows, summary
-
-
-def _builtin_dataset_path(
-    settings: Settings, dataset_id: str
-) -> tuple[OptimizationTarget, Path] | None:
-    eval_dir = _resolve_eval_datasets_dir(settings)
-    for target, (builtin_id, filename) in _BUILTIN_DATASETS.items():
-        if dataset_id == builtin_id:
-            return target, eval_dir / filename
-    return None
-
-
-def _summarize_builtin_dataset(
-    target: OptimizationTarget, dataset_id: str, path: Path, available_skills: set[str]
-) -> OptimizationDatasetSummary | None:
-    if not path.is_file():
-        return None
-    raw = path.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
-    rows, summary = _validate_and_summarize_jsonl(
-        raw, target, available_skills, strict_secrets=False
+    return LLMProviderView(
+        id=provider.id,
+        name=provider.name,
+        dialect=cast(llm_registry.ProviderDialect, provider.dialect),
+        api_mode=cast(llm_registry.ProviderApiMode, provider.api_mode),
+        base_url=provider.base_url,
+        has_api_key=bool(provider.api_key_ciphertext),
+        api_key_hint=provider.api_key_hint,
+        default_model=provider.default_model,
+        cached_models=models,
+        last_tested_at=provider.last_tested_at,
+        created_at=provider.created_at,
+        updated_at=provider.updated_at,
     )
+
+
+def _custom_dataset_summary(row: store.OptimizationDataset) -> OptimizationDatasetSummary:
+    backend = cast(opt_runner.DatasetStorageBackend, row.storage_backend or "neon")
     return OptimizationDatasetSummary(
-        id=dataset_id,
-        name=path.name,
-        target=target,
-        source="builtin",
-        row_count=len(rows),
-        size_bytes=len(raw),
-        sha256=digest,
-        summary_json=summary,
-        created_at=None,
+        id=str(row.id),
+        name=row.name,
+        target=opt_runner.coerce_target(row.target),
+        source="custom",
+        storage_backend=backend,
+        storage_volume=row.storage_volume,
+        row_count=row.row_count,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        summary_json=dict(row.summary_json or {}),
+        created_at=row.created_at,
     )
-
-
-def _env_path_for_target(settings: Settings, target: OptimizationTarget) -> str | None:
-    if target == "rlm":
-        return str(settings.optimized_program_path) if settings.optimized_program_path else None
-    if target == "skills":
-        return str(settings.skill_selector_path) if settings.skill_selector_path else None
-    return str(settings.memory_gate_path) if settings.memory_gate_path else None
 
 
 @app.get("/api/optimizations/overview", dependencies=[Depends(require_auth)])
 async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
-    effective = await _effective_settings(runtime)
-    promotions = await store.list_active_optimization_promotions(runtime.sessionmaker)
-    recent_jobs = await store.list_optimization_jobs(runtime.sessionmaker, limit=100)
+    data = await opt_runner.load_overview_data(runtime.sessionmaker)
+    effective = _merge_settings(runtime.settings, data.workspace_overrides)
 
     targets: list[TargetStatusSummary] = []
-    for target in _VALID_OPT_TARGETS:
-        active_promo = promotions.get(target)
-        history = await store.list_target_promotion_history(runtime.sessionmaker, target, limit=5)
-        target_jobs = [job for job in recent_jobs if job.target == target]
-        active_job = next((job for job in target_jobs if job.status in {"queued", "running"}), None)
-        latest_job = target_jobs[0] if target_jobs else None
-        env_path = _env_path_for_target(runtime.settings, target)
+    for target in opt_datasets.VALID_OPT_TARGETS:
+        t_data = data.targets[target]
+        active_promo = t_data.active_promotion
+        prev_promo = t_data.previous_promotion
+        env_path = opt_runner.env_path_for_target(runtime.settings, target)
         source: Literal["promoted", "env", "default"]
         if active_promo is not None:
             source = "promoted"
@@ -2419,23 +2259,44 @@ async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
             source = "env"
         else:
             source = "default"
-        has_previous = active_promo is not None and any(
-            item.id != active_promo.id for item in history
-        )
         targets.append(
             TargetStatusSummary(
                 target=target,
                 source=source,
                 env_path=env_path,
                 active_promotion=(
-                    OptimizationPromotionView.model_validate(active_promo)
+                    _promotion_view(
+                        active_promo,
+                        job=data.jobs_by_id.get(active_promo.job_id),
+                        provider_name=(
+                            data.provider_names.get(active_promo.decision_provider_id)
+                            if active_promo.decision_provider_id is not None
+                            else None
+                        ),
+                    )
                     if active_promo is not None
                     else None
                 ),
-                can_rollback_previous=has_previous,
+                previous_promotion=(
+                    _promotion_view(
+                        prev_promo,
+                        job=data.jobs_by_id.get(prev_promo.job_id),
+                        provider_name=(
+                            data.provider_names.get(prev_promo.decision_provider_id)
+                            if prev_promo.decision_provider_id is not None
+                            else None
+                        ),
+                    )
+                    if prev_promo is not None
+                    else None
+                ),
+                can_rollback_previous=prev_promo is not None,
                 can_rollback_env=active_promo is not None,
-                latest_job=_job_summary(runtime, latest_job) if latest_job else None,
-                active_job=_job_summary(runtime, active_job) if active_job else None,
+                latest_scored_job=_job_summary(runtime, t_data.latest_scored_job)
+                if t_data.latest_scored_job
+                else None,
+                latest_job=_job_summary(runtime, t_data.latest_job) if t_data.latest_job else None,
+                active_job=_job_summary(runtime, t_data.active_job) if t_data.active_job else None,
             )
         )
 
@@ -2448,7 +2309,7 @@ async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
         ),
         configured_branch_enabled=bool(opt_db and opt_db.get_secret_value()),
         configured_branch_label=(
-            _redact_db_label(opt_db.get_secret_value())
+            opt_datasets.redact_db_label(opt_db.get_secret_value())
             if opt_db and opt_db.get_secret_value()
             else None
         ),
@@ -2458,6 +2319,14 @@ async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
         decision_model=effective.decision_model,
         llm_model=effective.llm_model,
         sub_llm_model=effective.sub_llm_model,
+        neon_storage_enabled=runtime.storage is not None,
+        daytona_volume_enabled=opt_runner.daytona_volume_enabled(
+            runtime.settings, daytona=runtime.volume_daytona or runtime.daytona
+        ),
+        daytona_dataset_volume=runtime.settings.daytona_dataset_volume,
+        credentials_encryption_enabled=llm_registry.encryption_configured(runtime.settings),
+        allow_private_llm_endpoints=runtime.settings.allow_private_llm_endpoints,
+        allow_local_interpreter=runtime.settings.allow_local_interpreter,
     )
     return OptimizationOverview(targets=targets, capabilities=capabilities)
 
@@ -2466,36 +2335,38 @@ async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
 async def list_optimization_datasets(runtime: RuntimeDep) -> list[OptimizationDatasetSummary]:
     registry = await _skill_registry(runtime)
     available_skills = {skill.name for skill in registry.available_skills(runtime.settings)}
-    eval_dir = _resolve_eval_datasets_dir(runtime.settings)
+    eval_dir = opt_runner.resolve_eval_datasets_dir(runtime.settings)
 
     items: list[OptimizationDatasetSummary] = []
-    for target in _VALID_OPT_TARGETS:
-        builtin_id, filename = _BUILTIN_DATASETS[target]
+    for target in opt_datasets.VALID_OPT_TARGETS:
+        builtin_id, filename = opt_datasets.BUILTIN_DATASETS[target]
         summary = await asyncio.to_thread(
-            _summarize_builtin_dataset,
+            opt_runner.summarize_builtin_dataset,
             target,
             builtin_id,
             eval_dir / filename,
             available_skills,
         )
         if summary is not None:
-            items.append(summary)
+            items.append(
+                OptimizationDatasetSummary(
+                    id=summary.id,
+                    name=summary.name,
+                    target=summary.target,
+                    source="builtin",
+                    storage_backend="builtin",
+                    storage_volume=None,
+                    row_count=summary.row_count,
+                    size_bytes=summary.size_bytes,
+                    sha256=summary.sha256,
+                    summary_json=summary.summary_json,
+                    created_at=None,
+                )
+            )
 
     custom_rows = await store.list_optimization_datasets(runtime.sessionmaker)
     for row in custom_rows:
-        items.append(
-            OptimizationDatasetSummary(
-                id=str(row.id),
-                name=row.name,
-                target=_coerce_target(row.target),
-                source="custom",
-                row_count=row.row_count,
-                size_bytes=row.size_bytes,
-                sha256=row.sha256,
-                summary_json=dict(row.summary_json or {}),
-                created_at=row.created_at,
-            )
-        )
+        items.append(_custom_dataset_summary(row))
     return items
 
 
@@ -2508,23 +2379,41 @@ async def preview_optimization_dataset(
     registry = await _skill_registry(runtime)
     available_skills = {skill.name for skill in registry.available_skills(runtime.settings)}
 
-    if (builtin := _builtin_dataset_path(runtime.settings, dataset_id)) is not None:
+    if (builtin := opt_runner.builtin_dataset_path(runtime.settings, dataset_id)) is not None:
         target, path = builtin
         if not path.is_file():
             raise HTTPException(404, "Built-in dataset file not found")
         raw = await asyncio.to_thread(path.read_bytes)
-        rows, summary = _validate_and_summarize_jsonl(
-            raw, target, available_skills, strict_secrets=False
+        try:
+            rows, _ = await asyncio.to_thread(
+                opt_datasets.validate_and_summarize_jsonl,
+                raw,
+                target,
+                available_skills,
+                strict_secrets=False,
+                enforce_min_rows=False,
+            )
+        except opt_datasets.DatasetValidationError as error:
+            raise HTTPException(422, str(error)) from error
+        cached = await asyncio.to_thread(
+            opt_runner.summarize_builtin_dataset,
+            target,
+            dataset_id,
+            path,
+            available_skills,
         )
+        assert cached is not None
         dataset_summary = OptimizationDatasetSummary(
-            id=dataset_id,
-            name=path.name,
-            target=target,
+            id=cached.id,
+            name=cached.name,
+            target=cached.target,
             source="builtin",
-            row_count=len(rows),
-            size_bytes=len(raw),
-            sha256=hashlib.sha256(raw).hexdigest(),
-            summary_json=summary,
+            storage_backend="builtin",
+            storage_volume=None,
+            row_count=cached.row_count,
+            size_bytes=cached.size_bytes,
+            sha256=cached.sha256,
+            summary_json=cached.summary_json,
         )
         return OptimizationDatasetPreview(dataset=dataset_summary, rows=rows[:limit])
 
@@ -2537,31 +2426,22 @@ async def preview_optimization_dataset(
     if record is None:
         raise HTTPException(404, "Dataset not found")
 
-    with TemporaryDirectory(prefix="fleet-opt-preview-") as temporary:
-        local = Path(temporary) / "dataset.jsonl"
-        await runtime.storage.download(
-            record.object_key, local, sha256=record.sha256, size=record.size_bytes
+    if record.summary_json.get("deletion_pending"):
+        raise HTTPException(409, "Dataset deletion is pending; retry deletion")
+    raw, _cached_path = await opt_runner.materialize_dataset_bytes(runtime, record)
+    record_target = opt_runner.coerce_target(record.target)
+    try:
+        rows, _ = await asyncio.to_thread(
+            opt_datasets.validate_and_summarize_jsonl,
+            raw,
+            record_target,
+            available_skills,
+            strict_secrets=False,
+            enforce_min_rows=False,
         )
-        raw = local.read_bytes()
-    record_target = _coerce_target(record.target)
-    rows, _ = _validate_and_summarize_jsonl(
-        raw,
-        record_target,
-        available_skills,
-        strict_secrets=False,
-    )
-    dataset_summary = OptimizationDatasetSummary(
-        id=str(record.id),
-        name=record.name,
-        target=record_target,
-        source="custom",
-        row_count=record.row_count,
-        size_bytes=record.size_bytes,
-        sha256=record.sha256,
-        summary_json=dict(record.summary_json or {}),
-        created_at=record.created_at,
-    )
-    return OptimizationDatasetPreview(dataset=dataset_summary, rows=rows[:limit])
+    except opt_datasets.DatasetValidationError as error:
+        raise HTTPException(422, str(error)) from error
+    return OptimizationDatasetPreview(dataset=_custom_dataset_summary(record), rows=rows[:limit])
 
 
 @app.post(
@@ -2569,74 +2449,93 @@ async def preview_optimization_dataset(
     status_code=201,
     dependencies=[Depends(require_auth)],
     max_body_size=10 * 1024 * 1024,
-    form_limits={"max_files": 1, "max_fields": 4, "max_part_size": 64 * 1024},
+    form_limits={"max_files": 1, "max_fields": 6, "max_part_size": 64 * 1024},
 )
 async def upload_optimization_dataset(
-    request: Request,
     file: Annotated[UploadFile, Upload()],
     runtime: RuntimeDep,
+    target: Annotated[OptimizationTarget, Form()],
+    name: Annotated[str | None, Form()] = None,
+    storage_backend: Annotated[store.OptimizationStorageBackend, Form()] = "neon",
 ) -> OptimizationDatasetSummary:
-    form = await request.form()
-    raw_target = form.get("target")
-    if not isinstance(raw_target, str) or raw_target not in _VALID_OPT_TARGETS:
-        raise HTTPException(422, "Dataset upload requires target ('skills', 'memory', or 'rlm')")
-    target: OptimizationTarget = raw_target  # type: ignore[assignment]
-
     filename = file.filename or "dataset.jsonl"
     if not _safe_component(filename) or not filename.endswith(".jsonl"):
         raise HTTPException(422, "Dataset filename must be a clean .jsonl filename")
-    raw_name = form.get("name")
-    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else filename
-    if not 1 <= len(name) <= 120:
-        raise HTTPException(422, "Dataset name must be between 1 and 120 characters")
+    resolved_name = _clean_display_name(
+        name if isinstance(name, str) and name.strip() else filename,
+        field_label="Dataset name",
+        max_length=120,
+    )
+    if "/" in resolved_name or "\\" in resolved_name:
+        raise HTTPException(422, "Dataset name must not contain path separators")
+
+    if storage_backend == "daytona_volume" and not opt_runner.daytona_volume_enabled(
+        runtime.settings, daytona=runtime.volume_daytona or runtime.daytona
+    ):
+        raise HTTPException(
+            422,
+            "Daytona Volume storage requires a configured Daytona API key and dataset volume",
+        )
 
     raw_bytes = await file.read()
-    if len(raw_bytes) > 10 * 1024 * 1024:
+    if len(raw_bytes) > opt_datasets.MAX_DATASET_BYTES:
         raise HTTPException(413, "Dataset exceeds 10 MiB limit")
 
     registry = await _skill_registry(runtime)
     available_skills = {skill.name for skill in registry.available_skills(runtime.settings)}
-    rows, summary = _validate_and_summarize_jsonl(raw_bytes, target, available_skills)
+    try:
+        rows, summary = await asyncio.to_thread(
+            opt_datasets.validate_and_summarize_jsonl,
+            raw_bytes,
+            target,
+            available_skills,
+        )
+    except opt_datasets.DatasetValidationError as error:
+        raise HTTPException(422, str(error)) from error
+
+    existing_dataset = await store.get_optimization_dataset_by_name(
+        runtime.sessionmaker, resolved_name
+    )
+    if existing_dataset is not None:
+        raise HTTPException(409, f"A dataset named '{resolved_name}' already exists")
 
     dataset_id = uuid4()
-    object_key = runtime.storage.optimization_dataset_key(dataset_id)
-    with TemporaryDirectory(prefix="fleet-opt-ds-") as temporary:
-        local = Path(temporary) / "dataset.jsonl"
-        local.write_bytes(raw_bytes)
-        digest, size_bytes = await runtime.storage.put_object(object_key, local)
+    object_key, storage_volume, digest, size_bytes = await opt_runner.store_dataset_bytes(
+        runtime,
+        dataset_id=dataset_id,
+        raw_bytes=raw_bytes,
+        storage_backend=storage_backend,
+    )
 
     try:
         record = await store.create_optimization_dataset(
             runtime.sessionmaker,
             dataset_id=dataset_id,
-            name=name,
+            name=resolved_name,
             target=target,
+            storage_backend=storage_backend,
+            storage_volume=storage_volume,
             object_key=object_key,
             sha256=digest,
             size_bytes=size_bytes,
             row_count=len(rows),
             summary_json=summary,
         )
-    except IntegrityError as error:
-        with suppress(StorageError):
-            await runtime.storage.delete_object(object_key)
-        raise HTTPException(409, f"A dataset named '{name}' already exists") from error
-    except BaseException:
-        with suppress(StorageError):
-            await runtime.storage.delete_object(object_key)
+    except BaseException as error:
+        try:
+            await opt_runner.delete_dataset_from_backend(
+                runtime,
+                storage_backend=storage_backend,
+                storage_volume=storage_volume,
+                object_key=object_key,
+            )
+        except (DatasetVolumeError, StorageError):
+            _LOG.exception("Could not clean up failed dataset upload %s", dataset_id)
+        if isinstance(error, IntegrityError):
+            raise HTTPException(409, f"A dataset named '{resolved_name}' already exists") from error
         raise
 
-    return OptimizationDatasetSummary(
-        id=str(record.id),
-        name=record.name,
-        target=target,
-        source="custom",
-        row_count=record.row_count,
-        size_bytes=record.size_bytes,
-        sha256=record.sha256,
-        summary_json=dict(record.summary_json or {}),
-        created_at=record.created_at,
-    )
+    return _custom_dataset_summary(record)
 
 
 @app.delete(
@@ -2653,443 +2552,425 @@ async def delete_optimization_dataset(dataset_id: str, runtime: RuntimeDep) -> N
         raise HTTPException(404, "Dataset not found") from error
 
     try:
-        deleted = await store.delete_optimization_dataset(runtime.sessionmaker, parsed_id)
+        deleted = await store.begin_optimization_dataset_deletion(runtime.sessionmaker, parsed_id)
     except store.OptimizationConflictError as error:
         raise HTTPException(409, str(error)) from error
     if deleted is None:
         raise HTTPException(404, "Dataset not found")
-    with suppress(StorageError):
-        await runtime.storage.delete_object(deleted.object_key)
+    await opt_runner.delete_dataset_from_backend(
+        runtime,
+        storage_backend=deleted.storage_backend,
+        storage_volume=deleted.storage_volume,
+        object_key=deleted.object_key,
+    )
+    await opt_runner.evict_cached_dataset(runtime.artifact_cache_dir, deleted.sha256)
+    await store.finish_optimization_dataset_deletion(runtime.sessionmaker, parsed_id)
 
 
-async def _create_ephemeral_neon_branch(
-    settings: Settings, target: OptimizationTarget, job_id: UUID
-) -> tuple[str, str]:
-    api_key = settings.neon_api_key.get_secret_value() if settings.neon_api_key else ""
-    project_id = (settings.neon_project_id or "").strip()
-    if not api_key or not project_id:
-        raise RuntimeError("Auto ephemeral Neon branch is not configured")
-    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
-    branch_payload: dict[str, Any] = {
-        "branch": {"name": f"opt-ui-{target}-{job_id.hex[:8]}"},
-        "endpoints": [{"type": "read_write"}],
-    }
-    if settings.neon_parent_branch_id:
-        branch_payload["branch"]["parent_id"] = settings.neon_parent_branch_id
-
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(
-            f"{_NEON_API_BASE}/projects/{quote(project_id, safe='')}/branches",
-            headers=headers,
-            json=branch_payload,
-        )
-        resp.raise_for_status()
-        created = resp.json()
-        branch = created.get("branch") or {}
-        branch_id = str(branch.get("id") or "")
-        if not branch_id:
-            raise RuntimeError("Neon REST API did not return a branch ID")
-        uri_resp = await client.get(
-            f"{_NEON_API_BASE}/projects/{quote(project_id, safe='')}/connection_uri",
-            headers=headers,
-            params={"branch_id": branch_id, "database_name": "neondb", "role_name": "neondb_owner"},
-        )
-        uri_resp.raise_for_status()
-        uri = str((uri_resp.json() or {}).get("uri") or "")
-        if not uri:
-            await _delete_ephemeral_neon_branch(settings, branch_id)
-            raise RuntimeError("Neon REST API did not return a connection URI")
-        return branch_id, uri
+# ---------------------------------------------------------------------------
+# LLM Provider Registry Routes
+# ---------------------------------------------------------------------------
 
 
-async def _delete_ephemeral_neon_branch(settings: Settings, branch_id: str) -> None:
-    api_key = settings.neon_api_key.get_secret_value() if settings.neon_api_key else ""
-    project_id = (settings.neon_project_id or "").strip()
-    if not api_key or not project_id or not branch_id:
-        return
-    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+@app.get("/api/optimizations/providers", dependencies=[Depends(require_auth)])
+async def list_optimization_providers(runtime: RuntimeDep) -> LLMProviderListResponse:
+    providers = await store.list_llm_providers(runtime.sessionmaker)
+    return LLMProviderListResponse(
+        providers=[_provider_view(provider) for provider in providers],
+        encryption_configured=llm_registry.encryption_configured(runtime.settings),
+        allow_private_endpoints=runtime.settings.allow_private_llm_endpoints,
+    )
+
+
+@app.post("/api/optimizations/providers", status_code=201, dependencies=[Depends(require_auth)])
+async def create_optimization_provider(
+    payload: LLMProviderCreate,
+    runtime: RuntimeDep,
+) -> LLMProviderView:
+    name = _clean_display_name(payload.name, field_label="Provider name", max_length=120)
+    spec = llm_registry.PROVIDER_DIALECTS[payload.dialect]
+    api_mode: llm_registry.ProviderApiMode = (
+        payload.api_mode if payload.api_mode is not None else spec.default_api_mode
+    )
+
+    raw_base = (payload.base_url or "").strip() or None
+    if raw_base is None and spec.requires_base_url:
+        raise HTTPException(422, f"Dialect '{payload.dialect}' requires an explicit base_url")
+    validated_base: str | None = None
+    if raw_base is not None:
+        try:
+            validated_base = await asyncio.to_thread(
+                llm_registry.validate_endpoint_url,
+                raw_base,
+                allow_private=runtime.settings.allow_private_llm_endpoints,
+            )
+        except llm_registry.EndpointValidationError as error:
+            raise HTTPException(422, str(error)) from error
+
+    raw_key = payload.api_key.get_secret_value().strip() if payload.api_key is not None else ""
+    ciphertext: str | None = None
+    hint: str | None = None
+    if raw_key:
+        if not llm_registry.encryption_configured(runtime.settings):
+            raise HTTPException(
+                400,
+                "FLEET_CREDENTIALS_ENCRYPTION_KEY must be configured on the server to save API "
+                "keys (keyless local endpoints like Ollama/vLLM work without an API key).",
+            )
+        try:
+            ciphertext = llm_registry.encrypt_secret(raw_key, runtime.settings)
+        except llm_registry.CredentialEncryptionError as error:
+            raise HTTPException(400, str(error)) from error
+        hint = llm_registry.mask_secret_hint(raw_key)
+
+    default_model = (payload.default_model or "").strip() or None
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            proj = quote(project_id, safe="")
-            branch = quote(branch_id, safe="")
-            await client.delete(
-                f"{_NEON_API_BASE}/projects/{proj}/branches/{branch}",
-                headers=headers,
-            )
-    except Exception as error:
-        _LOG.warning(
-            "Failed to delete ephemeral Neon branch %s (%s)", branch_id, type(error).__name__
-        )
-
-
-def _append_log_tail(current: str, chunk: str) -> str:
-    merged = current + chunk
-    encoded = merged.encode("utf-8", errors="replace")
-    if len(encoded) <= _OPT_LOG_MAX_BYTES:
-        return merged
-    return encoded[-_OPT_LOG_MAX_BYTES:].decode("utf-8", errors="ignore")
-
-
-def _read_latest_progress(progress_path: Path, offset: int) -> tuple[int, dict[str, Any] | None]:
-    if not progress_path.is_file():
-        return offset, None
-    raw = progress_path.read_bytes()
-    if len(raw) <= offset:
-        return offset, None
-    new_bytes = raw[offset:]
-    new_offset = offset + len(new_bytes)
-    latest: dict[str, Any] | None = None
-    for line in new_bytes.decode("utf-8", errors="replace").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        with suppress(json.JSONDecodeError):
-            parsed = json.loads(stripped)
-            if isinstance(parsed, dict):
-                latest = parsed
-    return new_offset, latest
-
-
-async def _supervise_optimization_job(
-    runtime: Runtime,
-    job_id: UUID,
-    *,
-    target: OptimizationTarget,
-    payload: OptimizationJobCreate,
-    branch_mode: OptimizationBranchMode,
-    effective: Settings,
-    dataset_source: store.OptimizationDatasetSource,
-    builtin_dataset_path: Path | None,
-    custom_dataset: store.OptimizationDataset | None,
-    custom_database_url: str | None,
-) -> None:
-    ephemeral_branch_id: str | None = None
-    log_tail = ""
-    extra_secrets = [custom_database_url] if custom_database_url else []
-    progress_state: dict[str, Any] = {
-        "stage": "queued",
-        "label": "Preparing optimization runner",
-        "completed": None,
-        "total": None,
-    }
-    cancelled = False
-    proc: asyncio.subprocess.Process | None = None
-
-    try:
-        if branch_mode == "auto_neon":
-            progress_state = {
-                "stage": "provisioning_branch",
-                "label": "Provisioning ephemeral Neon branch",
-            }
-            await store.update_optimization_job_progress(
-                runtime.sessionmaker,
-                job_id,
-                status="running",
-                stage="provisioning_branch",
-                progress_json=progress_state,
-                started_at=datetime.now(UTC),
-            )
-            ephemeral_branch_id, db_url = await _create_ephemeral_neon_branch(
-                runtime.settings, target, job_id
-            )
-            extra_secrets.append(db_url)
-        elif branch_mode == "configured_branch":
-            opt_db = runtime.settings.optimization_database_url
-            assert opt_db is not None
-            db_url = opt_db.get_secret_value()
-            extra_secrets.append(db_url)
-        elif branch_mode == "custom_branch":
-            assert custom_database_url is not None
-            db_url = custom_database_url
-        else:
-            db_url = runtime.settings.database_direct_url
-            extra_secrets.append(db_url)
-
-        await store.update_optimization_job_progress(
+        created = await store.create_llm_provider(
             runtime.sessionmaker,
-            job_id,
-            status="running",
-            stage="starting",
-            progress_json={"stage": "starting", "label": "Launching isolated optimizer"},
-            started_at=datetime.now(UTC),
+            name=name,
+            dialect=payload.dialect,
+            api_mode=api_mode,
+            base_url=validated_base,
+            api_key_ciphertext=ciphertext,
+            api_key_hint=hint,
+            default_model=default_model,
+        )
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    return _provider_view(created)
+
+
+def _provider_endpoint_changed(
+    provider: store.LLMProvider, dialect: llm_registry.ProviderDialect, base_url: str | None
+) -> bool:
+    if provider.dialect != dialect:
+        return True
+    default = llm_registry.PROVIDER_DIALECTS[dialect].default_base_url or ""
+    return (provider.base_url or default).rstrip("/") != (base_url or default).rstrip("/")
+
+
+@app.patch("/api/optimizations/providers/{provider_id}", dependencies=[Depends(require_auth)])
+async def update_optimization_provider(
+    provider_id: UUID,
+    payload: LLMProviderUpdate,
+    runtime: RuntimeDep,
+) -> LLMProviderView:
+    existing = await store.get_llm_provider(runtime.sessionmaker, provider_id)
+    if existing is None:
+        raise HTTPException(404, "LLM provider not found")
+
+    changes: dict[str, Any] = {}
+    endpoint_changed = False
+    if "name" in payload.model_fields_set:
+        if payload.name is None:
+            raise HTTPException(422, "Provider name cannot be null")
+        changes["name"] = _clean_display_name(
+            payload.name, field_label="Provider name", max_length=120
         )
 
-        with TemporaryDirectory(prefix=f"fleet-opt-job-{job_id.hex[:8]}-") as temporary:
-            work_dir = Path(temporary)
-            progress_path = work_dir / "progress.jsonl"
-            report_path = work_dir / "report.json"
-            artifact_path = work_dir / f"{target}.json"
-            log_dir = work_dir / "logs"
+    effective_dialect = cast(
+        llm_registry.ProviderDialect,
+        payload.dialect
+        if ("dialect" in payload.model_fields_set and payload.dialect is not None)
+        else existing.dialect,
+    )
+    if "dialect" in payload.model_fields_set:
+        if payload.dialect is None:
+            raise HTTPException(422, "Provider dialect cannot be null")
+        changes["dialect"] = payload.dialect
 
-            dataset_arg: Path | None = None
-            if dataset_source == "builtin" and builtin_dataset_path is not None:
-                dataset_arg = builtin_dataset_path
-            elif dataset_source == "custom" and custom_dataset is not None:
-                dataset_arg = work_dir / "dataset.jsonl"
-                await runtime.storage.download(
-                    custom_dataset.object_key,
-                    dataset_arg,
-                    sha256=custom_dataset.sha256,
-                    size=custom_dataset.size_bytes,
+    if "api_mode" in payload.model_fields_set:
+        if payload.api_mode is None:
+            raise HTTPException(422, "Provider api_mode cannot be null")
+        changes["api_mode"] = payload.api_mode
+
+    spec = llm_registry.PROVIDER_DIALECTS[effective_dialect]
+    if "base_url" in payload.model_fields_set or "dialect" in payload.model_fields_set:
+        candidate_base = (
+            ((payload.base_url or "").strip() or None)
+            if "base_url" in payload.model_fields_set
+            else existing.base_url
+        )
+        if candidate_base is None and spec.requires_base_url:
+            raise HTTPException(422, f"Dialect '{effective_dialect}' requires an explicit base_url")
+        if candidate_base is not None:
+            try:
+                candidate_base = await asyncio.to_thread(
+                    llm_registry.validate_endpoint_url,
+                    candidate_base,
+                    allow_private=runtime.settings.allow_private_llm_endpoints,
+                )
+            except llm_registry.EndpointValidationError as error:
+                raise HTTPException(422, str(error)) from error
+        endpoint_changed = _provider_endpoint_changed(existing, effective_dialect, candidate_base)
+        if (
+            existing.api_key_ciphertext
+            and endpoint_changed
+            and not payload.clear_api_key
+            and (
+                "api_key" not in payload.model_fields_set
+                or (payload.api_key is not None and not payload.api_key.get_secret_value().strip())
+            )
+        ):
+            raise HTTPException(
+                422, "Replace or clear the saved API key when changing the endpoint"
+            )
+        if "base_url" in payload.model_fields_set:
+            changes["base_url"] = candidate_base
+
+    if payload.clear_api_key or ("api_key" in payload.model_fields_set and payload.api_key is None):
+        changes["api_key_ciphertext"] = None
+        changes["api_key_hint"] = None
+    elif "api_key" in payload.model_fields_set and payload.api_key is not None:
+        raw_key = payload.api_key.get_secret_value().strip()
+        if raw_key:
+            if not llm_registry.encryption_configured(runtime.settings):
+                raise HTTPException(
+                    400,
+                    "FLEET_CREDENTIALS_ENCRYPTION_KEY must be configured on the server to save "
+                    "API keys (keyless local endpoints like Ollama/vLLM work without an API key).",
+                )
+            try:
+                changes["api_key_ciphertext"] = llm_registry.encrypt_secret(
+                    raw_key, runtime.settings
+                )
+            except llm_registry.CredentialEncryptionError as error:
+                raise HTTPException(400, str(error)) from error
+            changes["api_key_hint"] = llm_registry.mask_secret_hint(raw_key)
+
+    if "default_model" in payload.model_fields_set:
+        changes["default_model"] = (payload.default_model or "").strip() or None
+
+    try:
+        if endpoint_changed or "api_key_ciphertext" in changes:
+            changes.update(cached_models_json=[], last_tested_at=None)
+        updated = await store.update_llm_provider(
+            runtime.sessionmaker, provider_id, expected_updated_at=existing.updated_at, **changes
+        )
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    if updated is None:
+        raise HTTPException(404, "LLM provider not found")
+    return _provider_view(updated)
+
+
+@app.delete(
+    "/api/optimizations/providers/{provider_id}",
+    status_code=204,
+    dependencies=[Depends(require_auth)],
+)
+async def delete_optimization_provider(provider_id: UUID, runtime: RuntimeDep) -> None:
+    try:
+        deleted = await store.delete_llm_provider(runtime.sessionmaker, provider_id)
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    if deleted is None:
+        raise HTTPException(404, "LLM provider not found")
+
+
+@app.post("/api/optimizations/providers/probe", dependencies=[Depends(require_auth)])
+async def probe_optimization_provider(
+    payload: LLMProviderProbeRequest,
+    runtime: RuntimeDep,
+) -> LLMProviderProbeResponse:
+    stored: store.LLMProvider | None = None
+    if payload.provider_id is not None:
+        stored = await store.get_llm_provider(runtime.sessionmaker, payload.provider_id)
+        if stored is None:
+            raise HTTPException(404, "LLM provider not found")
+
+    dialect = payload.dialect or (
+        cast(llm_registry.ProviderDialect, stored.dialect) if stored is not None else None
+    )
+    if dialect is None:
+        raise HTTPException(422, "Provide dialect or an existing provider_id to probe")
+
+    base_url = (
+        ((payload.base_url or "").strip() or None)
+        if "base_url" in payload.model_fields_set
+        else (stored.base_url if stored is not None else None)
+    )
+    raw_key: str | None = None
+    if payload.api_key is not None and payload.api_key.get_secret_value().strip():
+        raw_key = payload.api_key.get_secret_value().strip()
+    elif stored is not None and stored.api_key_ciphertext:
+        if _provider_endpoint_changed(stored, dialect, base_url):
+            raise HTTPException(
+                422, "Enter a key for the new endpoint or probe without a saved provider"
+            )
+        try:
+            raw_key = llm_registry.decrypt_secret(stored.api_key_ciphertext, runtime.settings)
+        except llm_registry.CredentialEncryptionError as error:
+            return LLMProviderProbeResponse(ok=False, models=[], count=0, error=str(error))
+
+    extra_secrets = [raw_key] if raw_key else []
+    try:
+        raw_models = await llm_registry.fetch_provider_models(
+            dialect,
+            base_url,
+            raw_key,
+            allow_private=runtime.settings.allow_private_llm_endpoints,
+        )
+    except (
+        llm_registry.EndpointValidationError,
+        llm_registry.ProviderProbeError,
+        ValueError,
+    ) as error:
+        return LLMProviderProbeResponse(
+            ok=False,
+            models=[],
+            count=0,
+            error=opt_datasets.scrub_secrets(str(error), extra_secrets),
+        )
+
+    models = [LLMProviderModelItem.model_validate(item) for item in raw_models]
+    return LLMProviderProbeResponse(ok=True, models=models, count=len(models), error=None)
+
+
+@app.post("/api/optimizations/providers/{provider_id}/models", dependencies=[Depends(require_auth)])
+async def refresh_optimization_provider_models(
+    provider_id: UUID,
+    runtime: RuntimeDep,
+) -> LLMProviderModelsResponse:
+    provider = await store.get_llm_provider(runtime.sessionmaker, provider_id)
+    if provider is None:
+        raise HTTPException(404, "LLM provider not found")
+
+    provider_version = provider.updated_at
+    raw_key: str | None = None
+    if provider.api_key_ciphertext:
+        try:
+            raw_key = llm_registry.decrypt_secret(provider.api_key_ciphertext, runtime.settings)
+        except llm_registry.CredentialEncryptionError as error:
+            raise HTTPException(400, str(error)) from error
+
+    extra_secrets = [raw_key] if raw_key else []
+    try:
+        raw_models = await llm_registry.fetch_provider_models(
+            cast(llm_registry.ProviderDialect, provider.dialect),
+            provider.base_url,
+            raw_key,
+            allow_private=runtime.settings.allow_private_llm_endpoints,
+        )
+    except llm_registry.EndpointValidationError as error:
+        raise HTTPException(422, opt_datasets.scrub_secrets(str(error), extra_secrets)) from error
+    except llm_registry.ProviderProbeError as error:
+        raise HTTPException(502, opt_datasets.scrub_secrets(str(error), extra_secrets)) from error
+
+    try:
+        updated = await store.update_llm_provider(
+            runtime.sessionmaker,
+            provider_id,
+            expected_updated_at=provider_version,
+            cached_models_json=raw_models,
+            last_tested_at=datetime.now(UTC),
+        )
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    if updated is None:
+        raise HTTPException(404, "LLM provider not found")
+    models = [LLMProviderModelItem.model_validate(item) for item in raw_models]
+    return LLMProviderModelsResponse(
+        provider=_provider_view(updated),
+        models=models,
+        count=len(models),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Optimization Job Launch, SSE, Cancel, Promote & Rollback
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_role_credentials(
+    runtime: Runtime,
+    effective: Settings,
+    payload: OptimizationJobCreate,
+) -> tuple[dict[opt_runner.RoleName, opt_runner.ResolvedRoleCredential], UUID | None]:
+    role_inputs: list[tuple[opt_runner.RoleName, LMRoleSelection | None]]
+    if payload.target == "rlm":
+        reflection_sel = payload.reflection_lm_config or (
+            LMRoleSelection(model=payload.reflection_lm)
+            if payload.reflection_lm and payload.reflection_lm.strip()
+            else None
+        )
+        judge_sel = payload.judge_lm_config or (
+            LMRoleSelection(model=payload.judge_lm)
+            if payload.judge_lm and payload.judge_lm.strip()
+            else None
+        )
+        role_inputs = [
+            ("root_lm", payload.root_lm),
+            ("sub_lm", payload.sub_lm),
+            ("reflection_lm", reflection_sel),
+            ("judge_lm", judge_sel),
+        ]
+    else:
+        role_inputs = [("decision_lm", payload.decision_lm)]
+
+    provider_cache: dict[UUID, store.LLMProvider] = {}
+    resolved: dict[opt_runner.RoleName, opt_runner.ResolvedRoleCredential] = {}
+    decision_provider_id: UUID | None = None
+
+    for role, selection in role_inputs:
+        if selection is None:
+            continue
+        cleaned_model = (selection.model or "").strip() or None
+        if selection.reasoning_effort and (selection.provider_id is None or role == "decision_lm"):
+            raise HTTPException(422, "Reasoning effort requires an OpenAI provider and RLM role")
+        if selection.provider_id is not None:
+            provider = provider_cache.get(selection.provider_id)
+            if provider is None:
+                fetched = await store.get_llm_provider(runtime.sessionmaker, selection.provider_id)
+                if fetched is None:
+                    raise HTTPException(404, f"LLM provider {selection.provider_id} not found")
+                provider = fetched
+                provider_cache[selection.provider_id] = provider
+            effective_model = cleaned_model or (provider.default_model or "").strip() or None
+            if effective_model is None:
+                raise HTTPException(
+                    422,
+                    f"Select a model or set a default model on provider '{provider.name}' "
+                    f"for {role}",
+                )
+            decrypted_key: str | None = None
+            if provider.api_key_ciphertext:
+                try:
+                    decrypted_key = llm_registry.decrypt_secret(
+                        provider.api_key_ciphertext, runtime.settings
+                    )
+                except llm_registry.CredentialEncryptionError as error:
+                    raise HTTPException(400, str(error)) from error
+            if selection.reasoning_effort and provider.dialect != "openai":
+                raise HTTPException(422, "Reasoning effort requires an OpenAI provider")
+            resolved[role] = opt_runner.ResolvedRoleCredential(
+                reasoning_effort=selection.reasoning_effort,
+                role=role,
+                model=effective_model,
+                dialect=cast(llm_registry.ProviderDialect, provider.dialect),
+                api_mode=cast(llm_registry.ProviderApiMode, provider.api_mode),
+                api_key=decrypted_key,
+                base_url=provider.base_url,
+                provider_id=provider.id,
+                provider_name=provider.name,
+            )
+            if role == "decision_lm":
+                decision_provider_id = provider.id
+        elif cleaned_model is not None:
+            if role == "decision_lm":
+                resolved[role] = opt_runner.ResolvedRoleCredential(
+                    role=role,
+                    model=cleaned_model,
+                )
+            else:
+                resolved[role] = opt_runner.ResolvedRoleCredential(
+                    role=role,
+                    model=cleaned_model,
+                    api_key=effective.llm_api_key.get_secret_value(),
+                    base_url=effective.llm_base_url,
                 )
 
-            cmd: list[str] = [
-                sys.executable,
-                "-m",
-                "fleet_rlm.optimize",
-                "--target",
-                target,
-                "--database-url",
-                db_url,
-                "--output",
-                str(artifact_path),
-                "--log-dir",
-                str(log_dir),
-                "--progress-file",
-                str(progress_path),
-                "--report-file",
-                str(report_path),
-                "--seed",
-                str(payload.seed),
-            ]
-            if dataset_arg is not None:
-                cmd.extend(["--dataset", str(dataset_arg)])
-            if branch_mode == "direct_readonly":
-                cmd.append("--allow-direct")
-            if payload.train_ratio is not None:
-                cmd.extend(["--train-ratio", str(payload.train_ratio)])
-            if payload.force:
-                cmd.append("--force")
-            if payload.num_threads is not None:
-                cmd.extend(["--num-threads", str(payload.num_threads)])
-
-            if target == "rlm":
-                cmd.extend(["--program", payload.program_kind])
-                if payload.val_ratio is not None:
-                    cmd.extend(["--val-ratio", str(payload.val_ratio)])
-                if payload.auto is not None:
-                    cmd.extend(["--auto", payload.auto])
-                elif payload.max_metric_calls is not None:
-                    cmd.extend(["--max-metric-calls", str(payload.max_metric_calls)])
-                cmd.extend(["--holdout-repeats", str(payload.holdout_repeats)])
-                if not payload.disable_cache:
-                    cmd.append("--no-disable-cache")
-                if payload.local_interpreter:
-                    cmd.append("--local-interpreter")
-                if payload.reflection_lm:
-                    cmd.extend(["--reflection-lm", payload.reflection_lm])
-                if payload.judge_lm:
-                    cmd.extend(["--judge-lm", payload.judge_lm])
-                if dataset_arg is None:
-                    cmd.extend(["--limit", str(payload.limit)])
-
-            env = os.environ.copy()
-            env.pop("DAYTONA_API_URL", None)
-            env.pop("DAYTONA_V2_API_URL", None)
-            env["PYTHONUNBUFFERED"] = "1"
-            env["FLEET_LLM_MODEL"] = effective.llm_model
-            env["FLEET_SUB_LLM_MODEL"] = effective.sub_llm_model
-            env["FLEET_DECISION_MODEL"] = effective.decision_model
-
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=str(_backend_root()),
-                env=env,
-            )
-            runtime.optimization_procs[job_id] = proc
-
-            log_lock = asyncio.Lock()
-
-            async def drain_stdout() -> None:
-                nonlocal log_tail
-                if proc.stdout is None:
-                    return
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    decoded = _scrub_secrets(line.decode("utf-8", errors="replace"), extra_secrets)
-                    async with log_lock:
-                        log_tail = _append_log_tail(log_tail, decoded)
-
-            async def monitor_loop() -> None:
-                nonlocal progress_state, cancelled
-                offset = 0
-                last_flushed_tail = ""
-                terminate_sent = False
-                terminate_at = 0.0
-                while proc.returncode is None:
-                    offset, latest = _read_latest_progress(progress_path, offset)
-                    async with log_lock:
-                        tail_snapshot = log_tail
-                    changed = tail_snapshot != last_flushed_tail
-                    if latest is not None:
-                        progress_state = latest
-                        changed = True
-                    if changed:
-                        last_flushed_tail = tail_snapshot
-                        await store.update_optimization_job_progress(
-                            runtime.sessionmaker,
-                            job_id,
-                            status="running",
-                            stage=str(progress_state.get("stage") or "running"),
-                            progress_json=progress_state,
-                            log_tail=tail_snapshot,
-                        )
-                    if await store.is_optimization_job_cancel_requested(
-                        runtime.sessionmaker, job_id
-                    ):
-                        cancelled = True
-                        if not terminate_sent:
-                            terminate_sent = True
-                            terminate_at = asyncio.get_running_loop().time()
-                            with suppress(ProcessLookupError, OSError):
-                                proc.terminate()
-                        elif asyncio.get_running_loop().time() - terminate_at >= 15.0:
-                            with suppress(ProcessLookupError, OSError):
-                                proc.kill()
-                    await asyncio.sleep(0.5)
-
-            await asyncio.gather(drain_stdout(), monitor_loop(), proc.wait())
-            _, final_progress = _read_latest_progress(progress_path, 0)
-            if final_progress is not None:
-                progress_state = final_progress
-
-            report_payload: dict[str, Any] | None = None
-            if report_path.is_file():
-                with suppress(json.JSONDecodeError):
-                    parsed_report = json.loads(report_path.read_text(encoding="utf-8"))
-                    if isinstance(parsed_report, dict):
-                        report_payload = parsed_report
-
-            if cancelled or proc.returncode == 130:
-                await store.finish_optimization_job(
-                    runtime.sessionmaker,
-                    job_id,
-                    status="cancelled",
-                    stage="cancelled",
-                    progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
-                    report_json=report_payload,
-                    log_tail=log_tail,
-                    error="Cancelled by user",
-                )
-                return
-
-            if proc.returncode != 0:
-                last_line = next(
-                    (ln.strip() for ln in reversed(log_tail.splitlines()) if ln.strip()),
-                    f"Optimizer exited with code {proc.returncode}",
-                )
-                await store.finish_optimization_job(
-                    runtime.sessionmaker,
-                    job_id,
-                    status="failed",
-                    stage="failed",
-                    progress_json={**progress_state, "stage": "failed", "label": "Failed"},
-                    report_json=report_payload,
-                    log_tail=log_tail,
-                    error=_scrub_secrets(last_line[:500], extra_secrets),
-                )
-                return
-
-            artifact_key: str | None = None
-            artifact_sha256: str | None = None
-            artifact_size: int | None = None
-            if artifact_path.is_file():
-                artifact_key = runtime.storage.optimization_artifact_key(job_id, target)
-                artifact_sha256, artifact_size = await runtime.storage.put_object(
-                    artifact_key, artifact_path
-                )
-
-            report_inner = (
-                report_payload.get("report")
-                if isinstance(report_payload, dict)
-                and isinstance(report_payload.get("report"), dict)
-                else report_payload
-            )
-            mlflow_run_id = (
-                str(report_payload.get("mlflow_run_id") or report_inner.get("mlflow_run_id") or "")
-                if isinstance(report_payload, dict) and isinstance(report_inner, dict)
-                else None
-            ) or None
-            resolved_decision_model = (
-                str(report_inner.get("resolved_decision_model") or "")
-                if isinstance(report_inner, dict)
-                else ""
-            ) or None
-
-            await store.finish_optimization_job(
-                runtime.sessionmaker,
-                job_id,
-                status="completed",
-                stage="completed",
-                saved=(
-                    bool(report_payload["saved"])
-                    if isinstance(report_payload, dict) and "saved" in report_payload
-                    else None
-                ),
-                baseline_score=(
-                    report_payload.get("baseline_score")
-                    if isinstance(report_payload, dict)
-                    else None
-                ),
-                optimized_score=(
-                    report_payload.get("optimized_score")
-                    if isinstance(report_payload, dict)
-                    else None
-                ),
-                train_size=(
-                    report_payload.get("train_size") if isinstance(report_payload, dict) else None
-                ),
-                val_size=(
-                    report_payload.get("val_size") if isinstance(report_payload, dict) else None
-                ),
-                holdout_size=(
-                    report_payload.get("holdout_size") if isinstance(report_payload, dict) else None
-                ),
-                progress_json={**progress_state, "stage": "completed", "label": "Completed"},
-                report_json=report_inner,
-                log_tail=log_tail,
-                artifact_object_key=artifact_key,
-                artifact_sha256=artifact_sha256,
-                artifact_size_bytes=artifact_size,
-                resolved_decision_model=resolved_decision_model,
-                mlflow_run_id=mlflow_run_id,
-                mlflow_experiment=runtime.settings.mlflow_experiment,
-            )
-    except asyncio.CancelledError:
-        if proc is not None and proc.returncode is None:
-            with suppress(ProcessLookupError, OSError):
-                proc.terminate()
-        with suppress(Exception):
-            await store.finish_optimization_job(
-                runtime.sessionmaker,
-                job_id,
-                status="cancelled",
-                stage="cancelled",
-                progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
-                log_tail=log_tail,
-                error="Cancelled by server shutdown",
-            )
-    except Exception as error:
-        scrubbed_error = _scrub_secrets(str(error) or type(error).__name__, extra_secrets)[:500]
-        with suppress(Exception):
-            await store.finish_optimization_job(
-                runtime.sessionmaker,
-                job_id,
-                status="failed",
-                stage="failed",
-                progress_json={**progress_state, "stage": "failed", "label": "Failed"},
-                log_tail=_scrub_secrets(log_tail, extra_secrets),
-                error=scrubbed_error,
-            )
-    finally:
-        runtime.optimization_procs.pop(job_id, None)
-        runtime.optimization_tasks.pop(job_id, None)
-        if ephemeral_branch_id is not None:
-            await _delete_ephemeral_neon_branch(runtime.settings, ephemeral_branch_id)
+    return resolved, decision_provider_id
 
 
 @app.get("/api/optimizations/jobs", dependencies=[Depends(require_auth)])
@@ -3115,6 +2996,12 @@ async def create_optimization_job(
     payload: OptimizationJobCreate,
     runtime: RuntimeDep,
 ) -> OptimizationJobDetail:
+    if payload.local_interpreter and not runtime.settings.allow_local_interpreter:
+        raise HTTPException(
+            403,
+            "Local interpreter mode is disabled on this server "
+            "(enable FLEET_ALLOW_LOCAL_INTERPRETER=true to permit host execution)",
+        )
     if (
         payload.target == "rlm"
         and payload.auto is not None
@@ -3123,6 +3010,9 @@ async def create_optimization_job(
         raise HTTPException(422, "Specify at most one of 'auto' and 'max_metric_calls'")
 
     effective = await _effective_settings(runtime)
+    role_credentials, decision_provider_id = await _resolve_role_credentials(
+        runtime, effective, payload
+    )
 
     dataset_source: store.OptimizationDatasetSource
     dataset_name: str | None = None
@@ -3133,8 +3023,8 @@ async def create_optimization_job(
     requested_ds = payload.dataset_id
     if requested_ds is None:
         if payload.target in {"skills", "memory"}:
-            builtin_id = _BUILTIN_DATASETS[payload.target][0]
-            builtin = _builtin_dataset_path(runtime.settings, builtin_id)
+            builtin_id = opt_datasets.BUILTIN_DATASETS[payload.target][0]
+            builtin = opt_runner.builtin_dataset_path(runtime.settings, builtin_id)
             assert builtin is not None
             _, builtin_path = builtin
             if not builtin_path.is_file():
@@ -3142,7 +3032,7 @@ async def create_optimization_job(
             dataset_source = "builtin"
             dataset_name = builtin_path.name
         else:
-            builtin = _builtin_dataset_path(runtime.settings, "builtin:rlm")
+            builtin = opt_runner.builtin_dataset_path(runtime.settings, "builtin:rlm")
             if builtin is not None and builtin[1].is_file():
                 builtin_path = builtin[1]
                 dataset_source = "builtin"
@@ -3155,7 +3045,7 @@ async def create_optimization_job(
             raise HTTPException(422, f"Target '{payload.target}' requires a labeled JSONL dataset")
         dataset_source = "db"
         dataset_name = "Past Completed Neon Runs"
-    elif (builtin := _builtin_dataset_path(runtime.settings, requested_ds)) is not None:
+    elif (builtin := opt_runner.builtin_dataset_path(runtime.settings, requested_ds)) is not None:
         ds_target, path = builtin
         if ds_target != payload.target:
             raise HTTPException(422, f"Dataset '{requested_ds}' is for target '{ds_target}'")
@@ -3189,9 +3079,14 @@ async def create_optimization_job(
         and runtime.settings.optimization_database_url.get_secret_value()
     )
 
+    raw_custom_db = (
+        payload.custom_database_url.get_secret_value().strip()
+        if payload.custom_database_url is not None
+        else ""
+    )
     branch_mode = payload.branch_mode
     if branch_mode is None:
-        if payload.custom_database_url and payload.custom_database_url.strip():
+        if raw_custom_db:
             branch_mode = "custom_branch"
         elif auto_neon_ready:
             branch_mode = "auto_neon"
@@ -3215,18 +3110,24 @@ async def create_optimization_job(
         if not configured_branch_ready:
             raise HTTPException(422, "FLEET_OPTIMIZATION_DATABASE_URL is not configured")
         opt_val = runtime.settings.optimization_database_url.get_secret_value()  # type: ignore[union-attr]
-        if _same_db_endpoint(opt_val, runtime.settings):
+        if opt_datasets.same_db_endpoint(opt_val, runtime.settings):
             raise HTTPException(
                 422,
                 "FLEET_OPTIMIZATION_DATABASE_URL points to the primary serving database; "
                 "use an isolated branch",
             )
     elif branch_mode == "custom_branch":
-        raw_custom = (payload.custom_database_url or "").strip()
-        if not raw_custom:
+        if not raw_custom_db:
             raise HTTPException(422, "Supply custom_database_url when branch_mode is custom_branch")
-        custom_db_url = _normalize_pg_url(raw_custom)
-        if _same_db_endpoint(custom_db_url, runtime.settings):
+        try:
+            custom_db_url = await asyncio.to_thread(
+                llm_registry.validate_database_url,
+                raw_custom_db,
+                allow_private=runtime.settings.allow_private_llm_endpoints,
+            )
+        except llm_registry.EndpointValidationError as error:
+            raise HTTPException(422, str(error)) from error
+        if opt_datasets.same_db_endpoint(custom_db_url, runtime.settings):
             raise HTTPException(
                 422,
                 "Custom database URL matches the primary serving database; "
@@ -3242,7 +3143,7 @@ async def create_optimization_job(
                 422, "Direct DB mode is only allowed for read-only JSONL dataset evaluations"
             )
 
-    config_snapshot = {
+    config_snapshot: dict[str, Any] = {
         "program_kind": payload.program_kind if payload.target == "rlm" else None,
         "branch_mode": branch_mode,
         "train_ratio": payload.train_ratio,
@@ -3256,31 +3157,82 @@ async def create_optimization_job(
         "disable_cache": payload.disable_cache if payload.target == "rlm" else None,
         "local_interpreter": payload.local_interpreter if payload.target == "rlm" else None,
         "force": payload.force,
-        "llm_model": effective.llm_model,
-        "sub_llm_model": effective.sub_llm_model,
-        "decision_model": effective.decision_model,
+        "llm_model": (
+            role_credentials["root_lm"].model
+            if "root_lm" in role_credentials
+            else effective.llm_model
+        ),
+        "sub_llm_model": (
+            role_credentials["sub_lm"].model
+            if "sub_lm" in role_credentials
+            else effective.sub_llm_model
+        ),
+        "decision_model": (
+            role_credentials["decision_lm"].model
+            if "decision_lm" in role_credentials
+            else effective.decision_model
+        ),
     }
+    if role_credentials:
+        config_snapshot["models"] = {
+            role: cred.to_provenance() for role, cred in role_credentials.items()
+        }
 
-    try:
-        job = await store.create_optimization_job(
+    async def _create_job_row() -> store.OptimizationJob:
+        return await store.create_optimization_job(
             runtime.sessionmaker,
             target=payload.target,
             program_kind=payload.program_kind if payload.target == "rlm" else None,
             dataset_source=dataset_source,
             dataset_name=dataset_name,
             dataset_id=dataset_uuid,
+            decision_provider_id=decision_provider_id,
             config_json=config_snapshot,
             mlflow_experiment=runtime.settings.mlflow_experiment,
         )
-    except store.OptimizationConflictError as error:
-        raise HTTPException(409, str(error)) from error
 
+    try:
+        try:
+            job = await _create_job_row()
+        except store.OptimizationConflictError as error:
+            reaped = await store.reap_stale_optimization_jobs(
+                runtime.sessionmaker,
+                runtime.settings.optimization_heartbeat_stale_seconds,
+            )
+            if reaped <= 0:
+                raise HTTPException(409, str(error)) from error
+            try:
+                job = await _create_job_row()
+            except store.OptimizationConflictError as retry_error:
+                raise HTTPException(409, str(retry_error)) from retry_error
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+
+    runtime.optimization_cancel_events[job.id] = asyncio.Event()
+    spec = opt_runner.JobRunSpec(
+        target=payload.target,
+        program_kind=payload.program_kind,
+        train_ratio=payload.train_ratio,
+        val_ratio=payload.val_ratio,
+        seed=payload.seed,
+        auto=payload.auto,
+        max_metric_calls=payload.max_metric_calls,
+        holdout_repeats=payload.holdout_repeats,
+        disable_cache=payload.disable_cache,
+        local_interpreter=payload.local_interpreter,
+        num_threads=payload.num_threads,
+        limit=payload.limit,
+        force=payload.force,
+        reflection_lm=payload.reflection_lm,
+        judge_lm=payload.judge_lm,
+        role_credentials=role_credentials,
+        decision_provider_id=decision_provider_id,
+    )
     task = asyncio.create_task(
-        _supervise_optimization_job(
+        opt_runner.supervise_optimization_job(
             runtime,
             job.id,
-            target=payload.target,
-            payload=payload,
+            spec=spec,
             branch_mode=branch_mode,
             effective=effective,
             dataset_source=dataset_source,
@@ -3325,19 +3277,34 @@ async def stream_optimization_job_events(
     yield ServerSentEvent(id=f"{job_id}:{seq}", event="snapshot", data=initial_payload)
     seq += 1
 
-    last_sig = (initial.status, initial.stage, initial.progress_json, initial.log_tail)
+    last_sig = (
+        initial.status,
+        initial.stage,
+        initial.cancel_requested,
+        initial.progress_json,
+        initial.log_tail,
+    )
     if initial.status in {"completed", "failed", "cancelled"}:
         yield ServerSentEvent(id=f"{job_id}:{seq}", event="done", data=initial_payload)
         return
 
     ticks_since_ping = 0
-    while not await request.is_disconnected():
-        await asyncio.sleep(0.5)
+    while not runtime.shutdown_event.is_set() and not await request.is_disconnected():
+        with suppress(TimeoutError):
+            await asyncio.wait_for(runtime.shutdown_event.wait(), timeout=0.5)
+        if runtime.shutdown_event.is_set() or await request.is_disconnected():
+            return
         async with runtime.sessionmaker() as db:
             current = await db.get(store.OptimizationJob, job_id)
         if current is None:
             return
-        sig = (current.status, current.stage, current.progress_json, current.log_tail)
+        sig = (
+            current.status,
+            current.stage,
+            current.cancel_requested,
+            current.progress_json,
+            current.log_tail,
+        )
         if sig != last_sig:
             last_sig = sig
             ticks_since_ping = 0
@@ -3359,37 +3326,10 @@ async def cancel_optimization_job(job_id: UUID, runtime: RuntimeDep) -> Optimiza
     job = await store.request_optimization_job_cancel(runtime.sessionmaker, job_id)
     if job is None:
         raise HTTPException(404, "Optimization job not found")
-    if (proc := runtime.optimization_procs.get(job_id)) is not None and proc.returncode is None:
-        with suppress(ProcessLookupError, OSError):
-            proc.terminate()
+    # Signal monitor_loop to send a single SIGTERM (never race proc.terminate() from HTTP handler).
+    if (cancel_event := runtime.optimization_cancel_events.get(job_id)) is not None:
+        cancel_event.set()
     return _job_detail(runtime, job)
-
-
-async def _validate_artifact_before_promote(
-    runtime: Runtime,
-    *,
-    target: OptimizationTarget,
-    object_key: str,
-    sha256: str,
-    size_bytes: int,
-) -> Path:
-    path = await _materialize_artifact(
-        runtime, object_key=object_key, sha256=sha256, size_bytes=size_bytes
-    )
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError("Artifact file must contain a JSON object")
-    if target == "rlm":
-        agent.build_program(runtime.settings, [], sub_lm=runtime.sub_lm, optimized_state=raw)
-    elif target == "skills":
-        registry = await _skill_registry(runtime)
-        available = registry.available_skills(runtime.settings)
-        if available:
-            build_skill_selector(available, state_path=path)
-    else:
-        predictor = dspy.Predict(agent.MemoryGate)
-        predictor.load(path)
-    return path
 
 
 @app.post("/api/optimizations/jobs/{job_id}/promote", dependencies=[Depends(require_auth)])
@@ -3403,13 +3343,20 @@ async def promote_optimization_job(
         raise HTTPException(404, "Optimization job not found")
     if job.status != "completed":
         raise HTTPException(409, "Only completed optimization jobs can be promoted")
+    if job.program_kind == "flex":
+        raise HTTPException(
+            400,
+            "dspy.Flex runs are evaluation-only; chat serving requires dspy.RLM artifacts.",
+        )
     if not job.artifact_object_key or not job.artifact_sha256 or job.artifact_size_bytes is None:
         raise HTTPException(
             409, "This run did not produce a saved artifact (gate discarded candidate)"
         )
-    non_qualifying = (job.saved is False) or (
-        isinstance(job.report_json, dict) and job.report_json.get("eligible") is False
+
+    report_eligible = (
+        job.report_json.get("eligible") is True if isinstance(job.report_json, dict) else False
     )
+    non_qualifying = (job.saved is False) or (not report_eligible)
     if non_qualifying and not payload.confirm_non_qualifying:
         raise HTTPException(
             409,
@@ -3417,49 +3364,52 @@ async def promote_optimization_job(
             "pass confirm_non_qualifying=true to promote",
         )
 
-    target = _coerce_target(job.target)
+    target = opt_runner.coerce_target(job.target)
+    available_skills: tuple[Any, ...] = ()
+    if target == "skills":
+        registry = await _skill_registry(runtime)
+        available_skills = registry.available_skills(runtime.settings)
     try:
-        cached_path = await _validate_artifact_before_promote(
+        await opt_runner.validate_artifact_before_promote(
             runtime,
             target=target,
             object_key=job.artifact_object_key,
             sha256=job.artifact_sha256,
             size_bytes=job.artifact_size_bytes,
+            available_skills=available_skills,
         )
     except Exception as error:
         raise HTTPException(422, f"Artifact validation failed: {error}") from error
 
-    promotion = await store.promote_optimization_artifact(
-        runtime.sessionmaker,
-        target=target,
-        job_id=job.id,
-        artifact_object_key=job.artifact_object_key,
-        artifact_sha256=job.artifact_sha256,
-        artifact_size_bytes=job.artifact_size_bytes,
-        resolved_decision_model=job.resolved_decision_model,
-    )
+    pin_reanchor = target in {"skills", "memory"} and payload.pin_decision_model
+    decision_provider_id = job.decision_provider_id if pin_reanchor else None
+    resolved_decision_model = job.resolved_decision_model if pin_reanchor else None
+    promo_program_kind = job.program_kind if target == "rlm" else None
 
-    if (
-        target in {"skills", "memory"}
-        and payload.pin_decision_model
-        and job.resolved_decision_model
-    ):
-        await store.update_workspace_settings_overrides(
-            runtime.sessionmaker, {"decision_model": job.resolved_decision_model}
+    try:
+        promotion = await store.promote_optimization_artifact(
+            runtime.sessionmaker,
+            target=target,
+            job_id=job.id,
+            artifact_object_key=job.artifact_object_key,
+            artifact_sha256=job.artifact_sha256,
+            artifact_size_bytes=job.artifact_size_bytes,
+            resolved_decision_model=resolved_decision_model,
+            decision_provider_id=decision_provider_id,
+            program_kind=promo_program_kind,
         )
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
 
-    # Best-effort mirror to backend/artifacts/<target>.json for local CLI parity.
-    with suppress(OSError):
-        filename = {
-            "rlm": "rlm_program.json",
-            "skills": "skill_selector.json",
-            "memory": "memory_gate.json",
-        }[target]
-        mirror = _backend_root() / "artifacts" / filename
-        mirror.parent.mkdir(parents=True, exist_ok=True)
-        mirror.write_bytes(cached_path.read_bytes())
-
-    return OptimizationPromotionView.model_validate(promotion)
+    provider_name: str | None = None
+    if promotion.decision_provider_id is not None:
+        provider = await store.get_llm_provider(
+            runtime.sessionmaker, promotion.decision_provider_id
+        )
+        provider_name = provider.name if provider is not None else None
+    return _promotion_view(promotion, job=job, provider_name=provider_name)
 
 
 @app.post("/api/optimizations/targets/{target}/rollback", dependencies=[Depends(require_auth)])
@@ -3468,12 +3418,9 @@ async def rollback_optimization_target(
     payload: RollbackTargetRequest,
     runtime: RuntimeDep,
 ) -> TargetStatusSummary:
-    restored = await store.rollback_optimization_target(
-        runtime.sessionmaker, target, mode=payload.mode
-    )
-    if restored is not None and target in {"skills", "memory"} and restored.resolved_decision_model:
-        await store.update_workspace_settings_overrides(
-            runtime.sessionmaker, {"decision_model": restored.resolved_decision_model}
-        )
+    try:
+        await store.rollback_optimization_target(runtime.sessionmaker, target, mode=payload.mode)
+    except store.OptimizationConflictError as error:
+        raise HTTPException(409, str(error)) from error
     overview = await optimization_overview(runtime)
     return next(item for item in overview.targets if item.target == target)

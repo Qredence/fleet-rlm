@@ -51,12 +51,19 @@ function extractRoleBinding(
   fallbackProviderId?: string | null,
   fallbackModel?: string | null,
 ): LMRoleSelection | null {
-  const raw = config?.[key]
+  const models = config?.models as Record<string, unknown> | undefined
+  const raw = models?.[key.replace(/_config$/, '')] ?? config?.[key]
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const rec = raw as Record<string, unknown>
     const providerId = typeof rec.provider_id === 'string' ? rec.provider_id : null
     const model = typeof rec.model === 'string' ? rec.model : null
-    if (providerId || model) return { provider_id: providerId, model }
+    const effort = rec.reasoning_effort
+    if (providerId || model) return {
+      provider_id: providerId,
+      model,
+      reasoning_effort: effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh'
+        ? effort : undefined,
+    }
   }
   if (fallbackProviderId || fallbackModel) {
     return { provider_id: fallbackProviderId ?? null, model: fallbackModel ?? null }
@@ -135,6 +142,7 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
   const [providers, setProviders] = useState<LLMProviderView[] | null>(null)
   const [encryptionConfigured, setEncryptionConfigured] = useState(true)
   const [allowPrivateEndpoints, setAllowPrivateEndpoints] = useState(false)
+  const [providersError, setProvidersError] = useState<string | null>(null)
   const [loadingProviders, setLoadingProviders] = useState(true)
   const providersControllerRef = useRef<AbortController | null>(null)
 
@@ -143,6 +151,7 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
       providersControllerRef.current?.abort()
       const controller = new AbortController()
       providersControllerRef.current = controller
+      setProvidersError(null)
       if (!opts?.silent) setLoadingProviders(true)
       try {
         const res = await api.listOptimizationProviders(controller.signal)
@@ -152,40 +161,19 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
         setAllowPrivateEndpoints(res.allow_private_endpoints)
       } catch (failure) {
         if (!controller.signal.aborted) {
-          setProviders((current) => current ?? [])
-          // Only surface provider fetch errors if user is on the Providers tab or no primary error exists.
-          setError((current) => current || errorMessage(failure))
+          setProvidersError(errorMessage(failure))
         }
       } finally {
         if (!controller.signal.aborted) setLoadingProviders(false)
       }
     },
-    [api, setError],
+    [api],
   )
 
   useEffect(() => {
-    const controller = new AbortController()
-    providersControllerRef.current = controller
-    void api
-      .listOptimizationProviders(controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted) return
-        setProviders(res.providers)
-        setEncryptionConfigured(res.encryption_configured)
-        setAllowPrivateEndpoints(res.allow_private_endpoints)
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setProviders((current) => current ?? [])
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoadingProviders(false)
-      })
-    return () => {
-      controller.abort()
-    }
-  }, [api])
+    void refreshProviders()
+    return () => providersControllerRef.current?.abort()
+  }, [refreshProviders])
 
   const effectiveEncryptionConfigured =
     overview?.capabilities.credentials_encryption_enabled ?? encryptionConfigured
@@ -458,6 +446,8 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
                 encryptionConfigured={effectiveEncryptionConfigured}
                 allowPrivateEndpoints={effectiveAllowPrivateEndpoints}
                 loading={loadingProviders}
+                loadError={providersError}
+                onRetry={() => void refreshProviders()}
                 onChanged={async (msg) => {
                   if (msg) setAnnouncement(msg)
                   await refreshProviders({ silent: true })

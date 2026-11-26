@@ -1231,6 +1231,7 @@ async def update_llm_provider(
     db: SessionFactory,
     provider_id: UUID,
     *,
+    expected_updated_at: datetime | None = None,
     name: str = _UNSET,
     dialect: LLMProviderDialect = _UNSET,
     api_mode: LLMProviderApiMode = _UNSET,
@@ -1265,12 +1266,13 @@ async def update_llm_provider(
     values["updated_at"] = func.now()
     try:
         async with db.begin() as connection:
-            return await connection.scalar(
-                update(LLMProvider)
-                .where(LLMProvider.id == provider_id)
-                .values(**values)
-                .returning(LLMProvider)
-            )
+            stmt = update(LLMProvider).where(LLMProvider.id == provider_id)
+            if expected_updated_at is not None:
+                stmt = stmt.where(LLMProvider.updated_at == expected_updated_at)
+            row = await connection.scalar(stmt.values(**values).returning(LLMProvider))
+            if row is None and await connection.get(LLMProvider, provider_id) is not None:
+                raise OptimizationConflictError("Provider changed during the request; retry")
+            return row
     except IntegrityError as exc:
         if (
             getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
@@ -1373,7 +1375,7 @@ async def get_optimization_dataset_by_name(
         )
 
 
-async def delete_optimization_dataset(
+async def begin_optimization_dataset_deletion(
     db: SessionFactory, dataset_id: UUID
 ) -> OptimizationDataset | None:
     async with db.begin() as connection:
@@ -1388,8 +1390,15 @@ async def delete_optimization_dataset(
         )
         if active_ref is not None:
             raise OptimizationConflictError("Dataset is currently in use by an active job")
-        await connection.delete(record)
+        record.summary_json = {**record.summary_json, "deletion_pending": True}
         return record
+
+
+async def finish_optimization_dataset_deletion(db: SessionFactory, dataset_id: UUID) -> None:
+    async with db.begin() as connection:
+        await connection.execute(
+            delete(OptimizationDataset).where(OptimizationDataset.id == dataset_id)
+        )
 
 
 async def create_optimization_job(
@@ -1414,6 +1423,8 @@ async def create_optimization_job(
                 )
                 if dataset is None:
                     raise LookupError(f"Optimization dataset {dataset_id} does not exist")
+                if dataset.summary_json.get("deletion_pending"):
+                    raise OptimizationConflictError("Dataset deletion is pending")
             if decision_provider_id is not None:
                 provider = await connection.get(
                     LLMProvider,

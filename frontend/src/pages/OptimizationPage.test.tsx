@@ -583,7 +583,11 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
 
     const gridHtml = renderToStaticMarkup(
       <TargetSummaryGrid
-        overview={MOCK_OVERVIEW}
+        overview={{ ...MOCK_OVERVIEW, targets: MOCK_OVERVIEW.targets.map(target => ({
+          ...target,
+          latest_scored_job: target.latest_job,
+          latest_job: target.latest_job && { ...target.latest_job, status: 'cancelled', optimized_score: null },
+        })) }}
         loading={false}
         onLaunchTarget={() => {}}
         onRollbackTarget={async () => {}}
@@ -662,6 +666,8 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     const html = renderToStaticMarkup(
       <TooltipProvider>
         <ProvidersSection
+          loadError={null}
+          onRetry={() => {}}
           api={api}
           providers={MOCK_PROVIDERS}
           encryptionConfigured={false}
@@ -679,6 +685,19 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(html).toContain('Local Ollama')
     expect(html).toContain('No API key')
     expect(html).toContain('Fetch /models')
+  })
+
+  it('shows provider fetch errors with a retry action instead of an empty registry', () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <ProvidersSection api={createApi('token')} providers={null} loading={false}
+          encryptionConfigured allowPrivateEndpoints={false} onChanged={() => {}}
+          loadError="Service unavailable" onRetry={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(html).toContain('Service unavailable')
+    expect(html).toContain('Retry')
+    expect(html).not.toContain('No custom LLM providers registered yet')
   })
 
   it('renders DatasetsSection with Neon vs Daytona Volume selector, dropzone, and storage badges', () => {

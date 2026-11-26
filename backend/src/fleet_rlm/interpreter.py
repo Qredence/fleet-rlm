@@ -1572,6 +1572,10 @@ async def write_volume_dataset(
         if parent_dir != DATASET_VOLUME_MOUNT:
             with suppress(DaytonaError):
                 await sandbox.fs.mkdir(parent_dir)
+        # Bucket mounts do not support atomic rename. Each dataset gets a fresh key.
+        if volume_type == "bucket":
+            await sandbox.fs.write_bytes(remote_path, payload, atomic=False)
+            return
         try:
             await sandbox.fs.write_bytes(remote_path, payload, atomic=True)
         except AtomicUploadUnsupportedError:

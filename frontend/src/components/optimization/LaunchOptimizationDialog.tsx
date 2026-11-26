@@ -68,6 +68,7 @@ const TARGET_EXPLANATION: Record<OptimizationTarget, string> = {
 }
 
 interface RoleState {
+  reasoningEffort?: LMRoleSelection['reasoning_effort']
   providerId: string
   model: string
 }
@@ -76,6 +77,7 @@ function toInitialRoleState(selection?: LMRoleSelection | null): RoleState {
   return {
     providerId: selection?.provider_id ?? WORKSPACE_PROVIDER_VALUE,
     model: selection?.model ?? '',
+    reasoningEffort: selection?.reasoning_effort,
   }
 }
 
@@ -83,7 +85,7 @@ function toPayloadRoleSelection(state: RoleState): LMRoleSelection | undefined {
   const providerId = state.providerId !== WORKSPACE_PROVIDER_VALUE ? state.providerId : null
   const model = state.model.trim() || null
   if (!providerId && !model) return undefined
-  return { provider_id: providerId, model }
+  return { provider_id: providerId, model, reasoning_effort: state.reasoningEffort }
 }
 
 function storageLabelForDataset(dataset: OptimizationDatasetSummary): string {
@@ -102,6 +104,7 @@ function defaultBranchForCapabilities(
 }
 
 function RoleModelPicker({
+  allowReasoningEffort = true,
   idPrefix,
   label,
   description,
@@ -113,6 +116,7 @@ function RoleModelPicker({
   refreshError,
   onRefreshProvider,
 }: {
+  allowReasoningEffort?: boolean
   idPrefix: string
   label: string
   description: string
@@ -206,6 +210,25 @@ function RoleModelPicker({
           }
         />
       </div>
+      {selectedProvider?.dialect === 'openai' && allowReasoningEffort && (
+        <Select
+          size="compact"
+          value={value.reasoningEffort ?? 'default'}
+          onValueChange={(effort) => onChange({
+            ...value,
+            reasoningEffort: effort === 'default' ? undefined : effort as RoleState['reasoningEffort'],
+          })}
+        >
+          <SelectTrigger aria-label={`${label} reasoning effort`} />
+          <SelectContent>
+            {(['default', 'low', 'medium', 'high', 'xhigh'] as const).map((effort, index) => (
+              <SelectItem key={effort} index={index} value={effort}>
+                {effort === 'default' ? 'Default reasoning effort' : effort}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       <FieldDescription>{description}</FieldDescription>
       {refreshError && (
         <p role="alert" className={`${typeClass('caption')} text-destructive`}>
@@ -241,7 +264,11 @@ export function LaunchOptimizationFormBody({
 }: LaunchOptimizationFormBodyProps) {
   const formId = useId()
   const initialTarget: OptimizationTarget = defaults.target ?? 'skills'
-  const initialTargetDatasets = datasets.filter((item) => item.target === initialTarget)
+  const availableDatasets = useMemo(
+    () => datasets.filter((item) => !item.summary_json.deletion_pending),
+    [datasets],
+  )
+  const initialTargetDatasets = availableDatasets.filter((item) => item.target === initialTarget)
   const initialDatasetId =
     defaults.datasetId &&
     (defaults.datasetId === 'db' ||
@@ -290,8 +317,8 @@ export function LaunchOptimizationFormBody({
   >(null)
 
   const matchingDatasets = useMemo(
-    () => datasets.filter((item) => item.target === target),
-    [datasets, target],
+    () => availableDatasets.filter((item) => item.target === target),
+    [availableDatasets, target],
   )
 
   const selectedDecisionProvider =
@@ -313,7 +340,7 @@ export function LaunchOptimizationFormBody({
 
   const handleTargetChange = (nextTarget: OptimizationTarget) => {
     setTarget(nextTarget)
-    const forTarget = datasets.filter((item) => item.target === nextTarget)
+    const forTarget = availableDatasets.filter((item) => item.target === nextTarget)
     const nextDataset = forTarget[0]?.id ?? (nextTarget === 'rlm' ? 'db' : '')
     setDatasetId(nextDataset)
     if (nextDataset === 'db' && branchMode === 'direct_readonly') {
@@ -675,6 +702,7 @@ export function LaunchOptimizationFormBody({
               <>
                 <RoleModelPicker
                   idPrefix={`${formId}-decision-lm`}
+                  allowReasoningEffort={false}
                   label="Decision model"
                   description="Calibrated scoring model whose decision thresholds & Choice weights ReAnchor fits."
                   value={decisionLm}

@@ -13,15 +13,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from botocore.exceptions import ClientError
 from botocore.response import StreamingBody
+from daytona.v2.errors import FileNotFoundError as DaytonaFileNotFoundError
 from daytona.v2.errors import (
-    AtomicUploadUnsupportedError,
     ForbiddenError,
     NotFoundError,
     ReadOnlyUnsupportedError,
     SandboxNotRunningError,
     UnsupportedVolumeTypeError,
 )
-from daytona.v2.errors import FileNotFoundError as DaytonaFileNotFoundError
 from daytona.v2.types import VolumeMount
 
 from fleet_rlm import interpreter
@@ -258,7 +257,7 @@ async def test_daytona_bucket_fallbacks_atomic_and_readonly() -> None:
 
         async def write_with_atomic_err(path: str, content: bytes, *, atomic: bool = False) -> None:
             if atomic:
-                raise AtomicUploadUnsupportedError("no atomic rename on FUSE")
+                pytest.fail("Bucket mounts require a direct write to the dataset key")
             await original_write(path, content, atomic=False)
 
         sb.fs.write_bytes = write_with_atomic_err

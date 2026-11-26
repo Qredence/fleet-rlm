@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     stale_run_timeout_seconds: int = Field(default=900, ge=30, le=86_400)
 
     daytona_api_key: SecretStr
+    daytona_service_key: SecretStr | None = Field(
+        default=None, validation_alias="DAYTONA_API_SERVICE_KEY", repr=False
+    )
     daytona_image: str = "fleet-rlm-py313-dspy35-v2"
     daytona_region: str | None = None
     daytona_idle_timeout_minutes: int = Field(default=15, ge=1, le=1440)

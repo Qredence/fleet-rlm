@@ -1825,6 +1825,29 @@ def test_rlm_metric_all_verifiers_and_execution_discipline() -> None:
     )
     assert optimize.rlm_metric(ex_artifact, good_pred).score == 1.0
 
+    skill_case = dspy.Example(
+        verifier={
+            "type": "artifact",
+            "answer_verifier": {
+                "type": "fact_checklist",
+                "required_patterns": [r"artifacts/SKILL\.md"],
+            },
+            "artifacts": {
+                "artifacts/SKILL.md": ex_artifact.verifier["artifacts"]["artifacts/SKILL.md"]
+            },
+        }
+    )
+    for paths, files, expected in [
+        (["/workspace/artifacts/SKILL.md"], {"artifacts/SKILL.md": valid_skill_md}, 1.0),
+        ([], {"artifacts/SKILL.md": valid_skill_md}, 0.0),
+        (["artifacts/SKILL.md"], {}, 0.0),
+        (["artifacts/SKILL.md"], {"artifacts/SKILL.md": leaked_skill_md}, 0.0),
+    ]:
+        prediction = dspy.Prediction(
+            answer="Created the skill.", artifact_paths=paths, artifacts=files
+        )
+        assert optimize.rlm_metric(skill_case, prediction).score == expected
+
     blank_pred = dspy.Prediction(
         answer='{"EU": 120}',
         artifacts={**good_pred.artifacts, "artifacts/chart.png": blank_png_buf.getvalue()},
@@ -2832,6 +2855,7 @@ def test_credentials_file_per_role_lm15_and_no_secret_leaks(
             "api_mode": "responses",
             "model": "gpt-4.1",
             "api_key": "sk-reflect-secret-value-654321",
+            "reasoning_effort": "xhigh",
             "provider_name": "OpenAI Direct",
         },
         "judge_lm": {
@@ -2872,6 +2896,7 @@ def test_credentials_file_per_role_lm15_and_no_secret_leaks(
     assert "api_key" not in built["sub_lm"][0].kwargs
     assert built["reflection_lm"][1] == "openai/gpt-4.1"
     assert built["reflection_lm"][0].model_type == "responses"
+    assert built["reflection_lm"][0].kwargs["reasoning_effort"] == "xhigh"
     assert built["judge_lm"][1] == "sglang:Qwen/Qwen2.5-32B"
     assert built["judge_lm"][0].model_type == "chat"
     assert built["decision_lm"][1] == "typesafe:jev-1.14.0"
@@ -2978,6 +3003,7 @@ def test_credentials_file_per_role_lm15_and_no_secret_leaks(
         "provider_name": "Compat Gateway",
     }
     assert parsed["models"]["reflection_lm"] == {
+        "reasoning_effort": "xhigh",
         "dialect": "openai",
         "model": "openai/gpt-4.1",
         "provider_name": "OpenAI Direct",

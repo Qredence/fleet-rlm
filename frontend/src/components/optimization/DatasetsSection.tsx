@@ -100,6 +100,7 @@ export function DatasetsSection({
 
   const [uploadTarget, setUploadTarget] = useState<OptimizationTarget>('skills')
   const [storageBackend, setStorageBackend] = useState<'neon' | 'daytona_volume'>('neon')
+  const [datasetId, setDatasetId] = useState('')
   const [uploadName, setUploadName] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -114,6 +115,11 @@ export function DatasetsSection({
   const [deleteTarget, setDeleteTarget] = useState<OptimizationDatasetSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  const targetDatasets = (datasets ?? []).filter(
+    (dataset) => dataset.target === uploadTarget && !dataset.summary_json.deletion_pending,
+  )
+  const selectedDataset = targetDatasets.find((dataset) => dataset.id === datasetId)
 
   const daytonaVolumeEnabled = capabilities?.daytona_volume_enabled === true
   const daytonaVolumeName = capabilities?.daytona_dataset_volume || 'fleet-eval-datasets'
@@ -164,8 +170,13 @@ export function DatasetsSection({
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  async function handleUpload(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (uploading) return
+    if (selectedDataset) {
+      onRunWithDataset(selectedDataset)
+      return
+    }
     if (!selectedFile) {
       setUploadError('Choose a UTF-8 .jsonl file first.')
       return
@@ -181,6 +192,7 @@ export function DatasetsSection({
       const created = await api.uploadOptimizationDataset(body)
       clearSelectedFile()
       setUploadName('')
+      setDatasetId(created.id)
       onUploaded(created)
     } catch (failure) {
       setUploadError(errorMessage(failure))
@@ -197,17 +209,16 @@ export function DatasetsSection({
     <div className="flex flex-col gap-6">
       {/* Upload custom dataset panel */}
       <form
-        onSubmit={handleUpload}
+        onSubmit={handleSubmit}
         className="flex flex-col gap-4 rounded-xl border bg-card p-4"
-        aria-label="Upload custom JSONL dataset"
+        aria-label="Choose an evaluation dataset"
       >
         <div className="flex flex-col gap-1">
           <h2 className={typeClass('subtitle')} style={{ fontVariationSettings: fontWeights.semibold }}>
-            Upload evaluation dataset
+            Evaluation dataset
           </h2>
           <p className={`${typeClass('caption')} text-muted-foreground`}>
-            Validated UTF-8 JSONL files (max 2,000 rows, secret-scanned before persistence) are
-            indexed in Neon Postgres and stored in your chosen backend.
+            Select a dataset for your target or upload a JSONL file.
           </p>
         </div>
 
@@ -216,7 +227,12 @@ export function DatasetsSection({
             <FieldLabel htmlFor={`${formId}-target`}>Target</FieldLabel>
             <Select
               value={uploadTarget}
-              onValueChange={(value) => setUploadTarget((value || 'skills') as OptimizationTarget)}
+              disabled={uploading}
+              onValueChange={(value) => {
+                setUploadTarget((value || 'skills') as OptimizationTarget)
+                setDatasetId('')
+                setUploadError('')
+              }}
             >
               <SelectTrigger
                 id={`${formId}-target`}
@@ -242,136 +258,167 @@ export function DatasetsSection({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor={`${formId}-storage`}>Storage backend</FieldLabel>
+            <FieldLabel htmlFor={`${formId}-dataset`}>JSONL dataset</FieldLabel>
             <Select
-              value={effectiveStorageBackend}
-              onValueChange={(value) =>
-                setStorageBackend((value === 'daytona_volume' ? 'daytona_volume' : 'neon'))
-              }
+              value={selectedDataset?.id ?? 'upload'}
+              disabled={uploading}
+              onValueChange={(value) => {
+                setDatasetId(value === 'upload' ? '' : value ?? '')
+                setUploadError('')
+              }}
             >
-              <SelectTrigger
-                id={`${formId}-storage`}
-                aria-label="Dataset storage backend"
-                placeholder="Choose storage backend"
-              />
+              <SelectTrigger id={`${formId}-dataset`} aria-label="JSONL dataset" />
               <SelectContent>
-                <SelectItem index={0} value="neon">
-                  Neon backend (Object Storage + Postgres)
-                </SelectItem>
-                <SelectItem
-                  index={1}
-                  value="daytona_volume"
-                  disabled={!daytonaVolumeEnabled}
-                >
-                  {daytonaVolumeEnabled
-                    ? `Daytona Volume (${daytonaVolumeName})`
-                    : `Daytona Volume (unavailable — configure Daytona)`}
-                </SelectItem>
+                <SelectItem index={0} value="upload">Upload a local file…</SelectItem>
+                {targetDatasets.map((dataset, index) => (
+                  <SelectItem key={dataset.id} index={index + 1} value={dataset.id}>
+                    {`${dataset.name} · ${storageBadgeMeta(resolveStorageBackend(dataset)).label}`}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <FieldDescription>
-              {effectiveStorageBackend === 'daytona_volume'
-                ? `Stores JSONL on managed Daytona Volume "${daytonaVolumeName}" with host SHA-256 caching.`
-                : daytonaVolumeEnabled
-                  ? 'Neon Object Storage keeps datasets alongside artifacts. Switch to Daytona Volume to keep datasets on Daytona storage.'
-                  : 'Stored in Neon Object Storage + Postgres. Configure DAYTONA_API_KEY on the backend to enable Daytona Volume storage.'}
-            </FieldDescription>
+            {selectedDataset && (
+              <FieldDescription>
+                {selectedDataset.row_count} rows · {formatBytes(selectedDataset.size_bytes)}
+              </FieldDescription>
+            )}
           </Field>
 
-          <Field>
-            <FieldLabel htmlFor={`${formId}-name`}>Display name (optional)</FieldLabel>
-            <Input
-              id={`${formId}-name`}
-              value={uploadName}
-              onChange={(event) => setUploadName(event.target.value)}
-              placeholder="e.g. customer-skills-v2.jsonl"
-            />
-            <FieldDescription>
-              Defaults to the uploaded filename when left blank.
-            </FieldDescription>
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor={`${formId}-file`}>JSONL file</FieldLabel>
-            <div
-              onDragOver={(event) => {
-                event.preventDefault()
-                setDragging(true)
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault()
-                setDragging(false)
-                const dropped = event.dataTransfer.files[0]
-                if (dropped) {
-                  setSelectedFile(dropped)
-                  setUploadError('')
-                }
-              }}
-              className={`flex min-h-9 items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-1.5 transition-colors ${
-                dragging ? 'border-foreground bg-hover' : 'border-border bg-background/50'
-              }`}
-              data-testid="dataset-dropzone"
-            >
-              <input
-                ref={fileInputRef}
-                id={`${formId}-file`}
-                type="file"
-                accept=".jsonl,application/jsonl,text/plain"
-                className="sr-only"
-                onChange={(event) => {
-                  setSelectedFile(event.target.files?.[0] ?? null)
-                  setUploadError('')
-                }}
-              />
-
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <FileUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span
-                  className={`${typeClass('caption')} truncate ${
-                    selectedFile ? 'font-mono text-foreground' : 'text-muted-foreground'
-                  }`}
-                  title={selectedFile?.name}
+          {!selectedDataset && (
+            <>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-storage`}>Storage backend</FieldLabel>
+                <Select
+                  value={effectiveStorageBackend}
+                  onValueChange={(value) =>
+                    setStorageBackend((value === 'daytona_volume' ? 'daytona_volume' : 'neon'))
+                  }
                 >
-                  {selectedFile
-                    ? `${selectedFile.name} (${formatBytes(selectedFile.size)})`
-                    : 'Drop a .jsonl file here or browse'}
-                </span>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-1">
-                {selectedFile && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label="Clear selected file"
-                          onClick={clearSelectedFile}
-                        />
-                      }
+                  <SelectTrigger
+                    id={`${formId}-storage`}
+                    aria-label="Dataset storage backend"
+                    placeholder="Choose storage backend"
+                  />
+                  <SelectContent>
+                    <SelectItem index={0} value="neon">
+                      Neon backend (Object Storage + Postgres)
+                    </SelectItem>
+                    <SelectItem
+                      index={1}
+                      value="daytona_volume"
+                      disabled={!daytonaVolumeEnabled}
                     >
-                      <X className="size-3.5" aria-hidden="true" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Clear selected file</TooltipContent>
-                  </Tooltip>
-                )}
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
+                      {daytonaVolumeEnabled
+                        ? `Daytona Volume (${daytonaVolumeName})`
+                        : `Daytona Volume (unavailable — configure Daytona)`}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  {effectiveStorageBackend === 'daytona_volume'
+                    ? `Stores JSONL on managed Daytona Volume "${daytonaVolumeName}" with host SHA-256 caching.`
+                    : daytonaVolumeEnabled
+                      ? 'Neon Object Storage keeps datasets alongside artifacts. Switch to Daytona Volume to keep datasets on Daytona storage.'
+                      : 'Stored in Neon Object Storage + Postgres. Configure DAYTONA_API_KEY on the backend to enable Daytona Volume storage.'}
+                </FieldDescription>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor={`${formId}-name`}>Display name (optional)</FieldLabel>
+                <Input
+                  id={`${formId}-name`}
+                  value={uploadName}
+                  onChange={(event) => setUploadName(event.target.value)}
+                  placeholder="e.g. customer-skills-v2.jsonl"
+                />
+                <FieldDescription>
+                  Defaults to the uploaded filename when left blank.
+                </FieldDescription>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor={`${formId}-file`}>JSONL file</FieldLabel>
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault()
+                    setDragging(true)
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    setDragging(false)
+                    const dropped = event.dataTransfer.files[0]
+                    if (dropped) {
+                      setSelectedFile(dropped)
+                      setUploadError('')
+                    }
+                  }}
+                  className={`flex min-h-9 items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-1.5 transition-colors ${
+                    dragging ? 'border-foreground bg-hover' : 'border-border bg-background/50'
+                  }`}
+                  data-testid="dataset-dropzone"
                 >
-                  Browse…
-                </Button>
-              </div>
-            </div>
-            <FieldDescription>
-              One JSON object per line. Raw API keys and database URLs are rejected automatically.
-            </FieldDescription>
-          </Field>
+                  <input
+                    ref={fileInputRef}
+                    id={`${formId}-file`}
+                    type="file"
+                    accept=".jsonl,application/jsonl,text/plain"
+                    className="sr-only"
+                    onChange={(event) => {
+                      setSelectedFile(event.target.files?.[0] ?? null)
+                      setUploadError('')
+                    }}
+                  />
+
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <FileUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span
+                      className={`${typeClass('caption')} truncate ${
+                        selectedFile ? 'font-mono text-foreground' : 'text-muted-foreground'
+                      }`}
+                      title={selectedFile?.name}
+                    >
+                      {selectedFile
+                        ? `${selectedFile.name} (${formatBytes(selectedFile.size)})`
+                        : 'Drop a .jsonl file here or browse'}
+                    </span>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    {selectedFile && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="Clear selected file"
+                              onClick={clearSelectedFile}
+                            />
+                          }
+                        >
+                          <X className="size-3.5" aria-hidden="true" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Clear selected file</TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Browse…
+                    </Button>
+                  </div>
+                </div>
+                <FieldDescription>
+                  One JSON object per line. Raw API keys and database URLs are rejected automatically.
+                </FieldDescription>
+              </Field>
+            </>
+          )}
         </div>
 
         {uploadError && (
@@ -380,16 +427,20 @@ export function DatasetsSection({
           </Alert>
         )}
 
-        <div className="flex justify-end">
-          <Button
-            type="submit"
-            size="sm"
-            disabled={uploading || !selectedFile}
-            data-testid="upload-dataset-button"
-          >
-            <Upload className="size-3.5" aria-hidden="true" />
-            {uploading ? 'Validating & uploading…' : 'Upload dataset'}
-          </Button>
+        <div className="flex justify-end gap-2">
+          {selectedDataset ? (
+            <>
+              <Button type="button" size="sm" variant="outline" onClick={() => void openPreview(selectedDataset)}>
+                <Eye aria-hidden="true" /> Preview
+              </Button>
+              <Button type="submit" size="sm"><Play aria-hidden="true" /> Configure run</Button>
+            </>
+          ) : (
+            <Button type="submit" size="sm" disabled={uploading || !selectedFile} data-testid="upload-dataset-button">
+              <Upload aria-hidden="true" />
+              {uploading ? 'Validating & uploading…' : 'Upload dataset'}
+            </Button>
+          )}
         </div>
       </form>
 
@@ -469,21 +520,25 @@ export function DatasetsSection({
                 </p>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void openPreview(dataset)}
-                      data-testid={`preview-dataset-${dataset.id}`}
-                    >
-                      <Eye className="size-3.5" aria-hidden="true" />
-                      Preview
-                    </Button>
-                    <Button size="sm" onClick={() => onRunWithDataset(dataset)}>
-                      <Play className="size-3.5" aria-hidden="true" />
-                      Run
-                    </Button>
-                  </div>
+                  {dataset.summary_json.deletion_pending ? (
+                    <span>Deletion pending</span>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void openPreview(dataset)}
+                        data-testid={`preview-dataset-${dataset.id}`}
+                      >
+                        <Eye className="size-3.5" aria-hidden="true" />
+                        Preview
+                      </Button>
+                      <Button size="sm" onClick={() => onRunWithDataset(dataset)}>
+                        <Play className="size-3.5" aria-hidden="true" />
+                        Run
+                      </Button>
+                    </div>
+                  )}
 
                   {dataset.source === 'custom' && (
                     <Tooltip>

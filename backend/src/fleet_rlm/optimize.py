@@ -179,6 +179,7 @@ class RoleModelConfig:
     base_url: str | None = field(default=None, repr=False)
     provider_name: str | None = None
     timeout: float | None = None
+    reasoning_effort: str | None = None
 
 
 def _infer_dialect(model: str) -> str | None:
@@ -261,6 +262,8 @@ def _build_role_lm(spec: RoleModelConfig) -> tuple[dspy.LM, str, ApiMode]:
     )
     # Only pass DSPy 3.5 lm15 NATIVE_CLIENT_KEYS (api_key, api_base, timeout).
     lm_kwargs: dict[str, Any] = {}
+    if spec.reasoning_effort:
+        lm_kwargs["reasoning_effort"] = spec.reasoning_effort
     if resolved_mode in {"chat", "responses"}:
         lm_kwargs["model_type"] = resolved_mode
     if spec.api_key is not None and spec.api_key.strip():
@@ -369,8 +372,12 @@ def load_role_credentials(path: Path) -> dict[RoleName, RoleModelConfig]:
                 raise ValueError(f"Credentials entry for {role_key!r}: 'timeout' must be positive")
             timeout = float(raw_timeout)
 
+        effort = entry.get("reasoning_effort")
+        if effort is not None and effort not in ("low", "medium", "high", "xhigh"):
+            raise ValueError(f"Credentials entry for {role_key!r}: invalid reasoning effort")
         configs[cast(RoleName, role_key)] = RoleModelConfig(
             model=raw_model.strip(),
+            reasoning_effort=effort,
             dialect=dialect,
             api_mode=api_mode,
             api_key=api_key,
@@ -2381,6 +2388,7 @@ def _evaluate_verifier(
     verifier: Mapping[str, Any] | None,
     *,
     judge_lm: dspy.BaseLM | None = None,
+    attachment_paths: Sequence[str] = (),
 ) -> tuple[float, bool, str]:
     actual_raw = str(getattr(pred, "answer", "") or "").strip()
     expected_raw = str(getattr(gold, "answer", "") or "").strip()
@@ -2426,7 +2434,7 @@ def _evaluate_verifier(
         max_words = verifier.get("max_words")
         failures: list[str] = []
 
-        if not actual_raw:
+        if not actual_raw and not (required and attachment_paths):
             return 0.0, False, "Fact checklist failed: empty answer."
 
         for pattern in forbidden:
@@ -2444,16 +2452,15 @@ def _evaluate_verifier(
         matched = 0
         missing_patterns: list[str] = []
         for item in required:
-            if isinstance(item, list):
-                if any(re.search(str(alt), actual_raw, re.IGNORECASE) for alt in item):
-                    matched += 1
-                else:
-                    missing_patterns.append(" | ".join(str(alt) for alt in item))
+            alternatives = item if isinstance(item, list) else [item]
+            if any(
+                re.search(str(pattern), actual_raw, re.IGNORECASE)
+                or any(re.fullmatch(str(pattern), path) for path in attachment_paths)
+                for pattern in alternatives
+            ):
+                matched += 1
             else:
-                if re.search(str(item), actual_raw, re.IGNORECASE):
-                    matched += 1
-                else:
-                    missing_patterns.append(str(item))
+                missing_patterns.append(" | ".join(str(pattern) for pattern in alternatives))
 
         if failures:
             if missing_patterns:
@@ -2481,12 +2488,6 @@ def _evaluate_verifier(
         answer_score = 1.0
         answer_passed = True
         feedback_parts: list[str] = []
-        if isinstance(answer_verifier, Mapping):
-            answer_score, answer_passed, ans_fb = _evaluate_verifier(
-                gold, pred, answer_verifier, judge_lm=judge_lm
-            )
-            feedback_parts.append(ans_fb)
-
         raw_artifacts = getattr(pred, "artifacts", None)
         artifact_map: dict[str, bytes] = {}
         if isinstance(raw_artifacts, Mapping):
@@ -2498,6 +2499,24 @@ def _evaluate_verifier(
         specs = verifier.get("artifacts") or {}
         if not isinstance(specs, Mapping):
             raise ValueError("Artifact verifier requires an 'artifacts' mapping")
+        if isinstance(answer_verifier, Mapping):
+            # WorkspaceTask submits the answer and its attachments in separate fields.
+            # Only a declared, collected artifact can supply a checklist path.
+            reported = getattr(pred, "artifact_paths", None)
+            declared = {_normalize_artifact_key(str(path)) for path in specs}
+            attachments = (
+                {_normalize_artifact_key(path) for path in reported if isinstance(path, str)}
+                if isinstance(reported, (list, tuple))
+                else set()
+            )
+            answer_score, answer_passed, ans_fb = _evaluate_verifier(
+                gold,
+                pred,
+                answer_verifier,
+                judge_lm=judge_lm,
+                attachment_paths=sorted(attachments.intersection(declared, artifact_map)),
+            )
+            feedback_parts.append(ans_fb)
         artifact_failures: list[str] = []
         for raw_path, check_spec in specs.items():
             norm_path = _normalize_artifact_key(str(raw_path))
@@ -3854,6 +3873,8 @@ def optimize_rlm(
                 provider_name=spec.provider_name,
                 extra_secrets=extra_secrets,
             )
+            if spec.reasoning_effort:
+                prov["reasoning_effort"] = spec.reasoning_effort
             return lm_obj, routed_model, prov
         lm_obj = agent._model(settings, fallback_model)
         prov = _role_provenance(

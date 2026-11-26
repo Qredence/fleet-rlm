@@ -670,6 +670,8 @@ function ProviderFormBody({
 }
 
 export function ProvidersSection({
+  loadError,
+  onRetry,
   api,
   providers,
   encryptionConfigured,
@@ -678,6 +680,8 @@ export function ProvidersSection({
   onChanged,
 }: {
   api: FleetApi
+  loadError: string | null
+  onRetry: () => void
   providers: LLMProviderView[] | null
   encryptionConfigured: boolean
   allowPrivateEndpoints: boolean
@@ -808,7 +812,12 @@ export function ProvidersSection({
       )}
 
       {/* Provider Cards Grid */}
-      {loading && !providers ? (
+      {loadError !== null ? (
+        <Alert variant="destructive">
+          <AlertDescription>Unable to load providers. {loadError}</AlertDescription>
+          <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>
+        </Alert>
+      ) : loading && !providers ? (
         <div className="opt-subgrid-cards" role="status" aria-label="Loading providers">
           {[0, 1, 2].map((idx) => (
             <Elevated
