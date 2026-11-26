@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from fleet_rlm.config import Settings
 from fleet_rlm.db import (
     Memory,
+    OptimizationConflictError,
     Run,
     Session,
     SessionFactory,
@@ -27,7 +28,9 @@ from fleet_rlm.db import (
     acquire_root_run,
     create_child_run,
     create_db,
+    create_llm_provider,
     create_session,
+    delete_llm_provider,
     finish_run,
     get_session_or_raise,
     get_session_prior_turns,
@@ -137,6 +140,45 @@ async def db() -> AsyncIterator[SessionFactory]:
 
 
 @pytest.mark.asyncio
+async def test_session_override_blocks_provider_deletion(db: SessionFactory) -> None:
+    provider = await create_llm_provider(db, name=f"Session provider {uuid4()}", dialect="openai")
+    try:
+        model = f"provider/{provider.id.hex.upper()}/gpt-4.1"
+        session = await create_session(db, model_override=model)
+        try:
+            with pytest.raises(OptimizationConflictError, match="session model override"):
+                await delete_llm_provider(db, provider.id)
+            assert (await get_session_or_raise(db, session.id)).model_override == model
+            async with db.begin() as connection:
+                await connection.execute(
+                    update(Session).where(Session.id == session.id).values(model_override=None)
+                )
+            assert await delete_llm_provider(db, provider.id) is not None
+            with pytest.raises(OptimizationConflictError, match="no longer exists"):
+                await create_session(db, model_override=model)
+        finally:
+            async with db.begin() as connection:
+                await connection.execute(delete(Session).where(Session.id == session.id))
+    finally:
+        await delete_llm_provider(db, provider.id)
+
+
+@pytest.mark.asyncio
+async def test_session_title_uses_first_admitted_prompt(db: SessionFactory) -> None:
+    session = await create_session(db)
+    try:
+        first = await acquire_root_run(db, session.id, "  Analyze\n  " + "é" * 100)
+        title = "Analyze " + "é" * 71 + "…"
+        assert (await get_session_or_raise(db, session.id)).title == title
+        assert await finish_run(db, first.id, status="failed")
+        await acquire_root_run(db, session.id, "A later prompt")
+        assert (await get_session_or_raise(db, session.id)).title == title
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(Session).where(Session.id == session.id))
+
+
+@pytest.mark.asyncio
 async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None:
     session = await create_session(db, title="Phase 1 locking test")
     try:
@@ -168,6 +210,7 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
         root = winners[0]
         assert (await get_session_or_raise(db, session.id)).upload_key is None
         assert root.id.version == 7
+        assert (await get_session_or_raise(db, session.id)).title == "Phase 1 locking test"
         assert root.root_run_id == root.id
         assert root.status == "running"
 

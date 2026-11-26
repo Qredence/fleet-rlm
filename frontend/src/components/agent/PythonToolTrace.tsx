@@ -1,5 +1,5 @@
 import { CircleAlert, Terminal } from 'lucide-react'
-import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceIcon, TraceLine, TraceTitle,
@@ -24,7 +24,7 @@ function PythonCode({ code }: { code: string }) {
   )
 }
 
-export function StackTrace({ error }: { error: string }) {
+function parseToolError(error: string) {
   let title = error.split('\n')[0] || 'Error'
   let stack = error
   try {
@@ -36,6 +36,11 @@ export function StackTrace({ error }: { error: string }) {
   } catch {
     // Plain tool errors already contain displayable text.
   }
+  return { title, stack }
+}
+
+export function StackTrace({ error }: { error: string }) {
+  const { title, stack } = parseToolError(error)
   return (
     <Trace>
       <TraceCollapsible defaultOpen>
@@ -55,11 +60,10 @@ export function StackTrace({ error }: { error: string }) {
   )
 }
 
-export function PythonToolTrace({ part, live }: { part: PythonPart; live: boolean }) {
+export function PythonToolTrace({ part, live, children }: { part: PythonPart; live: boolean; children?: ReactNode }) {
   const pending = part.state === 'input-streaming' || part.state === 'input-available'
   const running = live && pending
   const failed = part.state === 'output-error'
-  const [open, setOpen] = useState(running || failed)
   const raw = 'rawInput' in part ? part.rawInput : undefined
   const code = typeof part.input === 'string' ? part.input : typeof raw === 'string' ? raw : ''
   const output = part.state === 'output-available' ? part.output : undefined
@@ -69,17 +73,18 @@ export function PythonToolTrace({ part, live }: { part: PythonPart; live: boolea
   const line = (
     <TraceLine status={failed ? 'error' : running ? 'running' : undefined}>
       <TraceIcon><Terminal /></TraceIcon>
-      <TraceTitle>{title}</TraceTitle>
+      <TraceTitle className="whitespace-normal">{title}{failed && ` · ${parseToolError(part.errorText).title.slice(0, 160)}`}</TraceTitle>
       {running && !code && <TraceDescription>Waiting for Python source…</TraceDescription>}
     </TraceLine>
   )
-  if (!code && stdout === undefined && !failed) return line
+  if (!code && stdout === undefined && !failed && !children) return line
 
   return (
-    <TraceCollapsible open={open} onOpenChange={setOpen}>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
         <div className="flex min-w-0 flex-col gap-2">
+          {children}
           {code && <PythonCode code={code} />}
           {stdout !== undefined && (
             <CodeBlock size="sm">

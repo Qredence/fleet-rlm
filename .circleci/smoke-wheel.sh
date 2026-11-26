@@ -25,10 +25,12 @@ if release_version := os.environ.get("FLEET_RELEASE_VERSION"):
 settings = Settings.model_construct()
 registry = SkillRegistry.load(settings.skills_dir, fallback_to_bundled=True)
 expected_skills = {
-    "chart-visualization", "data-analysis", "document-extraction", "recursive-synthesis",
-    "scientific-computing", "skill-creator", "spreadsheet-audit", "web-research",
+    "chart-visualization", "data-analysis", "document-extraction", "pdf", "recursive-synthesis",
+    "report-writing", "scientific-computing", "skill-creator", "web-research", "xlsx",
 }
 assert expected_skills <= {skill.name for skill in registry.skills}
+pin_names = registry.pin_names()
+assert pin_names["spreadsheet-audit"] is pin_names["xlsx"]
 datasets = resolve_eval_datasets_dir(settings)
 assert load_skills_dataset(datasets / "skills.jsonl", registry)
 assert load_memory_dataset(datasets / "memory.jsonl")

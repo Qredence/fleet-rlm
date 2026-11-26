@@ -1,6 +1,8 @@
 """Synthetic fixtures and expected outcomes for the live bundled Skill evaluation."""
 
 import io
+import math
+import re
 from dataclasses import dataclass
 from xml.etree import ElementTree
 
@@ -15,11 +17,13 @@ class Case:
     contents: bytes = b""
     artifact: str = ""
     automatic: bool = False
+    additional_files: tuple[tuple[str, bytes], ...] = ()
 
 
 def _pdf() -> bytes:
     from matplotlib.backends.backend_pdf import PdfPages
     from matplotlib.figure import Figure
+    from PIL import Image, ImageDraw, ImageFont
 
     stream = io.BytesIO()
     with PdfPages(stream) as pdf:
@@ -27,9 +31,17 @@ def _pdf() -> bytes:
         page.text(0.1, 0.8, "North depot shipped 42 crates.")
         pdf.savefig(page)
         scan = Figure(figsize=(4, 3))
-        scan.subplots().imshow([[0, 1], [1, 0]], cmap="gray")
+        image = Image.new("L", (700, 140), "white")
+        ImageDraw.Draw(image).text(
+            (18, 40), "Seal code: VA74", font=ImageFont.load_default(size=50), fill=0
+        )
+        scan.subplots().imshow(image, cmap="gray", vmin=0, vmax=255)
         scan.axes[0].set_axis_off()
         pdf.savefig(scan)
+        illustration = Figure(figsize=(4, 3))
+        illustration.subplots().imshow([[0, 1], [1, 0]], cmap="gray")
+        illustration.axes[0].set_axis_off()
+        pdf.savefig(illustration)
     return stream.getvalue()
 
 
@@ -204,9 +216,42 @@ def verify_chart(path: str, payload: bytes) -> bool:
     if path.endswith(".svg"):
         root = ElementTree.fromstring(payload)
         labels = {
-            "".join(node.itertext()).strip() for node in root.findall(".//{*}text")
+            "".join(node.itertext()).strip(): node
+            for node in root.findall(".//{*}text")
         }
-        return {"EU 120", "US 80", "Region", "Revenue EUR"} <= labels
+        if not {"EU 120", "US 80", "Region", "Revenue EUR"} <= labels.keys():
+            return False
+        # Matplotlib renders each vertical bar as a four-corner patch. Pair categories by
+        # x position; reversed series with plausible labels must fail the source check.
+        bars = []
+        for group in root.findall(".//{*}g"):
+            if not group.get("id", "").startswith("patch_"):
+                continue
+            path_node = group.find("{*}path")
+            if path_node is None or "clip-path" not in path_node.attrib:
+                continue
+            coords = re.findall(
+                r"[ML]\s*([-+\d.eE]+)[ ,]+([-+\d.eE]+)", path_node.get("d", "")
+            )
+            xs = sorted({float(x) for x, _ in coords})
+            ys = sorted({float(y) for _, y in coords})
+            if len(coords) == 4 and len(xs) == len(ys) == 2:
+                bars.append((sum(xs) / 2, ys[1] - ys[0]))
+        if len(bars) != 2:
+            return False
+        heights = []
+        for category, annotation in (("EU", "EU 120"), ("US", "US 80")):
+            label = labels.get(category, labels[annotation])
+            if "x" in label.attrib:
+                x = float(label.attrib["x"])
+            elif match := re.search(
+                r"translate\(\s*([-+\d.eE]+)", label.get("transform", "")
+            ):
+                x = float(match[1])
+            else:
+                return False
+            heights.append(min(bars, key=lambda bar: abs(bar[0] - x))[1])
+        return math.isclose(heights[0] * 80, heights[1] * 120, rel_tol=0.005)
 
     from PIL import Image
 

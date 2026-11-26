@@ -1154,11 +1154,13 @@ def test_optimize_production_skill_catalog_with_reanchor(
         "chart-visualization",
         "data-analysis",
         "document-extraction",
+        "pdf",
         "recursive-synthesis",
+        "report-writing",
         "scientific-computing",
         "skill-creator",
-        "spreadsheet-audit",
         "web-research",
+        "xlsx",
     )
 
     rows = []

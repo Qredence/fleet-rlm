@@ -1866,7 +1866,7 @@ def load_rlm_dataset(
             active_skills: str = raw_active_skills
         elif skill_names:
             reg = get_registry()
-            by_name = {skill.name: skill for skill in reg.skills}
+            by_name = reg.pin_names()
             unknown = [name for name in skill_names if name not in by_name]
             if unknown:
                 raise ValueError(f"{path}:{index}: unknown skill_names {unknown!r}")
@@ -2008,17 +2008,17 @@ def load_skills_dataset(
     settings: Settings | None = None,
 ) -> list[dspy.Example]:
     """Load labeled skill-selector rows from JSONL, preserving runtime multi-turn formatting."""
-    by_name = {skill.name: skill for skill in registry.skills}
+    by_name = registry.pin_names()
     available_names = (
         {skill.name for skill in registry.available_skills(settings)}
         if settings is not None
         else set(by_name)
     )
 
-    def validate_skill_name(name: str, *, index: int) -> None:
+    def canonical_skill_name(name: str, *, index: int) -> str:
         if name not in by_name:
             raise ValueError(f"{path}:{index}: unknown skill {name!r}")
-        if name not in available_names:
+        if by_name[name].name not in available_names:
             reason = (
                 by_name[name].unavailable_reason(settings)
                 if settings is not None
@@ -2027,6 +2027,8 @@ def load_skills_dataset(
             raise ValueError(
                 f"{path}:{index}: skill {name!r} is unavailable under current settings: {reason}"
             )
+
+        return by_name[name].name
 
     examples: list[dspy.Example] = []
     for index, row in enumerate(read_jsonl(path), 1):
@@ -2043,7 +2045,7 @@ def load_skills_dataset(
             else None
         )
         if expected_skill is not None:
-            validate_skill_name(expected_skill, index=index)
+            expected_skill = canonical_skill_name(expected_skill, index=index)
 
         raw_secondary = row.get("secondary_skills") or []
         if not isinstance(raw_secondary, list):
@@ -2055,7 +2057,7 @@ def load_skills_dataset(
                     f"{path}:{index}: secondary_skills entries must be nonempty strings"
                 )
             cleaned = item.removeprefix("@").strip()
-            validate_skill_name(cleaned, index=index)
+            cleaned = canonical_skill_name(cleaned, index=index)
             if cleaned != expected_skill and cleaned not in secondary_skills:
                 secondary_skills.append(cleaned)
 

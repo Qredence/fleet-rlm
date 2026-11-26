@@ -68,6 +68,11 @@ class MemoryOptStore:
     async def update_overrides(
         self, _sessionmaker, changes: dict[str, object]
     ) -> dict[str, object]:
+        for field, value in changes.items():
+            if field in db._WORKSPACE_MODEL_ROLES:
+                provider_id = db.model_provider_id(value)
+                if provider_id is not None and provider_id not in self.providers:
+                    raise db.OptimizationConflictError("The selected provider no longer exists")
         for k, v in changes.items():
             if v is None:
                 self.overrides.pop(k, None)
@@ -137,6 +142,7 @@ class MemoryOptStore:
         provider = self.providers.get(provider_id)
         if provider is None:
             return None
+        db._guard_workspace_provider_removal(self.overrides, provider_id)
         if any(p.active and p.decision_provider_id == provider_id for p in self.promotions):
             raise db.OptimizationConflictError(
                 "LLM provider is currently referenced by an active optimization promotion"
@@ -538,6 +544,7 @@ async def opt_app(monkeypatch, tmp_path):
         credentials_encryption_key=_FERNET_KEY,
         mlflow_tracking_uri="http://127.0.0.1:5001",
         api_bearer_token="opt-token",
+        provider_admin_token="opt-token",
         skills_dir=skills_dir,
         eval_datasets_dir=eval_dir,
         artifact_cache_dir=cache_dir,
@@ -625,7 +632,7 @@ async def opt_app(monkeypatch, tmp_path):
 
     async with api.lifespan(api.app):
         transport = httpx.ASGITransport(app=api.app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
             yield SimpleNamespace(
                 client=client,
                 store=mem_store,
@@ -854,11 +861,72 @@ async def test_datasets_neon_and_daytona_volume_dispatch_caching_and_guards(
 
 
 @pytest.mark.asyncio
+async def test_registered_typesafe_workspace_decision_model(opt_app):
+    client = opt_app.client
+    model = "jev-preview"
+    created = await client.post(
+        "/api/optimizations/providers",
+        headers=_AUTH,
+        json={
+            "name": "Registered TypeSafe",
+            "dialect": "typesafe",
+            "api_key": "test-typesafe-key",
+            "default_model": model,
+        },
+    )
+    assert created.status_code == 201
+    provider_id = created.json()["id"]
+    qualified = f"provider/{provider_id}/{model}"
+    invalid = await client.patch(
+        "/api/settings", headers=_AUTH, json={"decision_model": f"provider/{provider_id}/other"}
+    )
+    assert invalid.status_code == 422
+    saved = await client.patch("/api/settings", headers=_AUTH, json={"decision_model": qualified})
+    assert saved.status_code == 200
+    loaded = await client.get("/api/settings", headers=_AUTH)
+    assert loaded.json()["effective"]["decision_model"] == qualified
+
+    runtime = api.app.state.runtime
+    effective = await api._effective_settings(runtime)
+    lm = await api._request_decision_lm(runtime, effective)
+    assert lm.model == "typesafe:jev-preview"
+    assert lm.kwargs["api_key"] == "test-typesafe-key"
+    roles, decision_provider_id = await api._resolve_role_credentials(
+        runtime, effective, api.OptimizationJobCreate(target="skills")
+    )
+    assert decision_provider_id == UUID(provider_id)
+    assert roles["decision_lm"].model == model
+    assert roles["decision_lm"].api_key == "test-typesafe-key"
+
+    route = f"/api/optimizations/providers/{provider_id}"
+    blocked = await client.delete(route, headers=_AUTH)
+    assert blocked.status_code == 409
+    assert "Decision Model" in blocked.json()["detail"]
+    reassigned = await client.patch("/api/settings", headers=_AUTH, json={"decision_model": None})
+    assert reassigned.status_code == 200
+    assert (await client.delete(route, headers=_AUTH)).status_code == 204
+    deleted_assignment = await client.patch(
+        "/api/settings", headers=_AUTH, json={"llm_model": qualified}
+    )
+    assert deleted_assignment.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_provider_crud_encryption_ssrf_probe_models_and_delete_guard(
     opt_app, monkeypatch
 ) -> None:
     client = opt_app.client
     mem_store = opt_app.store
+
+    shared_settings = opt_app.settings.model_copy(
+        update={"provider_admin_token": SecretStr("separate-admin")}
+    )
+    _swap_runtime_settings(shared_settings)
+    denied = await client.post(
+        "/api/optimizations/providers", headers=_AUTH, json={"name": "Denied", "dialect": "openai"}
+    )
+    assert denied.status_code == 403
+    _swap_runtime_settings(opt_app.settings)
 
     # 1. Overview capabilities reflect encryption & storage flags
     ov = (await client.get("/api/optimizations/overview", headers=_AUTH)).json()
@@ -953,6 +1021,19 @@ async def test_provider_crud_encryption_ssrf_probe_models_and_delete_guard(
         llm_registry.decrypt_secret(stored_row.api_key_ciphertext, opt_app.settings)
         == "sk-proj-supersecretkey9a4f"
     )
+
+    qualified = f"provider/{provider_id}/gpt-4.1"
+    lm, label = await api._chat_model(api.app.state.runtime, opt_app.settings, qualified)
+    assert label == "Primary Gateway · gpt-4.1"
+    assert lm.kwargs["api_base"] == "https://gateway.example.com/v1"
+    assert lm.kwargs["api_key"] == "sk-proj-supersecretkey9a4f"
+    defaults = opt_app.settings.model_copy(
+        update={"llm_model": qualified, "sub_llm_model": qualified}
+    )
+    primary, inherited_label = await api._chat_model(api.app.state.runtime, defaults, None)
+    sub = await api._workspace_sub_lm(api.app.state.runtime, defaults)
+    assert inherited_label == label
+    assert primary.kwargs["api_base"] == sub.kwargs["api_base"] == lm.kwargs["api_base"]
 
     # List returns encryption_configured & allow_private_endpoints
     listed = (await client.get("/api/optimizations/providers", headers=_AUTH)).json()
@@ -1169,6 +1250,15 @@ async def test_credentials_file_allowlisted_env_scrubbing_and_stale_reap_before_
     )
     assert prov_resp.status_code == 201
     prov_id = prov_resp.json()["id"]
+    workspace_models = await client.patch(
+        "/api/settings",
+        headers=_AUTH,
+        json={
+            "llm_model": f"provider/{prov_id}/gpt-4.1-mini",
+            "sub_llm_model": f"provider/{prov_id}/gpt-4.1-nano",
+        },
+    )
+    assert workspace_models.status_code == 200
 
     # Seed a STALE active RLM job (heartbeat 20m ago) -> must be reaped before 409!
     stale_id = uuid4()
@@ -1283,8 +1373,14 @@ async def test_credentials_file_allowlisted_env_scrubbing_and_stale_reap_before_
 
     # Non-secret provenance in config_json (no api_key!)
     cfg = started.json()["config_json"]
-    assert cfg["models"]["reflection_lm"]["provider_id"] == prov_id
-    assert cfg["models"]["reflection_lm"]["model"] == "gpt-4.1"
+    expected_roles = {
+        "root_lm": "gpt-4.1-mini",
+        "sub_lm": "gpt-4.1-nano",
+        "reflection_lm": "gpt-4.1",
+        "judge_lm": "gpt-4.1-mini",
+    }
+    assert {role: entry["model"] for role, entry in cfg["models"].items()} == expected_roles
+    assert all(entry["provider_id"] == prov_id for entry in cfg["models"].values())
     assert "api_key" not in json.dumps(cfg)
     assert "reflectkey" not in json.dumps(cfg)
 
@@ -1304,6 +1400,9 @@ async def test_credentials_file_allowlisted_env_scrubbing_and_stale_reap_before_
     assert "opt-branch-host" in str(captured["db_file_text"])
     creds = captured["cred_file_json"]
     assert isinstance(creds, dict)
+    assert {role: entry["model"] for role, entry in creds.items()} == expected_roles
+    assert all(entry["api_key"] == "sk-proj-reflectkey9876543210" for entry in creds.values())
+    assert all(entry["base_url"] == "https://reflect.example.com/v1" for entry in creds.values())
     assert creds["reflection_lm"]["api_key"] == "sk-proj-reflectkey9876543210"
     assert creds["reflection_lm"]["base_url"] == "https://reflect.example.com/v1"
     assert creds["reflection_lm"]["dialect"] == "openai_compatible"

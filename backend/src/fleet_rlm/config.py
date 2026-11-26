@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     db_pool_recycle_seconds: int = 300
 
+    provider_admin_token: SecretStr | None = None
     api_bearer_token: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     max_concurrent_turns_per_worker: int = Field(default=16, ge=1, le=256)

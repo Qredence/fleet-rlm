@@ -18,7 +18,8 @@ export function ModelSelector(props: ModelSelectorProps) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const loadingRef = useRef(false)
-  const label = model?.replace(/^openai\//, '') || 'Workspace default'
+  const modelName = model?.replace(/^provider\/[^/]+\//, '').replace(/^openai\//, '')
+  const label = modelName?.replace(/^gpt-/i, 'GPT-') || 'Workspace default'
 
   async function openPicker() {
     if (disabled || loadingRef.current) return
@@ -47,12 +48,7 @@ export function ModelSelector(props: ModelSelectorProps) {
     title: loadError ? 'Model selector could not load. Try again.' : `Model: ${label}`,
   } as const
 
-  const content = (
-    <>
-      <span className="shrink-0 text-muted-foreground" aria-hidden="true">Model ·</span>
-      <span className="truncate">{loadError ? 'Retry models' : label}</span>
-    </>
-  )
+  const content = <span className="truncate">{loadError ? 'Retry models' : label}</span>
 
   if (Picker) return <Picker {...props} label={label} trigger={<Button {...triggerProps} />}>{content}</Picker>
 

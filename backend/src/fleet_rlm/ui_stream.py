@@ -33,7 +33,7 @@ class UiPartAccumulator:
 
     def data(
         self,
-        name: Literal["skills", "file-tree", "web-call", "turn-details"],
+        name: Literal["skills", "file-tree", "web-call", "turn-details", "python-submission"],
         value: dict,
         *,
         key: str | None = None,
@@ -195,6 +195,15 @@ class UiStream:
     def turn_details(self, details: dict) -> dict:
         return self._root.data("turn-details", details)
 
+    @staticmethod
+    def _python_result(
+        parts: UiPartAccumulator, execution_id: int, output: Any, submission: bool
+    ) -> Iterator[dict]:
+        call_id = parts.python_calls.pop(execution_id)
+        if submission:
+            yield parts.data("python-submission", {"tool_call_id": call_id}, key=call_id)
+        yield parts.tool_output(call_id, output)
+
     def _frames(self, parts: UiPartAccumulator, event: agent.RunEvent) -> Iterator[dict]:
         match event:
             case agent.RunStartedEvent():
@@ -208,8 +217,8 @@ class UiStream:
                 if code.startswith("```") and code.endswith("```") and "\n" in code:
                     code = code.split("\n", 1)[1][:-3].rstrip()
                 yield from parts.python(call_id, code)
-            case agent.PythonExecCompletedEvent(execution_id, output):
-                yield parts.tool_output(parts.python_calls.pop(execution_id), output)
+            case agent.PythonExecCompletedEvent(execution_id, output, submission):
+                yield from self._python_result(parts, execution_id, output, submission)
             case agent.PythonExecFailedEvent(execution_id, error):
                 yield parts.tool_error(parts.python_calls.pop(execution_id), error)
             case agent.SubagentStartedEvent(child):

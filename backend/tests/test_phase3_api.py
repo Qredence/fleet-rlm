@@ -465,6 +465,7 @@ async def offline(monkeypatch, tmp_path):
         cors_origins=["https://client.example"],
         skills_dir=tmp_path,
     )
+    monkeypatch.setattr(api.store, "list_llm_providers", AsyncMock(return_value=[]))
     store = OfflineStore()
     engine = SimpleNamespace(dispose=AsyncMock())
     reap = AsyncMock(return_value=0)
@@ -1054,6 +1055,32 @@ async def test_install_skill_rejects_invalid_or_changed_artifacts(
     assert [item["name"] for item in (await offline.client.get("/api/skills")).json()] == ["table"]
 
 
+@pytest.mark.asyncio
+async def test_ui_stream_marks_only_terminal_python_output_as_submission():
+    frames = []
+
+    async def emit(frame):
+        frames.append(frame)
+
+    stream = api.ui_stream.UiStream("root", emit)
+    payload = {"answer": "5", "artifact_paths": []}
+    for execution_id, submission in enumerate((False, True)):
+        await stream.publish("root", api.agent.PythonExecStartedEvent(execution_id, "run()"))
+        await stream.publish(
+            "root", api.agent.PythonExecCompletedEvent(execution_id, payload, submission=submission)
+        )
+
+    ordinary, marker, submitted = [
+        frame
+        for frame in frames
+        if frame["type"] in {"tool-output-available", "data-python-submission"}
+    ]
+    assert ordinary["output"] == submitted["output"] == payload
+    assert marker["data"] == {"tool_call_id": submitted["toolCallId"]}
+    assert ordinary["toolCallId"] != submitted["toolCallId"]
+    assert marker in stream.snapshot("root")
+
+
 def test_ui_frames_and_lossless_nested_snapshots():
     root = api.ui_stream.UiPartAccumulator("root")
     assert root.start() == {"type": "start", "messageId": "root"}
@@ -1425,6 +1452,45 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["primary", "decision"])
+async def test_chat_billing_error_matches_failing_model(offline, monkeypatch, role):
+    runtime = api.app.state.runtime
+    failure = dspy.LMBillingError("private provider billing details")
+    if role == "decision":
+        decision_model = SimpleNamespace(model="typesafe:jev-test")
+        monkeypatch.setattr(api, "_request_decision_lm", AsyncMock(return_value=decision_model))
+        monkeypatch.setattr(api, "select_skills", Mock(side_effect=failure))
+        run = AsyncMock()
+        expected = (
+            "Billing failed while using the Decision Model (typesafe:jev-test). "
+            "Update it in Settings → Models."
+        )
+    else:
+        run = AsyncMock(side_effect=failure)
+        expected = (
+            f"Billing failed while using workspace provider · {runtime.settings.llm_model}. "
+            "Choose another model and retry."
+        )
+    monkeypatch.setattr(api.agent, "run_workspace_task", run)
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}],
+            "pinned_skills": ["table"] if role == "primary" else [],
+        },
+    )
+    assert response.status_code == 200
+    frames = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")
+    ]
+    assert [frame["errorText"] for frame in frames if frame["type"] == "error"] == [expected]
+    if role == "decision":
+        run.assert_not_awaited()
+    else:
+        run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     child_id, nested_id = uuid4(), uuid4()
     offline.create_child.side_effect = [SimpleNamespace(id=child_id), SimpleNamespace(id=nested_id)]
@@ -1758,6 +1824,13 @@ async def test_patch_session_edits_title_and_model_override(offline):
     re_set = await offline.client.patch(offline.base, json={"model_override": "anthropic/claude"})
     assert re_set.status_code == 200
     assert re_set.json()["model_override"] == "anthropic/claude"
+
+    missing = await offline.client.patch(
+        offline.base, json={"model_override": f"provider/{uuid4()}/gpt-4.1"}
+    )
+    assert missing.status_code == 409
+    assert missing.json()["detail"] == "The selected provider no longer exists"
+    assert offline.store.session.model_override == "anthropic/claude"
 
     cleared_empty = await offline.client.patch(offline.base, json={"model_override": "   "})
     assert cleared_empty.status_code == 200

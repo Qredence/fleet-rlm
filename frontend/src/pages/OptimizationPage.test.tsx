@@ -2,6 +2,7 @@ import { MotionConfig } from 'motion/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ModelSelector } from '@/components/agent/ModelSelector'
 import { ActiveRunBanner } from '@/components/optimization/ActiveRunBanner'
 import { CliReferenceSection } from '@/components/optimization/CliReferenceSection'
 import { DatasetsSection } from '@/components/optimization/DatasetsSection'
@@ -13,6 +14,7 @@ import { RunInspectorPanel } from '@/components/optimization/RunInspectorPanel'
 import { TargetSummaryGrid } from '@/components/optimization/TargetSummaryGrid'
 import { Dialog } from '@/components/ui/dialog'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { Slider } from '@/components/ui/slider'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import {
   createApi,
@@ -661,6 +663,17 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(cliHtml).toContain('uv run python -m fleet_rlm.optimize')
   })
 
+  it('shows the short model name in the closed selector', () => {
+    const html = renderToStaticMarkup(
+      <ModelSelector api={createApi('token')} model="provider/prov-openai/gpt-5"
+        disabled={false} saving={false} onChange={() => {}} />,
+    )
+    expect(html).toContain('Model: GPT-5')
+    expect(html).toContain('>GPT-5</span>')
+    expect(html).not.toContain('Model ·')
+    expect(html).not.toContain('prov-openai')
+  })
+
   it('renders ProvidersSection cards, masked hints, keyless local provider, and encryption warning banner', () => {
     const api = createApi('token')
     const html = renderToStaticMarkup(
@@ -685,6 +698,22 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(html).toContain('Local Ollama')
     expect(html).toContain('No API key')
     expect(html).toContain('Fetch /models')
+    expect(html).toContain('provider-card-prov-openai')
+
+    const rows = renderToStaticMarkup(
+      <TooltipProvider>
+        <ProvidersSection api={api} providers={MOCK_PROVIDERS} layout="rows"
+          encryptionConfigured allowPrivateEndpoints={false} loading={false}
+          loadError={null} onRetry={() => {}} onChanged={() => {}} onOpenModels={() => {}} />
+      </TooltipProvider>,
+    )
+    expect(rows).toContain('provider-row-prov-openai')
+    expect(rows).not.toContain('provider-card-')
+    expect(rows).toContain('sk-...9a4f')
+    expect(rows).toContain('Fetch /models')
+    expect(rows).toContain('Open Models')
+    expect(rows).toContain('Edit provider OpenAI Prod')
+    expect(rows).toContain('Delete provider OpenAI Prod')
   })
 
   it('shows provider fetch errors with a retry action instead of an empty registry', () => {
@@ -770,6 +799,43 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(nonJevReanchorHtml).toContain('Decision model')
     expect(nonJevReanchorHtml).toContain('Calibration notice')
     expect(nonJevReanchorHtml).toContain('TypeSafe Jev System One')
+  })
+
+  it('accepts the same registered TypeSafe model explicitly and as the workspace default', () => {
+    const selection = 'provider/prov-typesafe/jev-latest'
+    const providers = [
+      { ...MOCK_PROVIDERS[0], id: 'prov-typesafe', dialect: 'typesafe' as const },
+    ]
+    for (const decisionLm of [undefined, { model: selection }]) {
+      const html = renderToStaticMarkup(
+        <TooltipProvider>
+          <Dialog open>
+            <LaunchOptimizationFormBody
+              api={createApi('token')}
+              capabilities={{ ...MOCK_OVERVIEW.capabilities, decision_model: selection }}
+              datasets={MOCK_DATASETS}
+              providers={providers}
+              defaults={{ target: 'skills', decisionLm }}
+              onClose={() => {}}
+              onStarted={() => {}}
+              onManageProviders={() => {}}
+            />
+          </Dialog>
+        </TooltipProvider>,
+      )
+      expect(html).toContain('Decision model')
+      expect(html).not.toContain('Calibration notice')
+    }
+  })
+
+  it('gives compact slider inputs the explicit accessible name', () => {
+    const html = renderToStaticMarkup(<>
+      <Slider size="compact" aria-label="Volume" value={2} onChange={() => {}} />
+      <Slider size="compact" aria-label="Window" value={[2, 5]} onChange={() => {}} />
+    </>)
+    for (const label of ['Volume', 'Window minimum', 'Window maximum']) {
+      expect(html).toMatch(new RegExp(`<input[^>]*aria-label="${label}"`))
+    }
   })
 
   it.each([
