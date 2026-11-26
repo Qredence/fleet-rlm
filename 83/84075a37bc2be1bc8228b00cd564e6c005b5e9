@@ -1,0 +1,141 @@
+README.md
+  s_f1510116089704::t_77da8769f2cd1b 11,52-57
+backend/.env.example
+  s_f1510116089704::t_9ae29dc95708c3 65-66
+backend/alembic/versions/0010_session_titles.py
+  s_f1510116089704::t_418e7a012880d6 1-33
+backend/eval_datasets/fixtures.py
+  s_f1510116089704::t_07e35790ad62dd 176-181,183-184,186,220
+backend/eval_datasets/rlm.jsonl
+  s_f1510116089704::t_1daf1ef2338d29 2,16,25,33
+backend/eval_datasets/skill_candidates/combined/pdf/SKILL.md
+  s_f1510116089704::t_bbb340d4dd5c3b 1-41
+backend/eval_datasets/skill_candidates/office/docx/SKILL.md
+  s_f1510116089704::t_35dc6a103e4cff 1-10
+backend/eval_datasets/skill_candidates/office/pptx/SKILL.md
+  s_f1510116089704::t_82a37eb3520120 1-10
+backend/eval_datasets/skill_candidates/split/spreadsheet-audit/SKILL.md
+  s_f1510116089704::t_80d257fbf67c80 6
+backend/eval_datasets/skill_candidates/split/xlsx/SKILL.md
+  s_f1510116089704::t_c76e98fe8856f6 1-10
+backend/eval_datasets/skills.jsonl
+  s_f1510116089704::t_406d488febd7bb 67-77
+backend/skills/chart-visualization/SKILL.md
+  s_f1510116089704::t_064f0282d5b736 6
+backend/skills/data-analysis/SKILL.md
+  s_f1510116089704::t_2054e5705d9e65 3,8
+backend/skills/document-extraction/SKILL.md
+  s_f1510116089704::t_db7da3819fec43 3,6-7,30-55,57
+backend/skills/pdf/SKILL.md
+  s_f1510116089704::t_8e2c289de07dd1 1-12
+backend/skills/recursive-synthesis/SKILL.md
+  s_f1510116089704::t_0dd7c572beb0c2 3,6
+backend/skills/report-writing/SKILL.md
+  s_f1510116089704::t_5fd9b74de2d862 1-10
+backend/skills/scientific-computing/SKILL.md
+  s_f1510116089704::t_a5f6f028f11eb7 8
+backend/skills/skill-creator/SKILL.md
+  s_f1510116089704::t_6701e59093436e 6,10
+backend/skills/web-research/SKILL.md
+  s_f1510116089704::t_1103779d4b682d 9
+backend/skills/xlsx/SKILL.md
+  s_f1510116089704::t_42df263ae404d0 1-18
+backend/snapshot/Dockerfile
+  s_f1510116089704::t_b15b732fb34a8c 4-7
+backend/snapshot/requirements.in
+  s_f1510116089704::t_459e6d97749c0c 8-9
+backend/snapshot/requirements.lock
+  s_f1510116089704::t_a7719f7ce42f69 525-704,1049,1262-1269,1679-1680,1694-1697
+backend/src/fleet_rlm/agent.py
+  s_f1510116089704::t_6f93623afc19a3 339,683-685
+backend/src/fleet_rlm/api.py
+  s_64863219f72b60::t_a4027d318a466f 249-253,258-284,625-628,723-775,782-806,855-873,876-877,892-896,898-903,1325,1355-1357,1457,1459-1461,1585,1721-1733,1754,1855,1858-1861,1871,1875-1882,1915-1917,1939-1940,1945,2008,2803-2807,2874-2877,2985,2996-2999,3058-3061,3116-3135,3141,3154-3157,3160,3166-3167
+backend/src/fleet_rlm/config.py
+  s_f1510116089704::t_01c0d7a964851d 24
+backend/src/fleet_rlm/db.py
+  s_64863219f72b60::t_d4c8c849081383 4,437,534-541,1141-1169,1174-1176,1341-1353,1359-1361,1374-1390
+backend/src/fleet_rlm/llm_registry.py
+  s_f1510116089704::t_6fb817905f94a7 423-435,455,468,504
+backend/src/fleet_rlm/optimize.py
+  s_f1510116089704::t_2ab16b07242527 1869,2011,2018,2021,2031-2032,2048,2060
+backend/src/fleet_rlm/skills.py
+  s_f1510116089704::t_094e18ffe6501f 68-74,88,417,421-422
+backend/src/fleet_rlm/ui_stream.py
+  s_f1510116089704::t_f6074958124c32 36,198-206,220-221
+backend/tests/test_llm_registry.py
+  s_f1510116089704::t_bd8e9a709f3c81 155,157-158
+backend/tests/test_optimization_db_schema.py
+  s_f1510116089704::t_bc0bf8f6c5d69b 353-354
+backend/tests/test_optimization_ui_api.py
+  s_64863219f72b60::t_84bdf13022f7aa 71-75,145,547,635,863-913,921-930,1025-1037,1253-1261,1376-1383,1403-1405
+backend/tests/test_phase1_locking.py
+  s_64863219f72b60::t_07180a81ccd032 21,31,33,142-180,213
+backend/tests/test_phase2_engine.py
+  s_f1510116089704::t_ff404ca93532ca 1647,1667,1699,1701,1705,1708-1711,1731,2088
+backend/tests/test_phase3_api.py
+  s_64863219f72b60::t_5f80d5f03fdf13 468,1058-1083,1454-1492,1828-1834
+backend/tests/test_phase5_optimize.py
+  s_f1510116089704::t_990c7ca74838a4 1157,1159,1163
+docs/evaluation-baseline.md
+  s_f1510116089704::t_eb335b861b9800 236-287
+frontend/src/App.tsx
+  s_f1510116089704::t_becb0ccc822991 166
+frontend/src/components/agent/MessageParts.test.tsx
+  s_f1510116089704::t_8030dd151670da 1-31
+frontend/src/components/agent/MessageParts.tsx
+  s_f1510116089704::t_36f4189cfe468c 1-2,17-18,26-67,82,99-104,131-158
+frontend/src/components/agent/ModelSelector.tsx
+  s_f1510116089704::t_df6d0f3a0fb602 21-22,51
+frontend/src/components/agent/PythonToolTrace.tsx
+  s_f1510116089704::t_bbe23da2346901 2,27,39-43,63,76,80,83,87
+frontend/src/components/agent/SessionWorkspace.tsx
+  s_f1510116089704::t_ac0311f4c93b6f 47,56,101,298-304
+frontend/src/components/agent/SettingsDialog.tsx
+  s_f1510116089704::t_d51dd96ed5601f 3,16-20
+frontend/src/components/agent/SettingsDialogBody.tsx
+  s_f1510116089704::t_7f078dfca7b07f 1,3,5-7,15-17,19-20,39-67,82-86,90,96-102,130,132-142,289-290,303-310,312-321,323-362,398,437-479,488-500,502,505,509,512-553,555-561,568-575,577,582,596-638,653,658,675-676,681,685,690,700-734
+frontend/src/components/agent/TurnActivity.tsx
+  s_f1510116089704::t_2e3293c6786b9d 5,73-75,81,106,116-124,126
+frontend/src/components/optimization/LaunchOptimizationDialog.tsx
+  s_f1510116089704::t_848d39107b65a7 338-342,344
+frontend/src/components/optimization/ProvidersSection.tsx
+  s_64863219f72b60::t_4cdd2d54a55e56 13,219,245-246,287,301,383-392,414,523,545,564,686-689,699-700,709-710,713-720,732-733,739-740,782,851,853,855-856,858-863,867,885,894,896-898,900-919,922-938,940-944,946-954,956,972-977,986,1018,1026,1035-1040,1077-1082
+frontend/src/components/ui/slider.tsx
+  s_f1510116089704::t_89dbb6e88f9d29 1-2000
+frontend/src/hooks/use-session-chat.ts
+  s_f1510116089704::t_7babe38c0915d4 10,15,59
+frontend/src/lib/chat-fetch.test.ts
+  s_f1510116089704::t_25ab49ba86438d 70-71,77,83-84
+frontend/src/lib/chat-fetch.ts
+  s_f1510116089704::t_9ea03e0d9e3f98 25,43
+frontend/src/lib/chat-stream.ts
+  s_f1510116089704::t_88ec5ea39d4217 14,20,23-24,40-44,46
+frontend/src/lib/messages.ts
+  s_f1510116089704::t_cbd08bb1addbed 42
+frontend/src/pages/OptimizationPage.test.tsx
+  s_f1510116089704::t_9c3b9e16cea960 5,665-675,700-715
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8384075a37bc2be1bc8228b00cd564e6c005b5e9",
+  "prompts": {},
+  "sessions": {
+    "s_64863219f72b60": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21981-7241-72e1-b2d1-d40eed792fb8",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_f1510116089704": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a218ce-81ae-7991-accd-7b371b54e91a",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
