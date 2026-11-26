@@ -818,13 +818,13 @@ export function ProvidersSection({
           <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>
         </Alert>
       ) : loading && !providers ? (
-        <div className="opt-subgrid-cards" role="status" aria-label="Loading providers">
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4" role="status" aria-label="Loading providers">
           {[0, 1, 2].map((idx) => (
             <Elevated
               key={idx}
               offset={1}
               shadowLevel={2}
-              className="opt-subgrid-card min-w-0 rounded-xl p-4 ring-1 ring-foreground/10"
+              className="flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10"
             >
               <Skeleton className="h-5 w-36 bg-hover motion-reduce:animate-none" />
               <Skeleton className="h-10 w-full bg-hover motion-reduce:animate-none" />
@@ -852,7 +852,7 @@ export function ProvidersSection({
           </Button>
         </div>
       ) : (
-        <div className="opt-subgrid-cards" role="region" aria-label="Registered LLM providers">
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4" role="region" aria-label="Registered LLM providers">
           {providers.map((provider) => {
             const preset = DIALECT_MAP[provider.dialect]
             const isRefreshing = refreshingId === provider.id
@@ -866,23 +866,23 @@ export function ProvidersSection({
                 offset={1}
                 shadowLevel={2}
                 data-testid={`provider-card-${provider.id}`}
-                className="opt-subgrid-card min-w-0 rounded-xl p-4 ring-1 ring-foreground/10"
+                className="flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10"
               >
                 {/* Subgrid Row 1: Name & dialect/mode badges */}
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-col items-start gap-2">
                   <div className="min-w-0">
                     <h3
-                      className={`${typeClass('subtitle')} truncate text-foreground`}
+                      className={`${typeClass('subtitle')} [overflow-wrap:anywhere] text-foreground`}
                       style={{ fontVariationSettings: fontWeights.semibold }}
                       title={provider.name}
                     >
                       {provider.name}
                     </h3>
-                    <p className={`${typeClass('caption')} mt-0.5 truncate font-mono text-muted-foreground`}>
+                    <p className={`${typeClass('caption')} mt-0.5 [overflow-wrap:anywhere] font-mono text-muted-foreground`}>
                       {provider.base_url || preset?.defaultBaseUrl || 'Provider default endpoint'}
                     </p>
                   </div>
-                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                  <div className="flex max-w-full flex-wrap gap-1">
                     <Badge variant="secondary">{preset?.label ?? provider.dialect}</Badge>
                     {showModeBadge && (
                       <Badge variant="outline">{API_MODE_LABEL[provider.api_mode]}</Badge>
@@ -891,17 +891,17 @@ export function ProvidersSection({
                 </div>
 
                 {/* Subgrid Row 2: Key hint & default model */}
-                <dl className="grid grid-cols-2 gap-2 border-t border-border/60 pt-2.5">
+                <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2 border-t border-border/60 pt-2.5">
                   <div className="min-w-0">
                     <dt className={`${typeClass('caption')} text-muted-foreground`}>API key</dt>
-                    <dd className={`${typeClass('body')} truncate font-mono text-foreground`}>
+                    <dd className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}>
                       {provider.has_api_key ? (provider.api_key_hint ?? 'Saved') : 'No API key'}
                     </dd>
                   </div>
                   <div className="min-w-0">
                     <dt className={`${typeClass('caption')} text-muted-foreground`}>Default model</dt>
                     <dd
-                      className={`${typeClass('body')} truncate font-mono text-foreground`}
+                      className={`${typeClass('body')} [overflow-wrap:anywhere] font-mono text-foreground`}
                       title={provider.default_model ?? undefined}
                     >
                       {provider.default_model || '—'}
@@ -919,7 +919,7 @@ export function ProvidersSection({
                   {notice && (
                     <p
                       role={notice.ok ? 'status' : 'alert'}
-                      className={`${typeClass('caption')} ${notice.ok ? 'text-foreground' : 'text-destructive'}`}
+                      className={`${typeClass('caption')} [overflow-wrap:anywhere] ${notice.ok ? 'text-foreground' : 'text-destructive'}`}
                     >
                       {notice.text}
                     </p>
@@ -927,7 +927,7 @@ export function ProvidersSection({
                 </div>
 
                 {/* Subgrid Row 4: Actions */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
                   <Button
                     type="button"
                     size="sm"

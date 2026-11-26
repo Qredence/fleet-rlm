@@ -1,3 +1,4 @@
+import { formatScore, holdoutPoints } from './holdout-score'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -57,11 +58,6 @@ interface ProvenanceModel {
   dialect: string | null
 }
 
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return `${(value * 100).toFixed(1)}%`
-}
-
 function formatRate(value: unknown): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return `${(value * 100).toFixed(1)}%`
@@ -114,8 +110,8 @@ function buildGateChecklist(
       label: 'Holdout score improved over baseline',
       passed: improved,
       reason: improved
-        ? `${formatScore(job.baseline_score)} → ${formatScore(job.optimized_score)}`
-        : `${formatScore(job.optimized_score)} did not exceed ${formatScore(job.baseline_score)}`,
+        ? `${formatScore(job.baseline_score, job.target)} → ${formatScore(job.optimized_score, job.target)}`
+        : `${formatScore(job.optimized_score, job.target)} did not exceed ${formatScore(job.baseline_score, job.target)}`,
     })
   }
   if (job.target !== 'rlm') {
@@ -340,7 +336,7 @@ export function RunInspectorPanel({
 
   const delta =
     job.baseline_score !== null && job.optimized_score !== null
-      ? (job.optimized_score - job.baseline_score) * 100
+      ? job.optimized_score - job.baseline_score
       : null
 
   const safeMlflowUrl =
@@ -505,12 +501,12 @@ export function RunInspectorPanel({
               className={`${typeClass('title')} tabular-nums text-foreground`}
               style={{ fontVariationSettings: fontWeights.semibold }}
             >
-              {formatScore(job.baseline_score)} → {formatScore(job.optimized_score)}
+              {formatScore(job.baseline_score, job.target)} → {formatScore(job.optimized_score, job.target)}
             </dd>
             {delta !== null && (
               <dd className={`${typeClass('caption')} tabular-nums text-muted-foreground`}>
                 {delta >= 0 ? '+' : ''}
-                {delta.toFixed(1)} pts vs baseline
+                {holdoutPoints(delta, job.target)} pts vs baseline
               </dd>
             )}
           </div>
@@ -854,10 +850,10 @@ export function RunInspectorPanel({
                       Holdout score
                     </td>
                     <td className={`${typeClass('caption')} px-2.5 py-1.5 font-mono tabular-nums text-muted-foreground`}>
-                      {formatScore(activePromo?.optimized_score ?? job.baseline_score)}
+                      {formatScore(activePromo?.optimized_score ?? job.baseline_score, job.target)}
                     </td>
                     <td className={`${typeClass('caption')} px-2.5 py-1.5 font-mono tabular-nums text-foreground`}>
-                      {formatScore(job.optimized_score)}
+                      {formatScore(job.optimized_score, job.target)}
                     </td>
                   </tr>
                   {job.target !== 'rlm' && (fpBefore !== undefined || fpAfter !== undefined) && (

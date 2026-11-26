@@ -1,3 +1,4 @@
+import { formatScore as formatHoldoutScore, holdoutPoints } from './holdout-score'
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -174,8 +175,8 @@ function parseGateChecks(job: OptimizationJobDetail): GateCheckRow[] {
       actual: job.optimized_score,
       threshold: `> ${job.baseline_score.toFixed(4)}`,
       reason: improved
-        ? `Holdout improved from ${formatScore(job.baseline_score)} to ${formatScore(job.optimized_score)}`
-        : `Holdout ${formatScore(job.optimized_score)} did not beat baseline ${formatScore(job.baseline_score)}`,
+        ? `Holdout improved from ${formatHoldoutScore(job.baseline_score, job.target)} to ${formatHoldoutScore(job.optimized_score, job.target)}`
+        : `Holdout ${formatHoldoutScore(job.optimized_score, job.target)} did not beat baseline ${formatHoldoutScore(job.baseline_score, job.target)}`,
     })
   }
   if (job.target !== 'rlm') {
@@ -794,7 +795,7 @@ export function RunFullDiffContent({
                     </p>
                     <p className={`${typeClass('caption')} text-muted-foreground`}>
                       {job.baseline_score !== null && job.optimized_score !== null
-                        ? `Holdout moved from ${formatScore(job.baseline_score)} to ${formatScore(job.optimized_score)} (${job.optimized_score >= job.baseline_score ? '+' : ''}${((job.optimized_score - job.baseline_score) * 100).toFixed(1)} pts).`
+                        ? `Holdout moved from ${formatHoldoutScore(job.baseline_score, job.target)} to ${formatHoldoutScore(job.optimized_score, job.target)} (${job.optimized_score >= job.baseline_score ? '+' : ''}${holdoutPoints(job.optimized_score - job.baseline_score, job.target)} pts).`
                         : 'Awaiting holdout evaluation results.'}
                     </p>
                   </div>

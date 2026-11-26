@@ -1,3 +1,4 @@
+import { formatScore } from './holdout-score'
 import { ChevronDown, Square } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
@@ -142,11 +143,6 @@ function formatStageDuration(entry: StageTimelineEntry | undefined): string | nu
   const mins = Math.floor(seconds / 60)
   const rem = Math.round(seconds % 60)
   return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`
-}
-
-function formatMetric(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return `${(value * 100).toFixed(1)}%`
 }
 
 function resolveStageIndex(
@@ -411,7 +407,7 @@ export function ActiveRunBanner({
                     className={`${typeClass('subtitle')} tabular-nums text-foreground`}
                     style={{ fontVariationSettings: fontWeights.semibold }}
                   >
-                    {formatMetric(job.baseline_score ?? progress.baseline_score)}
+                    {formatScore(job.baseline_score ?? progress.baseline_score, job.target)}
                   </dd>
                 </div>
                 <div>
@@ -420,7 +416,7 @@ export function ActiveRunBanner({
                     className={`${typeClass('subtitle')} tabular-nums text-foreground`}
                     style={{ fontVariationSettings: fontWeights.semibold }}
                   >
-                    {formatMetric(job.optimized_score ?? progress.best_score)}
+                    {formatScore(job.optimized_score ?? progress.best_score, job.target)}
                   </dd>
                 </div>
               </dl>

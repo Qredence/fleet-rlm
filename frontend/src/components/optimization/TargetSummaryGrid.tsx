@@ -1,3 +1,4 @@
+import { formatScore, holdoutPoints } from './holdout-score'
 import { Brain, Code2, Package, Play, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -60,12 +61,8 @@ const SOURCE_BADGE: Record<
   default: { label: 'Default baseline', variant: 'outline' },
 }
 
-function formatScore(score: number | null | undefined): string {
-  if (score === null || score === undefined || Number.isNaN(score)) return '—'
-  return `${(score * 100).toFixed(1)}%`
-}
-
 function formatDelta(
+  target: string,
   baseline: number | null | undefined,
   optimized: number | null | undefined,
 ): string | null {
@@ -79,9 +76,9 @@ function formatDelta(
   ) {
     return null
   }
-  const delta = (optimized - baseline) * 100
+  const delta = optimized - baseline
   const sign = delta >= 0 ? '+' : ''
-  return `${sign}${delta.toFixed(1)} pts`
+  return `${sign}${holdoutPoints(delta, target)} pts`
 }
 
 function formatTimestamp(iso: string | null | undefined): string {
@@ -156,6 +153,7 @@ export function TargetSummaryGrid({
               : null
           )
           const delta = formatDelta(
+            summary.target,
             scored?.baseline_score,
             scored?.optimized_score,
           )
@@ -247,7 +245,7 @@ export function TargetSummaryGrid({
                         className={`${typeClass('title')} tabular-nums text-foreground`}
                         style={{ fontVariationSettings: fontWeights.semibold }}
                       >
-                        {formatScore(scored.optimized_score)}
+                        {formatScore(scored.optimized_score, summary.target)}
                       </span>
                     </div>
                     <div className="text-right">
@@ -257,7 +255,7 @@ export function TargetSummaryGrid({
                         </div>
                       )}
                       <div className={`${typeClass('caption')} tabular-nums text-muted-foreground`}>
-                        base {formatScore(scored.baseline_score)}
+                        base {formatScore(scored.baseline_score, summary.target)}
                       </div>
                     </div>
                   </>
@@ -375,7 +373,7 @@ export function TargetSummaryGrid({
                     <div>
                       <dt className={`${typeClass('caption')} text-muted-foreground`}>Holdout score</dt>
                       <dd className={`${typeClass('caption')} font-mono tabular-nums text-foreground`}>
-                        {formatScore(previousPromo.optimized_score)}
+                        {formatScore(previousPromo.optimized_score, rollbackState.summary.target)}
                       </dd>
                     </div>
                     <div>

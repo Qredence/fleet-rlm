@@ -1,3 +1,4 @@
+import { formatScore } from './holdout-score'
 import { useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -50,11 +51,6 @@ const STATUS_BADGE: Record<
   completed: { label: 'Completed', variant: 'secondary' },
   failed: { label: 'Failed', variant: 'destructive' },
   cancelled: { label: 'Cancelled', variant: 'outline' },
-}
-
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return `${(value * 100).toFixed(1)}%`
 }
 
 function formatTime(iso: string): string {
@@ -289,7 +285,7 @@ export function RunHistorySection({
                         <TableCell data-label="Score" className="text-right tabular-nums">
                           {job.optimized_score !== null ? (
                             <span>
-                              {formatScore(job.baseline_score)} → {formatScore(job.optimized_score)}
+                              {formatScore(job.baseline_score, job.target)} → {formatScore(job.optimized_score, job.target)}
                             </span>
                           ) : (
                             job.stage
