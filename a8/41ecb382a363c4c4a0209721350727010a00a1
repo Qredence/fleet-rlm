@@ -1,0 +1,31 @@
+.circleci/config.yml
+  s_4c5656a3b33387::t_b244a093979c12 18-19
+.circleci/continue-config.yml
+  s_4c5656a3b33387::t_54c31603e86ee8 52-59,62-64
+Makefile
+  s_4c5656a3b33387::t_c01a39ccce53fc 15-19
+backend/tests/test_phase3_api.py
+  s_4c5656a3b33387::t_c21cfd89a0da79 28,1264-1267
+frontend/tsconfig.app.json
+  s_4c5656a3b33387::t_ff7c6d5c4766af 21
+frontend/tsconfig.node.json
+  s_4c5656a3b33387::t_2dbc7f86172158 17
+scripts/check_hygiene.py
+  s_4c5656a3b33387::t_f2a00cdcd30b4a 1-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a841ecb382a363c4c4a0209721350727010a00a1",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
