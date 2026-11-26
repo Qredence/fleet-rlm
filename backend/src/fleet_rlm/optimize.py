@@ -1694,7 +1694,7 @@ def _resolve_fixture_search_paths(
         else:
             eval_dirs.append(configured)
             eval_dirs.append(_backend_root() / configured)
-    eval_dirs.append(_backend_root() / "eval_datasets")
+    eval_dirs.extend((_backend_root() / "eval_datasets", Path(__file__).with_name("eval_datasets")))
 
     fallback_mod: Path | None = None
     for eval_dir in eval_dirs:

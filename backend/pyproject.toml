@@ -166,9 +166,10 @@ allow_indirect_imports = true
 
 [tool.hatch.build.targets.wheel]
 dev-mode-dirs = ["src"]
-only-include = ["src/fleet_rlm", "skills"]
+only-include = ["src/fleet_rlm", "skills", "eval_datasets"]
 exclude = ["skills/.*", "**/__pycache__"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
 "skills" = "fleet_rlm/bundled_skills"
+"eval_datasets" = "fleet_rlm/eval_datasets"

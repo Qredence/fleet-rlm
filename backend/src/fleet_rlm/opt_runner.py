@@ -250,7 +250,12 @@ def resolve_eval_datasets_dir(settings: Settings) -> Path:
     if configured.is_absolute() or configured.is_dir():
         return configured.resolve()
     candidate = backend_root() / configured
-    return candidate.resolve() if candidate.is_dir() else configured
+    if candidate.is_dir():
+        return candidate.resolve()
+    packaged = Path(__file__).with_name("eval_datasets")
+    if configured == Path("eval_datasets") and packaged.is_dir():
+        return packaged
+    return configured
 
 
 def resolve_skills_dir(settings: Settings) -> Path:
