@@ -1,5 +1,5 @@
-import { Eye, Play, Trash2, Upload } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { Eye, FileUp, HardDrive, Play, Trash2, Upload, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -37,11 +37,14 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   errorMessage,
   type FleetApi,
+  type OptimizationCapabilities,
   type OptimizationDatasetPreview,
   type OptimizationDatasetSummary,
+  type OptimizationStorageBackend,
   type OptimizationTarget,
 } from '@/lib/api'
 import { Elevated } from '@/lib/elevated'
@@ -60,9 +63,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }
 
+function resolveStorageBackend(dataset: OptimizationDatasetSummary): OptimizationStorageBackend {
+  if (dataset.storage_backend) return dataset.storage_backend
+  return dataset.source === 'builtin' ? 'builtin' : 'neon'
+}
+
+function storageBadgeMeta(backend: OptimizationStorageBackend): {
+  label: string
+  variant: 'secondary' | 'outline' | 'default'
+} {
+  if (backend === 'builtin') return { label: 'Built-in', variant: 'secondary' }
+  if (backend === 'daytona_volume') return { label: 'Daytona Volume', variant: 'default' }
+  return { label: 'Neon', variant: 'outline' }
+}
+
 export function DatasetsSection({
   api,
   datasets,
+  capabilities = null,
   loading,
   onUploaded,
   onDeleted,
@@ -70,13 +88,18 @@ export function DatasetsSection({
 }: {
   api: FleetApi
   datasets: OptimizationDatasetSummary[] | null
+  capabilities?: OptimizationCapabilities | null
   loading: boolean
   onUploaded: (created: OptimizationDatasetSummary) => void
   onDeleted: (datasetId: string) => void
   onRunWithDataset: (dataset: OptimizationDatasetSummary) => void
 }) {
+  const formId = useId()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previewControllerRef = useRef<AbortController | null>(null)
+
   const [uploadTarget, setUploadTarget] = useState<OptimizationTarget>('skills')
+  const [storageBackend, setStorageBackend] = useState<'neon' | 'daytona_volume'>('neon')
   const [uploadName, setUploadName] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -90,20 +113,55 @@ export function DatasetsSection({
 
   const [deleteTarget, setDeleteTarget] = useState<OptimizationDatasetSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  const daytonaVolumeEnabled = capabilities?.daytona_volume_enabled === true
+  const daytonaVolumeName = capabilities?.daytona_dataset_volume || 'fleet-eval-datasets'
+  const effectiveStorageBackend: 'neon' | 'daytona_volume' =
+    storageBackend === 'daytona_volume' && !daytonaVolumeEnabled ? 'neon' : storageBackend
+
+  useEffect(() => {
+    return () => {
+      previewControllerRef.current?.abort()
+    }
+  }, [])
+
+  function handlePreviewOpenChange(nextOpen: boolean) {
+    setPreviewOpen(nextOpen)
+    if (!nextOpen) {
+      previewControllerRef.current?.abort()
+      previewControllerRef.current = null
+    }
+  }
 
   async function openPreview(dataset: OptimizationDatasetSummary) {
+    previewControllerRef.current?.abort()
+    const controller = new AbortController()
+    previewControllerRef.current = controller
+
     setPreviewOpen(true)
     setPreviewLoading(true)
     setPreviewError('')
     setPreviewData(null)
     try {
-      const result = await api.previewOptimizationDataset(dataset.id, 25)
-      setPreviewData(result)
+      const result = await api.previewOptimizationDataset(dataset.id, 25, controller.signal)
+      if (!controller.signal.aborted) {
+        setPreviewData(result)
+      }
     } catch (failure) {
-      setPreviewError(errorMessage(failure))
+      if (!controller.signal.aborted) {
+        setPreviewError(errorMessage(failure))
+      }
     } finally {
-      setPreviewLoading(false)
+      if (!controller.signal.aborted) {
+        setPreviewLoading(false)
+      }
     }
+  }
+
+  function clearSelectedFile() {
+    setSelectedFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   async function handleUpload(event: React.FormEvent) {
@@ -117,12 +175,12 @@ export function DatasetsSection({
     try {
       const body = new FormData()
       body.append('target', uploadTarget)
+      body.append('storage_backend', effectiveStorageBackend)
       if (uploadName.trim()) body.append('name', uploadName.trim())
       body.append('file', selectedFile)
       const created = await api.uploadOptimizationDataset(body)
-      setSelectedFile(null)
+      clearSelectedFile()
       setUploadName('')
-      if (fileInputRef.current) fileInputRef.current.value = ''
       onUploaded(created)
     } catch (failure) {
       setUploadError(errorMessage(failure))
@@ -130,6 +188,10 @@ export function DatasetsSection({
       setUploading(false)
     }
   }
+
+  const previewStorage = previewData ? resolveStorageBackend(previewData.dataset) : null
+  const previewStorageMeta = previewStorage ? storageBadgeMeta(previewStorage) : null
+  const deleteStorage = deleteTarget ? resolveStorageBackend(deleteTarget) : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -144,39 +206,93 @@ export function DatasetsSection({
             Upload evaluation dataset
           </h2>
           <p className={`${typeClass('caption')} text-muted-foreground`}>
-            Validated JSONL files are stored in Neon Object Storage (max 2,000 rows, no raw API keys
-            or database URLs).
+            Validated UTF-8 JSONL files (max 2,000 rows, secret-scanned before persistence) are
+            indexed in Neon Postgres and stored in your chosen backend.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
           <Field>
-            <FieldLabel>Target</FieldLabel>
+            <FieldLabel htmlFor={`${formId}-target`}>Target</FieldLabel>
             <Select
               value={uploadTarget}
               onValueChange={(value) => setUploadTarget((value || 'skills') as OptimizationTarget)}
             >
-              <SelectTrigger aria-label="Dataset target" placeholder="Select target" />
+              <SelectTrigger
+                id={`${formId}-target`}
+                aria-label="Dataset target"
+                placeholder="Select target"
+              />
               <SelectContent>
-                <SelectItem index={0} value="skills">Skill Selector</SelectItem>
-                <SelectItem index={1} value="memory">Memory Gate</SelectItem>
-                <SelectItem index={2} value="rlm">Root RLM</SelectItem>
+                <SelectItem index={0} value="skills">
+                  Skill Selector
+                </SelectItem>
+                <SelectItem index={1} value="memory">
+                  Memory Gate
+                </SelectItem>
+                <SelectItem index={2} value="rlm">
+                  Root RLM
+                </SelectItem>
               </SelectContent>
             </Select>
+            <FieldDescription>
+              Schema validation checks required fields, split balance, and lineage leakage for this
+              target.
+            </FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="opt-dataset-name">Display name (optional)</FieldLabel>
+            <FieldLabel htmlFor={`${formId}-storage`}>Storage backend</FieldLabel>
+            <Select
+              value={effectiveStorageBackend}
+              onValueChange={(value) =>
+                setStorageBackend((value === 'daytona_volume' ? 'daytona_volume' : 'neon'))
+              }
+            >
+              <SelectTrigger
+                id={`${formId}-storage`}
+                aria-label="Dataset storage backend"
+                placeholder="Choose storage backend"
+              />
+              <SelectContent>
+                <SelectItem index={0} value="neon">
+                  Neon backend (Object Storage + Postgres)
+                </SelectItem>
+                <SelectItem
+                  index={1}
+                  value="daytona_volume"
+                  disabled={!daytonaVolumeEnabled}
+                >
+                  {daytonaVolumeEnabled
+                    ? `Daytona Volume (${daytonaVolumeName})`
+                    : `Daytona Volume (unavailable — configure Daytona)`}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FieldDescription>
+              {effectiveStorageBackend === 'daytona_volume'
+                ? `Stores JSONL on managed Daytona Volume "${daytonaVolumeName}" with host SHA-256 caching.`
+                : daytonaVolumeEnabled
+                  ? 'Neon Object Storage keeps datasets alongside artifacts. Switch to Daytona Volume to keep datasets on Daytona storage.'
+                  : 'Stored in Neon Object Storage + Postgres. Configure DAYTONA_API_KEY on the backend to enable Daytona Volume storage.'}
+            </FieldDescription>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor={`${formId}-name`}>Display name (optional)</FieldLabel>
             <Input
-              id="opt-dataset-name"
+              id={`${formId}-name`}
               value={uploadName}
               onChange={(event) => setUploadName(event.target.value)}
               placeholder="e.g. customer-skills-v2.jsonl"
             />
+            <FieldDescription>
+              Defaults to the uploaded filename when left blank.
+            </FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="opt-dataset-file">JSONL file</FieldLabel>
+            <FieldLabel htmlFor={`${formId}-file`}>JSONL file</FieldLabel>
             <div
               onDragOver={(event) => {
                 event.preventDefault()
@@ -192,23 +308,68 @@ export function DatasetsSection({
                   setUploadError('')
                 }
               }}
-              className={`rounded-lg border border-dashed p-1.5 transition-colors ${dragging ? 'border-foreground bg-hover' : 'border-border'}`}
+              className={`flex min-h-9 items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-1.5 transition-colors ${
+                dragging ? 'border-foreground bg-hover' : 'border-border bg-background/50'
+              }`}
+              data-testid="dataset-dropzone"
             >
-              <Input
+              <input
                 ref={fileInputRef}
-                id="opt-dataset-file"
+                id={`${formId}-file`}
                 type="file"
                 accept=".jsonl,application/jsonl,text/plain"
+                className="sr-only"
                 onChange={(event) => {
                   setSelectedFile(event.target.files?.[0] ?? null)
                   setUploadError('')
                 }}
               />
+
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <FileUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span
+                  className={`${typeClass('caption')} truncate ${
+                    selectedFile ? 'font-mono text-foreground' : 'text-muted-foreground'
+                  }`}
+                  title={selectedFile?.name}
+                >
+                  {selectedFile
+                    ? `${selectedFile.name} (${formatBytes(selectedFile.size)})`
+                    : 'Drop a .jsonl file here or browse'}
+                </span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                {selectedFile && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label="Clear selected file"
+                          onClick={clearSelectedFile}
+                        />
+                      }
+                    >
+                      <X className="size-3.5" aria-hidden="true" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Clear selected file</TooltipContent>
+                  </Tooltip>
+                )}
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Browse…
+                </Button>
+              </div>
             </div>
             <FieldDescription>
-              {selectedFile
-                ? `${selectedFile.name} (${formatBytes(selectedFile.size)})`
-                : 'Drop a .jsonl file or browse.'}
+              One JSON object per line. Raw API keys and database URLs are rejected automatically.
             </FieldDescription>
           </Field>
         </div>
@@ -220,7 +381,12 @@ export function DatasetsSection({
         )}
 
         <div className="flex justify-end">
-          <Button type="submit" size="sm" disabled={uploading || !selectedFile}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={uploading || !selectedFile}
+            data-testid="upload-dataset-button"
+          >
             <Upload className="size-3.5" aria-hidden="true" />
             {uploading ? 'Validating & uploading…' : 'Upload dataset'}
           </Button>
@@ -248,6 +414,8 @@ export function DatasetsSection({
         <div className="opt-subgrid-cards" role="region" aria-label="Available datasets">
           {(datasets ?? []).map((dataset) => {
             const splits = dataset.summary_json?.splits ?? {}
+            const backend = resolveStorageBackend(dataset)
+            const badgeMeta = storageBadgeMeta(backend)
             return (
               <Elevated
                 key={dataset.id}
@@ -267,10 +435,16 @@ export function DatasetsSection({
                     </h3>
                     <p className={`${typeClass('caption')} text-muted-foreground`}>
                       {TARGET_LABEL[dataset.target]}
+                      {backend === 'daytona_volume' && dataset.storage_volume
+                        ? ` · ${dataset.storage_volume}`
+                        : ''}
                     </p>
                   </div>
-                  <Badge variant={dataset.source === 'builtin' ? 'secondary' : 'outline'}>
-                    {dataset.source === 'builtin' ? 'Built-in' : 'Custom'}
+                  <Badge variant={badgeMeta.variant} className="shrink-0">
+                    {backend === 'daytona_volume' && (
+                      <HardDrive className="size-3" aria-hidden="true" />
+                    )}
+                    {badgeMeta.label}
                   </Badge>
                 </div>
 
@@ -312,14 +486,25 @@ export function DatasetsSection({
                   </div>
 
                   {dataset.source === 'custom' && (
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Delete dataset ${dataset.name}`}
-                      onClick={() => setDeleteTarget(dataset)}
-                    >
-                      <Trash2 className="size-3.5" aria-hidden="true" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Delete dataset ${dataset.name}`}
+                            onClick={() => {
+                              setDeleteError('')
+                              setDeleteTarget(dataset)
+                            }}
+                            data-testid={`delete-dataset-${dataset.id}`}
+                          />
+                        }
+                      >
+                        <Trash2 className="size-3.5" aria-hidden="true" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Delete dataset</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
               </Elevated>
@@ -329,12 +514,20 @@ export function DatasetsSection({
       )}
 
       {/* Read-only preview Sheet */}
-      <Sheet open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Sheet open={previewOpen} onOpenChange={handlePreviewOpenChange}>
         <SheetContent side="right" className="w-full overflow-y-auto data-[side=right]:sm:max-w-2xl">
-          <SheetHeader>
-            <SheetTitle>{previewData?.dataset.name ?? 'Dataset preview'}</SheetTitle>
+          <SheetHeader className="pr-12">
+            <div className="flex flex-wrap items-center gap-2">
+              <SheetTitle>{previewData?.dataset.name ?? 'Dataset preview'}</SheetTitle>
+              {previewStorageMeta && (
+                <Badge variant={previewStorageMeta.variant}>{previewStorageMeta.label}</Badge>
+              )}
+            </div>
             <SheetDescription>
               Read-only sample (first 25 rows) with class and split counts.
+              {previewStorage === 'daytona_volume' && previewData?.dataset.storage_volume
+                ? ` Stored on Daytona Volume ${previewData.dataset.storage_volume}.`
+                : ''}
             </SheetDescription>
           </SheetHeader>
           <div className="flex flex-col gap-4 px-4 pb-6">
@@ -378,10 +571,15 @@ export function DatasetsSection({
                         <CodeBlockHeader>
                           <CodeBlockTitle>Row {index + 1}</CodeBlockTitle>
                           <CodeBlockActions>
-                            <CodeBlockCopyButton
-                              value={JSON.stringify(row, null, 2)}
-                              aria-label={`Copy row ${index + 1}`}
-                            />
+                            <Tooltip>
+                              <TooltipTrigger render={<span className="inline-flex" />}>
+                                <CodeBlockCopyButton
+                                  value={JSON.stringify(row, null, 2)}
+                                  aria-label={`Copy row ${index + 1}`}
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="top">Copy JSON row</TooltipContent>
+                            </Tooltip>
                           </CodeBlockActions>
                         </CodeBlockHeader>
                         <CodeBlockContent wrap>
@@ -397,27 +595,48 @@ export function DatasetsSection({
         </SheetContent>
       </Sheet>
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setDeleteTarget(null)
+            setDeleteError('')
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete custom dataset?</AlertDialogTitle>
             <AlertDialogDescription>
-              Deletes <code>{deleteTarget?.name}</code> from Neon Postgres and Object Storage.
-              Existing job reports remain intact.
+              Deletes <code>{deleteTarget?.name}</code> from Neon Postgres and{' '}
+              {deleteStorage === 'daytona_volume'
+                ? `Daytona Volume${deleteTarget?.storage_volume ? ` (${deleteTarget.storage_volume})` : ''}`
+                : 'Neon Object Storage'}
+              . Existing job reports remain intact.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {deleteError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={deleting}
               onClick={async () => {
                 if (!deleteTarget) return
+                setDeleteError('')
                 setDeleting(true)
                 try {
                   await api.deleteOptimizationDataset(deleteTarget.id)
                   const deletedId = deleteTarget.id
                   setDeleteTarget(null)
                   onDeleted(deletedId)
+                } catch (failure) {
+                  setDeleteError(errorMessage(failure))
                 } finally {
                   setDeleting(false)
                 }

@@ -1,5 +1,14 @@
-import { Activity, Database, Plus, RefreshCw, Terminal } from 'lucide-react'
-import { useState } from 'react'
+import {
+  Activity,
+  ChevronDown,
+  Database,
+  HelpCircle,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  Terminal,
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { ActiveRunBanner } from '@/components/optimization/ActiveRunBanner'
 import { CliReferenceSection } from '@/components/optimization/CliReferenceSection'
@@ -8,6 +17,8 @@ import {
   LaunchOptimizationDialog,
   type LaunchDefaults,
 } from '@/components/optimization/LaunchOptimizationDialog'
+import { ProvidersSection } from '@/components/optimization/ProvidersSection'
+import { RunFullDiffSheet } from '@/components/optimization/RunFullDiffSheet'
 import { RunHistorySection } from '@/components/optimization/RunHistorySection'
 import { TargetSummaryGrid } from '@/components/optimization/TargetSummaryGrid'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -15,13 +26,80 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsItem, TabsPanel } from '@/components/ui/fluid-tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useOptimizations } from '@/hooks/use-optimizations'
-import { errorMessage, type FleetApi, type OptimizationTarget } from '@/lib/api'
+import {
+  errorMessage,
+  type FleetApi,
+  type LLMProviderView,
+  type LMRoleSelection,
+  type OptimizationJobDetail,
+  type OptimizationJobSummary,
+  type OptimizationTarget,
+} from '@/lib/api'
+import { fontWeights } from '@/lib/font-weight'
+import { typeClass } from '@/lib/type-scale'
 
 const TAB_INDEX = {
   runs: 0,
   datasets: 1,
-  cli: 2,
+  providers: 2,
+  cli: 3,
 } as const
+
+function extractRoleBinding(
+  config: Record<string, unknown> | undefined,
+  key: string,
+  fallbackProviderId?: string | null,
+  fallbackModel?: string | null,
+): LMRoleSelection | null {
+  const raw = config?.[key]
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const rec = raw as Record<string, unknown>
+    const providerId = typeof rec.provider_id === 'string' ? rec.provider_id : null
+    const model = typeof rec.model === 'string' ? rec.model : null
+    if (providerId || model) return { provider_id: providerId, model }
+  }
+  if (fallbackProviderId || fallbackModel) {
+    return { provider_id: fallbackProviderId ?? null, model: fallbackModel ?? null }
+  }
+  return null
+}
+
+function rerunDefaultsForJob(job: OptimizationJobSummary): LaunchDefaults {
+  const cfg = job.config_json
+  return {
+    target: job.target,
+    datasetId:
+      job.dataset_source === 'custom' && job.dataset_id
+        ? job.dataset_id
+        : job.dataset_source === 'builtin'
+          ? `builtin:${job.target}`
+          : 'db',
+    programKind: (job.program_kind === 'flex' ? 'flex' : 'rlm') as 'rlm' | 'flex',
+    seed: typeof cfg?.seed === 'number' ? cfg.seed : 0,
+    maxMetricCalls: typeof cfg?.max_metric_calls === 'number' ? cfg.max_metric_calls : 80,
+    holdoutRepeats: typeof cfg?.holdout_repeats === 'number' ? cfg.holdout_repeats : 3,
+    rootLm: extractRoleBinding(cfg, 'root_lm'),
+    subLm: extractRoleBinding(cfg, 'sub_lm'),
+    reflectionLm: extractRoleBinding(
+      cfg,
+      'reflection_lm_config',
+      null,
+      typeof cfg?.reflection_lm === 'string' ? cfg.reflection_lm : null,
+    ),
+    judgeLm: extractRoleBinding(
+      cfg,
+      'judge_lm_config',
+      null,
+      typeof cfg?.judge_lm === 'string' ? cfg.judge_lm : null,
+    ),
+    decisionLm: extractRoleBinding(
+      cfg,
+      'decision_lm',
+      job.decision_provider_id ?? null,
+      job.resolved_decision_model,
+    ),
+  }
+}
 
 export function OptimizationPage({ api }: { api: FleetApi }) {
   const {
@@ -32,6 +110,7 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
     setSelectedJobId,
     selectedJob,
     liveJob,
+    streamWarning,
     loading,
     loadingSelected,
     error,
@@ -50,6 +129,68 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
   const [activeTab, setActiveTab] = useState<number>(TAB_INDEX.runs)
   const [launchOpen, setLaunchOpen] = useState(false)
   const [launchDefaults, setLaunchDefaults] = useState<LaunchDefaults>({})
+  const [diffJob, setDiffJob] = useState<OptimizationJobDetail | null>(null)
+  const [guideOpen, setGuideOpen] = useState(false)
+
+  const [providers, setProviders] = useState<LLMProviderView[] | null>(null)
+  const [encryptionConfigured, setEncryptionConfigured] = useState(true)
+  const [allowPrivateEndpoints, setAllowPrivateEndpoints] = useState(false)
+  const [loadingProviders, setLoadingProviders] = useState(true)
+  const providersControllerRef = useRef<AbortController | null>(null)
+
+  const refreshProviders = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      providersControllerRef.current?.abort()
+      const controller = new AbortController()
+      providersControllerRef.current = controller
+      if (!opts?.silent) setLoadingProviders(true)
+      try {
+        const res = await api.listOptimizationProviders(controller.signal)
+        if (controller.signal.aborted) return
+        setProviders(res.providers)
+        setEncryptionConfigured(res.encryption_configured)
+        setAllowPrivateEndpoints(res.allow_private_endpoints)
+      } catch (failure) {
+        if (!controller.signal.aborted) {
+          setProviders((current) => current ?? [])
+          // Only surface provider fetch errors if user is on the Providers tab or no primary error exists.
+          setError((current) => current || errorMessage(failure))
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoadingProviders(false)
+      }
+    },
+    [api, setError],
+  )
+
+  useEffect(() => {
+    const controller = new AbortController()
+    providersControllerRef.current = controller
+    void api
+      .listOptimizationProviders(controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return
+        setProviders(res.providers)
+        setEncryptionConfigured(res.encryption_configured)
+        setAllowPrivateEndpoints(res.allow_private_endpoints)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setProviders((current) => current ?? [])
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingProviders(false)
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [api])
+
+  const effectiveEncryptionConfigured =
+    overview?.capabilities.credentials_encryption_enabled ?? encryptionConfigured
+  const effectiveAllowPrivateEndpoints =
+    overview?.capabilities.allow_private_llm_endpoints ?? allowPrivateEndpoints
 
   const activeOverviewJob = overview?.targets.find((item) => item.active_job)?.active_job ?? null
   const activeRunForBanner =
@@ -59,6 +200,10 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
   function openLaunch(defaults: LaunchDefaults = {}) {
     setLaunchDefaults(defaults)
     setLaunchOpen(true)
+  }
+
+  async function handleRefreshEverything() {
+    await Promise.all([refreshAll(), refreshProviders()])
   }
 
   async function handleCancel(jobId: string) {
@@ -74,25 +219,15 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
     jobId: string,
     opts: { confirm_non_qualifying: boolean; pin_decision_model: boolean },
   ) {
-    try {
-      await api.promoteOptimizationJob(jobId, opts)
-      setAnnouncement('Artifact promoted to live traffic.')
-      await refreshAll({ silent: true })
-    } catch (failure) {
-      setError(errorMessage(failure))
-      throw failure
-    }
+    await api.promoteOptimizationJob(jobId, opts)
+    setAnnouncement('Artifact promoted to live traffic.')
+    await refreshAll({ silent: true })
   }
 
   async function handleRollback(target: OptimizationTarget, mode: 'previous' | 'env') {
-    try {
-      await api.rollbackOptimizationTarget(target, { mode })
-      setAnnouncement(`Rolled back ${target} optimization target.`)
-      await refreshAll({ silent: true })
-    } catch (failure) {
-      setError(errorMessage(failure))
-      throw failure
-    }
+    await api.rollbackOptimizationTarget(target, { mode })
+    setAnnouncement(`Rolled back ${target} optimization target.`)
+    await refreshAll({ silent: true })
   }
 
   return (
@@ -103,10 +238,13 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => void refreshAll()}
+            onClick={() => void handleRefreshEverything()}
             disabled={loading}
           >
-            <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            <RefreshCw
+              className={`size-3.5 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`}
+              aria-hidden="true"
+            />
             Refresh
           </Button>
           <Button
@@ -134,10 +272,20 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
             <Alert variant="destructive">
               <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
                 <span>{error}</span>
-                <Button variant="outline" size="sm" onClick={() => void refreshAll()}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRefreshEverything()}
+                >
                   Retry
                 </Button>
               </AlertDescription>
+            </Alert>
+          )}
+
+          {streamWarning && streamWarning !== error && (
+            <Alert>
+              <AlertDescription>{streamWarning}</AlertDescription>
             </Alert>
           )}
 
@@ -167,46 +315,112 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
             >
               <TabsItem index={TAB_INDEX.runs} icon={Activity} label="Runs" />
               <TabsItem index={TAB_INDEX.datasets} icon={Database} label="Datasets" />
+              <TabsItem index={TAB_INDEX.providers} icon={KeyRound} label="Providers" />
               <TabsItem index={TAB_INDEX.cli} icon={Terminal} label="CLI & Environment" />
             </Tabs>
 
             <TabsPanel index={TAB_INDEX.runs} selectedIndex={activeTab} idPrefix="optimization-tabs">
-              <RunHistorySection
-                overview={overview}
-                jobs={jobs}
-                loading={loading}
-                selectedJobId={selectedJobId}
-                selectedJob={selectedJob}
-                loadingSelected={loadingSelected}
-                targetFilter={targetFilter}
-                statusFilter={statusFilter}
-                onTargetFilterChange={setTargetFilter}
-                onStatusFilterChange={setStatusFilter}
-                onSelectJob={setSelectedJobId}
-                onPromote={handlePromote}
-                onRerun={(job) =>
-                  openLaunch({
-                    target: job.target,
-                    datasetId:
-                      job.dataset_source === 'custom' && job.dataset_id
-                        ? job.dataset_id
-                        : job.dataset_source === 'builtin'
-                          ? `builtin:${job.target}`
-                          : 'db',
-                    programKind: (job.program_kind === 'flex' ? 'flex' : 'rlm') as 'rlm' | 'flex',
-                    seed: typeof job.config_json?.seed === 'number' ? job.config_json.seed : 0,
-                    maxMetricCalls:
-                      typeof job.config_json?.max_metric_calls === 'number'
-                        ? job.config_json.max_metric_calls
-                        : 80,
-                    holdoutRepeats:
-                      typeof job.config_json?.holdout_repeats === 'number'
-                        ? job.config_json.holdout_repeats
-                        : 3,
-                  })
-                }
-                onLaunchFirst={() => openLaunch({})}
-              />
+              <div className="flex flex-col gap-4">
+                {/* Collapsible plain-English process guide */}
+                <div className="rounded-xl border bg-card">
+                  <button
+                    type="button"
+                    aria-expanded={guideOpen}
+                    onClick={() => setGuideOpen((prev) => !prev)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                    data-testid="how-optimization-works-toggle"
+                  >
+                    <span className="flex items-center gap-2">
+                      <HelpCircle className="size-4 text-muted-foreground" aria-hidden="true" />
+                      <span
+                        className={`${typeClass('body')} text-foreground`}
+                        style={{ fontVariationSettings: fontWeights.semibold }}
+                      >
+                        How optimization works
+                      </span>
+                      <span className={`${typeClass('caption')} hidden text-muted-foreground sm:inline`}>
+                        Prepare dataset → Run isolated eval → Review diff &amp; gate checks → Apply
+                        live or roll back
+                      </span>
+                    </span>
+                    <ChevronDown
+                      className={`size-4 shrink-0 text-muted-foreground transition-transform duration-160 ${guideOpen ? 'rotate-180' : ''}`}
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  {guideOpen && (
+                    <ol className="grid grid-cols-1 gap-3 border-t border-border/60 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <li className="flex flex-col gap-1">
+                        <span
+                          className={`${typeClass('caption')} text-foreground`}
+                          style={{ fontVariationSettings: fontWeights.semibold }}
+                        >
+                          1. Prepare dataset
+                        </span>
+                        <span className={`${typeClass('caption')} text-muted-foreground`}>
+                          Use a built-in eval set or upload a validated JSONL dataset to Neon Object
+                          Storage or a managed Daytona Volume.
+                        </span>
+                      </li>
+                      <li className="flex flex-col gap-1">
+                        <span
+                          className={`${typeClass('caption')} text-foreground`}
+                          style={{ fontVariationSettings: fontWeights.semibold }}
+                        >
+                          2. Run isolated eval
+                        </span>
+                        <span className={`${typeClass('caption')} text-muted-foreground`}>
+                          ReAnchor (Skills/Memory) or GEPA (Root RLM) executes against an isolated
+                          Neon branch using your selected LLM providers.
+                        </span>
+                      </li>
+                      <li className="flex flex-col gap-1">
+                        <span
+                          className={`${typeClass('caption')} text-foreground`}
+                          style={{ fontVariationSettings: fontWeights.semibold }}
+                        >
+                          3. Review diff &amp; gate checks
+                        </span>
+                        <span className={`${typeClass('caption')} text-muted-foreground`}>
+                          Inspect the Promotion Gate Checklist, unified prompt or parameter diffs,
+                          and per-example holdout regressions before applying.
+                        </span>
+                      </li>
+                      <li className="flex flex-col gap-1">
+                        <span
+                          className={`${typeClass('caption')} text-foreground`}
+                          style={{ fontVariationSettings: fontWeights.semibold }}
+                        >
+                          4. Apply live or roll back
+                        </span>
+                        <span className={`${typeClass('caption')} text-muted-foreground`}>
+                          Promoting activates the SHA-256 verified artifact immediately across all
+                          workers; rollback reverts cleanly to a prior promotion or baseline.
+                        </span>
+                      </li>
+                    </ol>
+                  )}
+                </div>
+
+                <RunHistorySection
+                  overview={overview}
+                  jobs={jobs}
+                  loading={loading}
+                  selectedJobId={selectedJobId}
+                  selectedJob={selectedJob}
+                  loadingSelected={loadingSelected}
+                  targetFilter={targetFilter}
+                  statusFilter={statusFilter}
+                  onTargetFilterChange={setTargetFilter}
+                  onStatusFilterChange={setStatusFilter}
+                  onSelectJob={setSelectedJobId}
+                  onPromote={handlePromote}
+                  onRerun={(job) => openLaunch(rerunDefaultsForJob(job))}
+                  onOpenFullDiff={(job) => setDiffJob(job)}
+                  onLaunchFirst={() => openLaunch({})}
+                />
+              </div>
             </TabsPanel>
 
             <TabsPanel
@@ -217,6 +431,7 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
               <DatasetsSection
                 api={api}
                 datasets={datasets}
+                capabilities={overview?.capabilities ?? null}
                 loading={loading}
                 onUploaded={(created) => {
                   setAnnouncement(`Uploaded dataset ${created.name}.`)
@@ -229,6 +444,24 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
                 onRunWithDataset={(dataset) =>
                   openLaunch({ target: dataset.target, datasetId: dataset.id })
                 }
+              />
+            </TabsPanel>
+
+            <TabsPanel
+              index={TAB_INDEX.providers}
+              selectedIndex={activeTab}
+              idPrefix="optimization-tabs"
+            >
+              <ProvidersSection
+                api={api}
+                providers={providers}
+                encryptionConfigured={effectiveEncryptionConfigured}
+                allowPrivateEndpoints={effectiveAllowPrivateEndpoints}
+                loading={loadingProviders}
+                onChanged={async (msg) => {
+                  if (msg) setAnnouncement(msg)
+                  await refreshProviders({ silent: true })
+                }}
               />
             </TabsPanel>
 
@@ -245,8 +478,23 @@ export function OptimizationPage({ api }: { api: FleetApi }) {
         api={api}
         capabilities={overview?.capabilities ?? null}
         datasets={datasets ?? []}
+        providers={providers ?? []}
         defaults={launchDefaults}
         onStarted={trackStartedJob}
+        onManageProviders={() => setActiveTab(TAB_INDEX.providers)}
+        onProviderRefreshed={(updated) => {
+          setProviders((current) =>
+            current ? current.map((item) => (item.id === updated.id ? updated : item)) : [updated],
+          )
+        }}
+      />
+
+      <RunFullDiffSheet
+        job={diffJob}
+        open={Boolean(diffJob)}
+        onOpenChange={(open) => {
+          if (!open) setDiffJob(null)
+        }}
       />
     </>
   )

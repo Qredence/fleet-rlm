@@ -1,5 +1,6 @@
 import { Brain, Code2, Package, Play, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,33 +14,47 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { type OptimizationOverview, type OptimizationTarget, type TargetStatusSummary } from '@/lib/api'
+import {
+  errorMessage,
+  type OptimizationOverview,
+  type OptimizationTarget,
+  type TargetStatusSummary,
+} from '@/lib/api'
 import { Elevated } from '@/lib/elevated'
 import { fontWeights } from '@/lib/font-weight'
 import { typeClass } from '@/lib/type-scale'
 
 const TARGET_META: Record<
   OptimizationTarget,
-  { title: string; subtitle: string; icon: typeof Package }
+  { title: string; subtitle: string; plainGuide: string; icon: typeof Package }
 > = {
   skills: {
     title: 'Skill Selector',
-    subtitle: 'ReAnchor per-turn Jev routing thresholds',
+    subtitle: 'ReAnchor per-turn routing thresholds',
+    plainGuide:
+      'Runs before each chat turn to pick which workspace skills to load, avoiding noisy context without missing needed skills.',
     icon: Package,
   },
   memory: {
     title: 'Memory Gate',
-    subtitle: 'ReAnchor consolidation save & scope gate',
+    subtitle: 'ReAnchor save, action & scope gate',
+    plainGuide:
+      'Runs during turn consolidation to decide whether to save a memory and its scope, cutting false-positive saves.',
     icon: Brain,
   },
   rlm: {
     title: 'Root RLM',
-    subtitle: 'GEPA instruction & sandbox action budget',
+    subtitle: 'GEPA instruction & sandbox budget',
+    plainGuide:
+      'Guides the sandboxed Python agent during chat turns; GEPA evolves prompt instructions with strict regression checks.',
     icon: Code2,
   },
 }
 
-const SOURCE_BADGE: Record<TargetStatusSummary['source'], { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+const SOURCE_BADGE: Record<
+  TargetStatusSummary['source'],
+  { label: string; variant: 'default' | 'secondary' | 'outline' }
+> = {
   promoted: { label: 'Promoted', variant: 'default' },
   env: { label: 'Env artifact', variant: 'secondary' },
   default: { label: 'Default baseline', variant: 'outline' },
@@ -50,7 +65,10 @@ function formatScore(score: number | null | undefined): string {
   return `${(score * 100).toFixed(1)}%`
 }
 
-function formatDelta(baseline: number | null | undefined, optimized: number | null | undefined): string | null {
+function formatDelta(
+  baseline: number | null | undefined,
+  optimized: number | null | undefined,
+): string | null {
   if (
     baseline === null ||
     baseline === undefined ||
@@ -64,6 +82,18 @@ function formatDelta(baseline: number | null | undefined, optimized: number | nu
   const delta = (optimized - baseline) * 100
   const sign = delta >= 0 ? '+' : ''
   return `${sign}${delta.toFixed(1)} pts`
+}
+
+function formatTimestamp(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 export function TargetSummaryGrid({
@@ -81,6 +111,7 @@ export function TargetSummaryGrid({
     summary: TargetStatusSummary
     mode: 'previous' | 'env'
     submitting: boolean
+    error: string
   } | null>(null)
 
   if (!overview && loading) {
@@ -110,6 +141,7 @@ export function TargetSummaryGrid({
   }
 
   const targets = overview?.targets ?? []
+  const previousPromo = rollbackState?.summary.previous_promotion ?? null
 
   return (
     <>
@@ -118,9 +150,14 @@ export function TargetSummaryGrid({
           const meta = TARGET_META[summary.target]
           const Icon = meta.icon
           const badge = SOURCE_BADGE[summary.source]
-          const delta = formatDelta(summary.latest_job?.baseline_score, summary.latest_job?.optimized_score)
+          const delta = formatDelta(
+            summary.latest_job?.baseline_score,
+            summary.latest_job?.optimized_score,
+          )
           const hasActive = Boolean(summary.active_job)
           const shaShort = summary.active_promotion?.artifact_sha256.slice(0, 12)
+          const pinnedProvider = summary.active_promotion?.decision_provider_name
+          const pinnedModel = summary.active_promotion?.resolved_decision_model
 
           return (
             <Elevated
@@ -130,25 +167,33 @@ export function TargetSummaryGrid({
               data-testid={`target-card-${summary.target}`}
               className="opt-subgrid-card min-w-0 rounded-xl p-4 ring-1 ring-foreground/10"
             >
-              {/* Subgrid Row 1: Title & active source badge */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-start gap-2.5">
-                  <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <h2
-                      className={`${typeClass('subtitle')} truncate text-foreground`}
-                      style={{ fontVariationSettings: fontWeights.semibold }}
-                    >
-                      {meta.title}
-                    </h2>
-                    <p className={`${typeClass('caption')} text-muted-foreground`}>
-                      {meta.subtitle}
-                    </p>
+              {/* Subgrid Row 1: Title, plain-English role & active source badge */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <Icon
+                      className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <h2
+                        className={`${typeClass('subtitle')} truncate text-foreground`}
+                        style={{ fontVariationSettings: fontWeights.semibold }}
+                      >
+                        {meta.title}
+                      </h2>
+                      <p className={`${typeClass('caption')} text-muted-foreground`}>
+                        {meta.subtitle}
+                      </p>
+                    </div>
                   </div>
+                  <Badge variant={badge.variant} className="shrink-0">
+                    {badge.label}
+                  </Badge>
                 </div>
-                <Badge variant={badge.variant} className="shrink-0">
-                  {badge.label}
-                </Badge>
+                <p className={`${typeClass('caption')} text-muted-foreground/90`}>
+                  {meta.plainGuide}
+                </p>
               </div>
 
               {/* Subgrid Row 2: Active artifact & pinned model provenance */}
@@ -159,11 +204,14 @@ export function TargetSummaryGrid({
                       <span className="text-muted-foreground">Artifact SHA</span>
                       <code className="truncate font-mono text-foreground">{shaShort}</code>
                     </div>
-                    {summary.active_promotion.resolved_decision_model && (
+                    {pinnedModel && (
                       <div className={`${typeClass('caption')} flex items-center justify-between gap-2`}>
                         <span className="text-muted-foreground">Pinned model</span>
-                        <span className="truncate font-mono text-foreground">
-                          {summary.active_promotion.resolved_decision_model}
+                        <span
+                          className="truncate font-mono text-foreground"
+                          title={pinnedProvider ? `${pinnedProvider} · ${pinnedModel}` : pinnedModel}
+                        >
+                          {pinnedProvider ? `${pinnedProvider} · ${pinnedModel}` : pinnedModel}
                         </span>
                       </div>
                     )}
@@ -236,6 +284,7 @@ export function TargetSummaryGrid({
                         summary,
                         mode: summary.can_rollback_previous ? 'previous' : 'env',
                         submitting: false,
+                        error: '',
                       })
                     }
                     data-testid={`rollback-target-${summary.target}`}
@@ -256,41 +305,117 @@ export function TargetSummaryGrid({
           if (!open && !rollbackState?.submitting) setRollbackState(null)
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               Roll back {rollbackState ? TARGET_META[rollbackState.summary.target].title : ''}?
             </AlertDialogTitle>
             <AlertDialogDescription>
               {rollbackState?.mode === 'previous'
-                ? 'Reverts live traffic to the previously promoted artifact for this target, without restarting backend workers.'
+                ? 'Reverts live traffic to the previously promoted artifact for this target immediately, without restarting backend workers.'
                 : 'Clears the promoted runtime override and restores the deployment environment or default baseline artifact.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {rollbackState?.summary.can_rollback_previous && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={rollbackState.mode === 'previous' ? 'default' : 'outline'}
-                onClick={() =>
-                  setRollbackState((prev) => (prev ? { ...prev, mode: 'previous' } : prev))
-                }
+
+          {rollbackState && (
+            <div className="flex flex-col gap-3">
+              {rollbackState.summary.can_rollback_previous && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={rollbackState.mode === 'previous' ? 'default' : 'outline'}
+                    onClick={() =>
+                      setRollbackState((prev) =>
+                        prev ? { ...prev, mode: 'previous', error: '' } : prev,
+                      )
+                    }
+                  >
+                    Previous promotion
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={rollbackState.mode === 'env' ? 'default' : 'outline'}
+                    onClick={() =>
+                      setRollbackState((prev) =>
+                        prev ? { ...prev, mode: 'env', error: '' } : prev,
+                      )
+                    }
+                  >
+                    Env / Default baseline
+                  </Button>
+                </div>
+              )}
+
+              {/* Exact restoration preview */}
+              <div
+                className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3"
+                data-testid="rollback-preview"
               >
-                Previous promotion
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={rollbackState.mode === 'env' ? 'default' : 'outline'}
-                onClick={() =>
-                  setRollbackState((prev) => (prev ? { ...prev, mode: 'env' } : prev))
-                }
-              >
-                Env / Default baseline
-              </Button>
+                <p
+                  className={`${typeClass('caption')} text-foreground`}
+                  style={{ fontVariationSettings: fontWeights.semibold }}
+                >
+                  Will restore:
+                </p>
+                {rollbackState.mode === 'previous' && previousPromo ? (
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    <div>
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>Artifact SHA</dt>
+                      <dd className={`${typeClass('caption')} font-mono text-foreground`}>
+                        {previousPromo.artifact_sha256.slice(0, 12)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>Holdout score</dt>
+                      <dd className={`${typeClass('caption')} font-mono tabular-nums text-foreground`}>
+                        {formatScore(previousPromo.optimized_score)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>Pinned model</dt>
+                      <dd className={`${typeClass('caption')} truncate font-mono text-foreground`}>
+                        {previousPromo.decision_provider_name
+                          ? `${previousPromo.decision_provider_name} · ${previousPromo.resolved_decision_model ?? 'default'}`
+                          : (previousPromo.resolved_decision_model ?? 'Workspace default')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className={`${typeClass('caption')} text-muted-foreground`}>Promoted</dt>
+                      <dd className={`${typeClass('caption')} text-foreground`}>
+                        {formatTimestamp(previousPromo.promoted_at)}
+                      </dd>
+                    </div>
+                  </dl>
+                ) : rollbackState.mode === 'previous' ? (
+                  <p className={`${typeClass('caption')} text-muted-foreground`}>
+                    Previous promoted artifact for {TARGET_META[rollbackState.summary.target].title}.
+                  </p>
+                ) : rollbackState.summary.env_path ? (
+                  <div className="flex flex-col gap-0.5">
+                    <span className={`${typeClass('caption')} text-muted-foreground`}>
+                      Deployment environment artifact
+                    </span>
+                    <code className={`${typeClass('caption')} break-all font-mono text-foreground`}>
+                      {rollbackState.summary.env_path}
+                    </code>
+                  </div>
+                ) : (
+                  <p className={`${typeClass('caption')} text-foreground`}>
+                    Built-in DSPy baseline (no artifact override).
+                  </p>
+                )}
+              </div>
+
+              {rollbackState.error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{rollbackState.error}</AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={rollbackState?.submitting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
@@ -298,12 +423,14 @@ export function TargetSummaryGrid({
               onClick={async () => {
                 if (!rollbackState) return
                 const { summary, mode } = rollbackState
-                setRollbackState({ ...rollbackState, submitting: true })
+                setRollbackState((prev) => (prev ? { ...prev, submitting: true, error: '' } : prev))
                 try {
                   await onRollbackTarget(summary.target, mode)
                   setRollbackState(null)
-                } finally {
-                  setRollbackState((prev) => (prev ? { ...prev, submitting: false } : null))
+                } catch (failure) {
+                  setRollbackState((prev) =>
+                    prev ? { ...prev, submitting: false, error: errorMessage(failure) } : null,
+                  )
                 }
               }}
             >

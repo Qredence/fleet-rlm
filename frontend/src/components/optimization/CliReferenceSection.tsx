@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/badge'
 import {
   CodeBlock,
   CodeBlockActions,
@@ -6,6 +7,7 @@ import {
   CodeBlockHeader,
   CodeBlockTitle,
 } from '@/components/ui/code-block'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { OptimizationCapabilities } from '@/lib/api'
 import { fontWeights } from '@/lib/font-weight'
 import { typeClass } from '@/lib/type-scale'
@@ -47,15 +49,20 @@ export function CliReferenceSection({
         </h2>
         <p className={`${typeClass('body')} text-muted-foreground`}>
           Run these commands from <code>backend/</code> with <code>NEON_BRANCH_URL</code> pointed
-          at an isolated Neon branch. Pin the exact TypeSafe Jev snapshot in{' '}
-          <code>FLEET_DECISION_MODEL</code> when deploying ReAnchor artifacts.
+          at an isolated Neon branch. Promoted ReAnchor artifacts pin their calibrated{' '}
+          <code>(provider, decision_model)</code> per target automatically.
         </p>
         {CLI_SNIPPETS.map(({ target, title, command }) => (
           <CodeBlock key={target} size="sm">
             <CodeBlockHeader>
               <CodeBlockTitle>{title}</CodeBlockTitle>
               <CodeBlockActions>
-                <CodeBlockCopyButton value={command} aria-label={`Copy ${title} command`} />
+                <Tooltip>
+                  <TooltipTrigger render={<span className="inline-flex" />}>
+                    <CodeBlockCopyButton value={command} aria-label={`Copy ${title} command`} />
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Copy CLI command</TooltipContent>
+                </Tooltip>
               </CodeBlockActions>
             </CodeBlockHeader>
             <CodeBlockContent wrap>{command}</CodeBlockContent>
@@ -68,10 +75,10 @@ export function CliReferenceSection({
           className={typeClass('subtitle')}
           style={{ fontVariationSettings: fontWeights.semibold }}
         >
-          Runtime environment &amp; branch safety
+          Runtime environment &amp; security policy
         </h3>
         {capabilities ? (
-          <dl className="grid gap-2.5">
+          <dl className="grid gap-3">
             <div className="flex flex-col gap-0.5">
               <dt className={`${typeClass('caption')} text-muted-foreground`}>Decision model</dt>
               <dd className={`${typeClass('body')} wrap-anywhere font-mono text-foreground`}>
@@ -84,13 +91,59 @@ export function CliReferenceSection({
                 {capabilities.llm_model} · {capabilities.sub_llm_model}
               </dd>
             </div>
+            <div className="flex flex-col gap-0.5 border-t border-border/60 pt-2.5">
+              <dt className={`${typeClass('caption')} text-muted-foreground`}>
+                Dataset storage backends
+              </dt>
+              <dd className="mt-1 flex flex-wrap gap-1.5">
+                <Badge variant={capabilities.neon_storage_enabled === false ? 'outline' : 'secondary'}>
+                  Neon S3: {capabilities.neon_storage_enabled === false ? 'Unavailable' : 'Ready'}
+                </Badge>
+                <Badge variant={capabilities.daytona_volume_enabled ? 'default' : 'outline'}>
+                  Daytona Volume:{' '}
+                  {capabilities.daytona_volume_enabled
+                    ? capabilities.daytona_dataset_volume || 'fleet-eval-datasets'
+                    : 'Not configured'}
+                </Badge>
+              </dd>
+            </div>
             <div className="flex flex-col gap-0.5">
+              <dt className={`${typeClass('caption')} text-muted-foreground`}>
+                Provider credentials encryption
+              </dt>
+              <dd className={`${typeClass('body')} text-foreground`}>
+                {capabilities.credentials_encryption_enabled
+                  ? 'Configured (Fernet AEAD active)'
+                  : 'Not configured — keyless local providers only'}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className={`${typeClass('caption')} text-muted-foreground`}>
+                Private / local LLM endpoints
+              </dt>
+              <dd className={`${typeClass('body')} text-foreground`}>
+                {capabilities.allow_private_llm_endpoints
+                  ? 'Allowed (localhost / RFC1918 enabled; IMDS still blocked)'
+                  : 'Blocked by default (public HTTPS endpoints only)'}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className={`${typeClass('caption')} text-muted-foreground`}>
+                Local DSPy interpreter fallback
+              </dt>
+              <dd className={`${typeClass('body')} text-foreground`}>
+                {capabilities.allow_local_interpreter
+                  ? 'Enabled (FLEET_ALLOW_LOCAL_INTERPRETER=true)'
+                  : 'Disabled (isolated Daytona sandboxes required)'}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5 border-t border-border/60 pt-2.5">
               <dt className={`${typeClass('caption')} text-muted-foreground`}>
                 Configured optimization branch
               </dt>
               <dd className={`${typeClass('body')} wrap-anywhere text-foreground`}>
                 {capabilities.configured_branch_enabled
-                  ? capabilities.configured_branch_label ?? 'Configured'
+                  ? (capabilities.configured_branch_label ?? 'Configured')
                   : 'Not configured'}
               </dd>
             </div>

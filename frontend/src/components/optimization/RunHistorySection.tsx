@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -23,10 +23,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { StatusFilter, TargetFilter } from '@/hooks/use-optimizations'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import type { StatusFilter, TargetFilter } from '@/hooks/use-optimizations'
 import type {
   OptimizationJobDetail,
+  OptimizationJobStatus,
   OptimizationJobSummary,
   OptimizationOverview,
 } from '@/lib/api'
@@ -39,6 +40,17 @@ const TARGET_LABEL = {
   memory: 'Memory Gate',
   rlm: 'Root RLM',
 } as const
+
+const STATUS_BADGE: Record<
+  OptimizationJobStatus,
+  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }
+> = {
+  queued: { label: 'Queued', variant: 'outline' },
+  running: { label: 'Running', variant: 'default' },
+  completed: { label: 'Completed', variant: 'secondary' },
+  failed: { label: 'Failed', variant: 'destructive' },
+  cancelled: { label: 'Cancelled', variant: 'outline' },
+}
 
 function formatScore(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
@@ -70,6 +82,7 @@ export function RunHistorySection({
   onSelectJob,
   onPromote,
   onRerun,
+  onOpenFullDiff,
   onLaunchFirst,
 }: {
   overview: OptimizationOverview | null
@@ -88,19 +101,31 @@ export function RunHistorySection({
     opts: { confirm_non_qualifying: boolean; pin_decision_model: boolean },
   ) => Promise<void>
   onRerun: (job: OptimizationJobSummary) => void
+  onOpenFullDiff?: (job: OptimizationJobDetail) => void
   onLaunchFirst: () => void
 }) {
   const isWide = useMediaQuery('(min-width: 80rem)')
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
 
   const selectedIndex =
     jobs && selectedJobId ? jobs.findIndex((item) => item.id === selectedJobId) : -1
-  const activePromotionJobId =
-    overview?.targets.find((item) => item.target === selectedJob?.target)?.active_promotion?.job_id ?? null
+  const activeTargetSummary =
+    overview?.targets.find((item) => item.target === selectedJob?.target) ?? null
+  const activePromotionJobId = activeTargetSummary?.active_promotion?.job_id ?? null
 
-  const handleRowSelect = (jobId: string) => {
+  const handleRowSelect = (jobId: string, openDrawerOnNarrow = true) => {
     onSelectJob(jobId)
-    if (!isWide) setDrawerOpen(true)
+    if (!isWide && openDrawerOnNarrow) setDrawerOpen(true)
+  }
+
+  const moveFocusByOffset = (currentIndex: number, offset: number) => {
+    if (!jobs || jobs.length === 0) return
+    const nextIndex = Math.max(0, Math.min(jobs.length - 1, currentIndex + offset))
+    const nextJob = jobs[nextIndex]
+    if (!nextJob) return
+    onSelectJob(nextJob.id)
+    rowRefs.current.get(nextJob.id)?.focus()
   }
 
   return (
@@ -118,10 +143,18 @@ export function RunHistorySection({
             >
               <SelectTrigger aria-label="Filter runs by target" placeholder="All targets" />
               <SelectContent>
-                <SelectItem index={0} value="all">All targets</SelectItem>
-                <SelectItem index={1} value="skills">Skill Selector</SelectItem>
-                <SelectItem index={2} value="memory">Memory Gate</SelectItem>
-                <SelectItem index={3} value="rlm">Root RLM</SelectItem>
+                <SelectItem index={0} value="all">
+                  All targets
+                </SelectItem>
+                <SelectItem index={1} value="skills">
+                  Skill Selector
+                </SelectItem>
+                <SelectItem index={2} value="memory">
+                  Memory Gate
+                </SelectItem>
+                <SelectItem index={3} value="rlm">
+                  Root RLM
+                </SelectItem>
               </SelectContent>
             </Select>
 
@@ -132,11 +165,24 @@ export function RunHistorySection({
             >
               <SelectTrigger aria-label="Filter runs by status" placeholder="All statuses" />
               <SelectContent>
-                <SelectItem index={0} value="all">All statuses</SelectItem>
-                <SelectItem index={1} value="running">Running</SelectItem>
-                <SelectItem index={2} value="completed">Completed</SelectItem>
-                <SelectItem index={3} value="failed">Failed</SelectItem>
-                <SelectItem index={4} value="cancelled">Cancelled</SelectItem>
+                <SelectItem index={0} value="all">
+                  All statuses
+                </SelectItem>
+                <SelectItem index={1} value="queued">
+                  Queued
+                </SelectItem>
+                <SelectItem index={2} value="running">
+                  Running
+                </SelectItem>
+                <SelectItem index={3} value="completed">
+                  Completed
+                </SelectItem>
+                <SelectItem index={4} value="failed">
+                  Failed
+                </SelectItem>
+                <SelectItem index={5} value="cancelled">
+                  Cancelled
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -146,7 +192,7 @@ export function RunHistorySection({
           tabIndex={0}
           role="region"
           aria-labelledby="opt-runs-caption"
-          className="opt-table-wrapper rounded-xl border bg-card focus-visible:outline-2 focus-visible:outline-ring"
+          className="opt-table-wrapper rounded-xl border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {loading && !jobs ? (
             <div className="flex flex-col gap-2 p-4" role="status" aria-label="Loading optimization runs">
@@ -189,22 +235,41 @@ export function RunHistorySection({
                   />
                 ) : (
                   jobs.map((job, idx) => {
+                    const isSelected = job.id === selectedJobId
                     const isPromoted = overview?.targets.some(
                       (item) => item.active_promotion?.job_id === job.id,
                     )
+                    const statusBadge = STATUS_BADGE[job.status]
                     return (
                       <TableRow
                         key={job.id}
+                        ref={(node) => {
+                          if (node) rowRefs.current.set(job.id, node)
+                          else rowRefs.current.delete(job.id)
+                        }}
                         index={idx}
                         tabIndex={0}
+                        aria-selected={isSelected}
                         onClick={() => handleRowSelect(job.id)}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault()
                             handleRowSelect(job.id)
+                          } else if (event.key === 'ArrowDown') {
+                            event.preventDefault()
+                            moveFocusByOffset(idx, 1)
+                          } else if (event.key === 'ArrowUp') {
+                            event.preventDefault()
+                            moveFocusByOffset(idx, -1)
+                          } else if (event.key === 'Home') {
+                            event.preventDefault()
+                            moveFocusByOffset(0, 0)
+                          } else if (event.key === 'End' && jobs.length > 0) {
+                            event.preventDefault()
+                            moveFocusByOffset(jobs.length - 1, 0)
                           }
                         }}
-                        className="cursor-pointer outline-none"
+                        className="cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                         data-testid={`run-row-${job.id}`}
                       >
                         <TableCell data-label="Target">
@@ -216,9 +281,9 @@ export function RunHistorySection({
                           {job.dataset_name ?? job.dataset_source}
                         </TableCell>
                         <TableCell data-label="Status">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Badge variant="ghost">{job.status}</Badge>
-                            {isPromoted && <Badge variant="ghost">Active</Badge>}
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                            {isPromoted && <Badge variant="default">Active</Badge>}
                           </span>
                         </TableCell>
                         <TableCell data-label="Score" className="text-right tabular-nums">
@@ -245,22 +310,24 @@ export function RunHistorySection({
 
       {/* Desktop inline sticky inspector */}
       {isWide ? (
-        <div className="xl:sticky xl:top-4 xl:self-start">
+        <div className="min-w-0 xl:sticky xl:top-4 xl:self-start">
           <RunInspectorPanel
             job={selectedJob}
             loading={loadingSelected}
             activePromotionJobId={activePromotionJobId}
+            activeTargetSummary={activeTargetSummary}
             onPromote={onPromote}
             onRerun={onRerun}
+            onOpenFullDiff={onOpenFullDiff}
           />
         </div>
       ) : (
         <Sheet open={drawerOpen && Boolean(selectedJobId)} onOpenChange={setDrawerOpen}>
           <SheetContent side="right" className="w-full overflow-y-auto data-[side=right]:sm:max-w-xl">
-            <SheetHeader>
+            <SheetHeader className="pr-12">
               <SheetTitle>Optimization run details</SheetTitle>
               <SheetDescription>
-                Inspect holdout diagnostics, fitted weights, and promotion status.
+                Inspect holdout diagnostics, gate checks, fitted parameters, and promotion controls.
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-6">
@@ -268,11 +335,20 @@ export function RunHistorySection({
                 job={selectedJob}
                 loading={loadingSelected}
                 activePromotionJobId={activePromotionJobId}
+                activeTargetSummary={activeTargetSummary}
                 onPromote={onPromote}
                 onRerun={(job) => {
                   setDrawerOpen(false)
                   onRerun(job)
                 }}
+                onOpenFullDiff={
+                  onOpenFullDiff
+                    ? (job) => {
+                        setDrawerOpen(false)
+                        onOpenFullDiff(job)
+                      }
+                    : undefined
+                }
               />
             </div>
           </SheetContent>

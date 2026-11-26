@@ -97,6 +97,93 @@ export interface WorkspaceSettingsView {
 export type OptimizationTarget = 'skills' | 'memory' | 'rlm'
 export type OptimizationBranchMode = 'auto_neon' | 'configured_branch' | 'custom_branch' | 'direct_readonly'
 export type OptimizationJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type OptimizationStorageBackend = 'builtin' | 'neon' | 'daytona_volume'
+
+export type LLMProviderDialect =
+  | 'openai'
+  | 'openai_compatible'
+  | 'anthropic'
+  | 'gemini'
+  | 'openrouter'
+  | 'xai'
+  | 'groq'
+  | 'deepseek'
+  | 'ollama'
+  | 'vllm'
+  | 'typesafe'
+
+export type LLMProviderApiMode = 'auto' | 'chat' | 'responses'
+
+export interface LLMProviderModelItem {
+  id: string
+  label?: string
+  owned_by?: string
+}
+
+export interface LLMProviderView {
+  id: string
+  name: string
+  dialect: LLMProviderDialect
+  api_mode: LLMProviderApiMode
+  base_url: string | null
+  has_api_key: boolean
+  api_key_hint: string | null
+  default_model: string | null
+  cached_models: LLMProviderModelItem[]
+  last_tested_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LLMProviderListResponse {
+  providers: LLMProviderView[]
+  encryption_configured: boolean
+  allow_private_endpoints: boolean
+}
+
+export interface LLMProviderCreateRequest {
+  name: string
+  dialect: LLMProviderDialect
+  api_mode?: LLMProviderApiMode
+  base_url?: string | null
+  api_key?: string | null
+  default_model?: string | null
+}
+
+export interface LLMProviderUpdateRequest {
+  name?: string
+  dialect?: LLMProviderDialect
+  api_mode?: LLMProviderApiMode
+  base_url?: string | null
+  api_key?: string | null
+  default_model?: string | null
+}
+
+export interface LLMProviderProbeRequest {
+  provider_id?: string | null
+  dialect: LLMProviderDialect
+  api_mode?: LLMProviderApiMode
+  base_url?: string | null
+  api_key?: string | null
+}
+
+export interface LLMProviderProbeResponse {
+  ok: boolean
+  models: LLMProviderModelItem[]
+  count: number
+  error?: string | null
+}
+
+export interface LLMProviderRefreshModelsResponse {
+  provider: LLMProviderView
+  models: LLMProviderModelItem[]
+  count: number
+}
+
+export interface LMRoleSelection {
+  provider_id?: string | null
+  model?: string | null
+}
 
 export interface OptimizationPromotionView {
   id: string
@@ -106,9 +193,23 @@ export interface OptimizationPromotionView {
   artifact_sha256: string
   artifact_size_bytes: number
   resolved_decision_model: string | null
+  decision_provider_id?: string | null
+  decision_provider_name?: string | null
+  program_kind?: string | null
+  optimized_score?: number | null
+  baseline_score?: number | null
   active: boolean
   promoted_at: string
   rolled_back_at: string | null
+}
+
+export interface OptimizationStageTimelineEntry {
+  stage: string
+  label?: string
+  status?: string
+  started_at?: string | null
+  finished_at?: string | null
+  duration_seconds?: number | null
 }
 
 export interface OptimizationJobProgress {
@@ -120,6 +221,8 @@ export interface OptimizationJobProgress {
   baseline_score?: number | null
   best_score?: number | null
   message?: string | null
+  last_active_stage?: string | null
+  stage_timeline?: OptimizationStageTimelineEntry[]
   ts?: string
 }
 
@@ -144,6 +247,7 @@ export interface OptimizationJobSummary {
   artifact_sha256: string | null
   artifact_size_bytes: number | null
   resolved_decision_model: string | null
+  decision_provider_id?: string | null
   mlflow_run_id: string | null
   mlflow_experiment: string | null
   mlflow_run_url: string | null
@@ -164,6 +268,7 @@ export interface TargetStatusSummary {
   source: 'promoted' | 'env' | 'default'
   env_path: string | null
   active_promotion: OptimizationPromotionView | null
+  previous_promotion?: OptimizationPromotionView | null
   can_rollback_previous: boolean
   can_rollback_env: boolean
   latest_job: OptimizationJobSummary | null
@@ -177,6 +282,12 @@ export interface OptimizationCapabilities {
   mlflow_tracking_uri: string | null
   mlflow_experiment: string
   daytona_configured: boolean
+  neon_storage_enabled?: boolean
+  daytona_volume_enabled?: boolean
+  daytona_dataset_volume?: string
+  credentials_encryption_enabled?: boolean
+  allow_private_llm_endpoints?: boolean
+  allow_local_interpreter?: boolean
   decision_model: string
   llm_model: string
   sub_llm_model: string
@@ -192,6 +303,8 @@ export interface OptimizationDatasetSummary {
   name: string
   target: OptimizationTarget
   source: 'builtin' | 'custom'
+  storage_backend?: OptimizationStorageBackend
+  storage_volume?: string | null
   row_count: number
   size_bytes: number
   sha256: string | null
@@ -231,6 +344,11 @@ export interface OptimizationJobCreate {
   force?: boolean
   reflection_lm?: string | null
   judge_lm?: string | null
+  root_lm?: LMRoleSelection | null
+  sub_lm?: LMRoleSelection | null
+  reflection_lm_config?: LMRoleSelection | null
+  judge_lm_config?: LMRoleSelection | null
+  decision_lm?: LMRoleSelection | null
 }
 
 export interface PromoteJobRequest {
@@ -421,6 +539,25 @@ export function createApi(token?: string) {
         headers: { Accept: 'text/event-stream' },
         signal,
       }),
+    listOptimizationProviders: (signal?: AbortSignal) =>
+      json<LLMProviderListResponse>(`${optimizationsPath}/providers`, { signal }),
+    createOptimizationProvider: (payload: LLMProviderCreateRequest) =>
+      json<LLMProviderView>(`${optimizationsPath}/providers`, writeJson('POST', payload)),
+    updateOptimizationProvider: (id: string, payload: LLMProviderUpdateRequest) =>
+      json<LLMProviderView>(
+        `${optimizationsPath}/providers/${encodeURIComponent(id)}`,
+        writeJson('PATCH', payload),
+      ),
+    async deleteOptimizationProvider(id: string) {
+      await request(`${optimizationsPath}/providers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+    probeOptimizationProvider: (payload: LLMProviderProbeRequest) =>
+      json<LLMProviderProbeResponse>(`${optimizationsPath}/providers/probe`, writeJson('POST', payload)),
+    refreshOptimizationProviderModels: (id: string) =>
+      json<LLMProviderRefreshModelsResponse>(
+        `${optimizationsPath}/providers/${encodeURIComponent(id)}/models`,
+        { method: 'POST' },
+      ),
   }
 }
 
