@@ -1,0 +1,14 @@
+docs/evaluation-baseline.md
+  h_f276322eb5eb9f 218-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a4f62b00354929cf83d47f29507d07f49658fa6",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
