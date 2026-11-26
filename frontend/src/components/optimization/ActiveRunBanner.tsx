@@ -1,6 +1,6 @@
-import { ChevronDown, Square, X } from 'lucide-react'
+import { ChevronDown, Square } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +18,6 @@ import {
   BannerDescription,
   BannerTitle,
 } from '@/components/ui/banner'
-import { Button } from '@/components/ui/button'
 import {
   CodeBlock,
   CodeBlockActions,
@@ -27,13 +26,13 @@ import {
   CodeBlockHeader,
   CodeBlockTitle,
 } from '@/components/ui/code-block'
-import { ThinkingIndicator } from '@/components/ui/thinking-indicator'
 import {
   ThinkingStep,
   ThinkingSteps,
   ThinkingStepsContent,
   ThinkingStepsHeader,
 } from '@/components/ui/thinking-steps'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { OptimizationJobDetail, OptimizationTarget } from '@/lib/api'
 import { fontWeights } from '@/lib/font-weight'
 import { spring } from '@/lib/springs'
@@ -50,13 +49,29 @@ interface StageDefinition {
   label: string
 }
 
+interface StageTimelineEntry {
+  stage: string
+  status?: string
+  started_at?: string | null
+  finished_at?: string | null
+  duration_seconds?: number | null
+  duration_s?: number | null
+  duration_ms?: number | null
+  elapsed_seconds?: number | null
+}
+
 function stagesForJob(job: OptimizationJobDetail): StageDefinition[] {
   if (job.target === 'rlm') {
     const base: StageDefinition[] = [{ key: 'loading_dataset', label: 'Load dataset' }]
     if (job.config_json?.branch_mode === 'auto_neon') {
       base.unshift({ key: 'provisioning_branch', label: 'Provision Neon branch' })
     }
-    if (!job.config_json?.local_interpreter) {
+    const programKind =
+      job.program_kind ??
+      (typeof job.config_json?.program_kind === 'string' ? job.config_json.program_kind : null)
+    const isFlex = programKind === 'flex'
+    const isLocal = job.config_json?.local_interpreter === true
+    if (!isFlex && !isLocal) {
       base.push({ key: 'provisioning_sandboxes', label: 'Provision Daytona sandboxes' })
     }
     base.push(
@@ -80,9 +95,93 @@ function stagesForJob(job: OptimizationJobDetail): StageDefinition[] {
   return stages
 }
 
+function parseStageTimeline(progress: Record<string, unknown>): StageTimelineEntry[] {
+  const raw = progress.stage_timeline
+  if (!Array.isArray(raw)) return []
+  const entries: StageTimelineEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as Record<string, unknown>
+    if (typeof rec.stage !== 'string' || !rec.stage) continue
+    entries.push({
+      stage: rec.stage,
+      status: typeof rec.status === 'string' ? rec.status : undefined,
+      started_at: typeof rec.started_at === 'string' ? rec.started_at : null,
+      finished_at: typeof rec.finished_at === 'string' ? rec.finished_at : null,
+      duration_seconds: typeof rec.duration_seconds === 'number' ? rec.duration_seconds : null,
+      duration_s: typeof rec.duration_s === 'number' ? rec.duration_s : null,
+      duration_ms: typeof rec.duration_ms === 'number' ? rec.duration_ms : null,
+      elapsed_seconds: typeof rec.elapsed_seconds === 'number' ? rec.elapsed_seconds : null,
+    })
+  }
+  return entries
+}
+
+function formatStageDuration(entry: StageTimelineEntry | undefined): string | null {
+  if (!entry) return null
+  let seconds: number | null = null
+  if (typeof entry.duration_seconds === 'number' && Number.isFinite(entry.duration_seconds)) {
+    seconds = entry.duration_seconds
+  } else if (typeof entry.duration_s === 'number' && Number.isFinite(entry.duration_s)) {
+    seconds = entry.duration_s
+  } else if (typeof entry.elapsed_seconds === 'number' && Number.isFinite(entry.elapsed_seconds)) {
+    seconds = entry.elapsed_seconds
+  } else if (typeof entry.duration_ms === 'number' && Number.isFinite(entry.duration_ms)) {
+    seconds = entry.duration_ms / 1000
+  } else if (entry.started_at && entry.finished_at) {
+    const startMs = Date.parse(entry.started_at)
+    const endMs = Date.parse(entry.finished_at)
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+      seconds = (endMs - startMs) / 1000
+    }
+  }
+  if (seconds === null || seconds < 0) return null
+  if (seconds < 1) return `${Math.max(1, Math.round(seconds * 1000))}ms`
+  if (seconds < 10) return `${seconds.toFixed(1)}s`
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const rem = Math.round(seconds % 60)
+  return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`
+}
+
 function formatMetric(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   return `${(value * 100).toFixed(1)}%`
+}
+
+function resolveStageIndex(
+  stages: StageDefinition[],
+  currentStageKey: string,
+  timeline: StageTimelineEntry[],
+  progressRecord: Record<string, unknown>,
+  trackedStageKey: string | undefined,
+): number {
+  const indexOfStage = (key: string | undefined | null): number => {
+    if (!key) return -1
+    const exact = stages.findIndex((item) => item.key === key)
+    if (exact !== -1) return exact
+    if (key === 'starting' || key === 'queued') return stages.length > 0 ? 0 : -1
+    return -1
+  }
+
+  const direct = indexOfStage(currentStageKey)
+  if (direct !== -1) return direct
+
+  for (let i = timeline.length - 1; i >= 0; i -= 1) {
+    const idx = indexOfStage(timeline[i]?.stage)
+    if (idx !== -1) return idx
+  }
+
+  const lastFromProgress =
+    typeof progressRecord.last_active_stage === 'string'
+      ? indexOfStage(progressRecord.last_active_stage)
+      : -1
+  if (lastFromProgress !== -1) return lastFromProgress
+
+  const tracked = indexOfStage(trackedStageKey)
+  if (tracked !== -1) return tracked
+
+  return -1
 }
 
 export function ActiveRunBanner({
@@ -99,9 +198,11 @@ export function ActiveRunBanner({
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
+  const [lastStageByJob, setLastStageByJob] = useState<Record<string, string>>({})
 
   const isRunning = Boolean(job && (job.status === 'queued' || job.status === 'running'))
   const progress = job?.progress_json ?? {}
+  const progressRecord = progress as Record<string, unknown>
   const completed = typeof progress.completed === 'number' ? progress.completed : null
   const total = typeof progress.total === 'number' && progress.total > 0 ? progress.total : null
   const isDeterminate = completed !== null && total !== null && completed >= 0
@@ -116,9 +217,49 @@ export function ActiveRunBanner({
           ? 'warning'
           : 'info'
 
-  const stages = job ? stagesForJob(job) : []
+  const stages = useMemo(() => (job ? stagesForJob(job) : []), [job])
+  const timeline = useMemo(() => parseStageTimeline(progressRecord), [progressRecord])
+  const timelineByStage = useMemo(() => {
+    const map = new Map<string, StageTimelineEntry>()
+    for (const entry of timeline) {
+      map.set(entry.stage, entry)
+    }
+    return map
+  }, [timeline])
+
   const currentStageKey = progress.stage || job?.stage || 'queued'
-  const currentStageIdx = stages.findIndex((item) => item.key === currentStageKey)
+  const isKnownNonTerminalStage = useMemo(
+    () =>
+      stages.some((item) => item.key === currentStageKey) ||
+      currentStageKey === 'starting' ||
+      currentStageKey === 'queued',
+    [currentStageKey, stages],
+  )
+
+  // Remember the last non-terminal stage per job during render so terminal transitions
+  // (failed / cancelled) highlight the stage that actually failed even when stage_timeline is absent.
+  const rememberedStage =
+    job && isKnownNonTerminalStage
+      ? currentStageKey === 'starting' || currentStageKey === 'queued'
+        ? (stages[0]?.key ?? currentStageKey)
+        : currentStageKey
+      : null
+  if (job && rememberedStage && lastStageByJob[job.id] !== rememberedStage) {
+    setLastStageByJob((prev) => ({ ...prev, [job.id]: rememberedStage }))
+  }
+
+  const resolvedStageIdx = job
+    ? resolveStageIndex(stages, currentStageKey, timeline, progressRecord, lastStageByJob[job.id])
+    : -1
+
+  const completedStagesCount =
+    !job
+      ? 0
+      : job.status === 'completed' || currentStageKey === 'completed'
+        ? stages.length
+        : resolvedStageIdx > 0
+          ? resolvedStageIdx
+          : 0
 
   return (
     <>
@@ -133,7 +274,15 @@ export function ActiveRunBanner({
             transition={spring.moderate}
             className="flex flex-col gap-3"
           >
-            <Banner status={bannerStatus} contrast="low" className="ring-1 ring-foreground/10">
+            <Banner
+              status={bannerStatus}
+              contrast="low"
+              open
+              dismissible={!isRunning}
+              onDismiss={onDismiss}
+              dismissLabel="Dismiss run banner"
+              className="ring-1 ring-foreground/10"
+            >
               <BannerTitle>
                 {TARGET_LABEL[job.target]} · {job.dataset_name ?? job.dataset_source}
               </BannerTitle>
@@ -163,18 +312,9 @@ export function ActiveRunBanner({
                   )}
                 </span>
               </BannerDescription>
+              {/* Markup order matches BANNER_ACTION_ORDER under BannerDescription: primary, secondary, ghost */}
               <BannerActions>
-                <BannerAction variant="ghost" onClick={() => onInspect(job.id)}>
-                  Inspect
-                </BannerAction>
-                <BannerAction variant="secondary" onClick={() => setShowLogs((prev) => !prev)}>
-                  <ChevronDown
-                    className={`size-3.5 transition-transform duration-160 ${showLogs ? 'rotate-180' : ''}`}
-                    aria-hidden="true"
-                  />
-                  {showLogs ? 'Hide logs' : 'Logs'}
-                </BannerAction>
-                {isRunning ? (
+                {isRunning && (
                   <BannerAction
                     variant="primary"
                     disabled={job.cancel_requested || cancelling}
@@ -183,64 +323,82 @@ export function ActiveRunBanner({
                     <Square className="size-3" aria-hidden="true" />
                     {job.cancel_requested ? 'Cancelling…' : 'Cancel'}
                   </BannerAction>
-                ) : (
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Dismiss run banner"
-                    onClick={onDismiss}
-                  >
-                    <X className="size-3.5" aria-hidden="true" />
-                  </Button>
                 )}
+                <BannerAction variant="secondary" onClick={() => setShowLogs((prev) => !prev)}>
+                  <ChevronDown
+                    className={`size-3.5 transition-transform duration-160 ${showLogs ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                  {showLogs ? 'Hide logs' : 'Logs'}
+                </BannerAction>
+                <BannerAction variant="ghost" onClick={() => onInspect(job.id)}>
+                  Inspect
+                </BannerAction>
               </BannerActions>
             </Banner>
 
             <div className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
               <div className="flex min-w-0 flex-col gap-2">
-                {isRunning && <ThinkingIndicator size="compact" className="px-1 py-0" />}
                 <ThinkingSteps
                   running={isRunning}
                   defaultOpen={isRunning}
                   size="compact"
                   className="w-full"
                 >
-                  <ThinkingStepsHeader meta={`${stages.length} stages`}>
-                    Execution stages
+                  <ThinkingStepsHeader meta={`${completedStagesCount}/${stages.length} stages`}>
+                    {isRunning ? 'Optimizing target' : 'Execution stages'}
                   </ThinkingStepsHeader>
                   <ThinkingStepsContent>
                     {stages.map((item, idx) => {
                       let stepStatus: 'complete' | 'active' | 'upcoming' | 'error' = 'upcoming'
                       if (job.status === 'completed' || currentStageKey === 'completed') {
-                      stepStatus = 'complete'
-                    } else if (job.status === 'failed' || job.status === 'cancelled') {
-                      if (currentStageIdx === -1) stepStatus = idx === 0 ? 'error' : 'upcoming'
-                      else if (idx < currentStageIdx) stepStatus = 'complete'
-                      else if (idx === currentStageIdx) stepStatus = 'error'
-                      else stepStatus = 'upcoming'
-                    } else if (currentStageIdx !== -1) {
-                      if (idx < currentStageIdx) stepStatus = 'complete'
-                      else if (idx === currentStageIdx) stepStatus = 'active'
-                      else stepStatus = 'upcoming'
-                    } else if (idx === 0) {
-                      stepStatus = 'active'
-                    }
-                    return (
-                      <ThinkingStep
-                        key={item.key}
-                        label={item.label}
-                        status={stepStatus}
-                        isLast={idx === stages.length - 1}
-                        meta={
-                          stepStatus === 'active' && completed !== null
+                        stepStatus = 'complete'
+                      } else if (job.status === 'failed' || job.status === 'cancelled') {
+                        if (resolvedStageIdx === -1) {
+                          stepStatus = 'upcoming'
+                        } else if (idx < resolvedStageIdx) {
+                          stepStatus = 'complete'
+                        } else if (idx === resolvedStageIdx) {
+                          stepStatus = 'error'
+                        } else {
+                          stepStatus = 'upcoming'
+                        }
+                      } else {
+                        const activeIdx = resolvedStageIdx !== -1 ? resolvedStageIdx : 0
+                        if (idx < activeIdx) stepStatus = 'complete'
+                        else if (idx === activeIdx) stepStatus = 'active'
+                        else stepStatus = 'upcoming'
+                      }
+
+                      const duration = formatStageDuration(timelineByStage.get(item.key))
+                      let meta: string | undefined
+                      if (stepStatus === 'active') {
+                        const progressMeta =
+                          completed !== null
                             ? total !== null
                               ? `${completed}/${total}`
                               : `${completed}`
-                            : undefined
-                        }
-                      />
-                    )
+                            : null
+                        meta =
+                          progressMeta && duration
+                            ? `${progressMeta} · ${duration}`
+                            : (progressMeta ?? duration ?? undefined)
+                      } else if (stepStatus === 'error') {
+                        const terminalText = job.status === 'cancelled' ? 'Cancelled' : 'Failed'
+                        meta = duration ? `${duration} · ${terminalText}` : terminalText
+                      } else if (stepStatus === 'complete' && duration) {
+                        meta = duration
+                      }
+
+                      return (
+                        <ThinkingStep
+                          key={item.key}
+                          label={item.label}
+                          status={stepStatus}
+                          isLast={idx === stages.length - 1}
+                          meta={meta}
+                        />
+                      )
                     })}
                   </ThinkingStepsContent>
                 </ThinkingSteps>
@@ -273,10 +431,15 @@ export function ActiveRunBanner({
                 <CodeBlockHeader>
                   <CodeBlockTitle>Optimizer output</CodeBlockTitle>
                   <CodeBlockActions>
-                    <CodeBlockCopyButton
-                      value={job.log_tail || 'No optimizer logs yet.'}
-                      aria-label="Copy optimizer logs"
-                    />
+                    <Tooltip>
+                      <TooltipTrigger render={<span className="inline-flex" />}>
+                        <CodeBlockCopyButton
+                          value={job.log_tail || 'No optimizer logs yet.'}
+                          aria-label="Copy optimizer logs"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Copy optimizer logs</TooltipContent>
+                    </Tooltip>
                   </CodeBlockActions>
                 </CodeBlockHeader>
                 <CodeBlockContent
