@@ -28,6 +28,8 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    ```
    Set the Postgres URLs, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_IMAGE`, `FLEET_DAYTONA_REGION`, and the `FLEET_S3_*` variables shown in the example. Set `FLEET_LLM_MODEL`, `FLEET_SUB_LLM_MODEL`, `FLEET_LLM_API_KEY`, and `TYPESAFE_API_KEY`. Unset `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` when running the v2 client. See [Build and roll out the sandbox image](#build-and-roll-out-the-sandbox-image).
 
+   To use the `web-research` skill, set the optional `TAVILY_API_KEY`. This key stays on the Fleet host. If you do not set it, `web-research` is unavailable.
+
    > Models, RLM and history budgets, and the Python cell timeout can be edited in **Settings**. Environment variables control the Daytona image, region, and lifecycle, the storage bucket, the model gateway, MLflow, and worker concurrency.
 
 2. **Install dependencies and run database migrations:**
