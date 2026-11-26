@@ -1,0 +1,25 @@
+backend/.env.example
+  s_9af83eb7d7f332::t_3176a3c379fbd1 59-64
+backend/src/fleet_rlm/llm_registry.py
+  s_9af83eb7d7f332::t_0f31a0a1b9a819 10,284,293,298-299,308-311,320-326
+backend/tests/test_llm_registry.py
+  s_9af83eb7d7f332::t_cba249a92d4214 77-79,83-86
+frontend/src/components/optimization/ActiveRunBanner.tsx
+  s_9af83eb7d7f332::t_fbfd4ed843d2ce 353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ac2e5c789f97f1779372b70fd57b53577f42ae3c",
+  "prompts": {},
+  "sessions": {
+    "s_9af83eb7d7f332": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21760-7790-7ba0-b55f-3003070d7c46",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
