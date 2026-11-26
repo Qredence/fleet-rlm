@@ -1315,6 +1315,20 @@ def _unsuccessful_exit(
     return "failed", message[:500]
 
 
+def _remove_secret_files(*paths: Path | None) -> None:
+    for path in paths:
+        if path is not None:
+            with suppress(OSError):
+                path.unlink(missing_ok=True)
+
+
+async def _stop_monitor_task(task: asyncio.Task[None]) -> None:
+    if not task.done():
+        task.cancel()
+    with suppress(asyncio.CancelledError, Exception):
+        await task
+
+
 async def supervise_optimization_job(
     runtime: OptimizationRuntimeLike,
     job_id: UUID,
@@ -1608,18 +1622,9 @@ async def supervise_optimization_job(
                     else:
                         terminate_sent = True
                         await _terminate_and_reap_proc(proc, grace_seconds=5.0)
-                if not monitor_task.done():
-                    monitor_task.cancel()
-                with suppress(asyncio.CancelledError, Exception):
-                    await monitor_task
-                if not drain_task.done():
-                    drain_task.cancel()
-                with suppress(asyncio.CancelledError, Exception):
-                    await drain_task
-                for secret_path in (db_url_file, credentials_file):
-                    if secret_path is not None:
-                        with suppress(OSError):
-                            secret_path.unlink(missing_ok=True)
+                await _stop_monitor_task(monitor_task)
+                await _stop_monitor_task(drain_task)
+                _remove_secret_files(db_url_file, credentials_file)
                 db_url_file = None
                 credentials_file = None
 
@@ -1757,10 +1762,7 @@ async def supervise_optimization_job(
                 error=scrubbed_error,
             )
     finally:
-        for secret_path in (db_url_file, credentials_file):
-            if secret_path is not None:
-                with suppress(OSError):
-                    secret_path.unlink(missing_ok=True)
+        _remove_secret_files(db_url_file, credentials_file)
         runtime.optimization_procs.pop(job_id, None)
         runtime.optimization_tasks.pop(job_id, None)
         runtime.optimization_cancel_events.pop(job_id, None)
