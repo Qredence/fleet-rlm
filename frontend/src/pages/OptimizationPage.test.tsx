@@ -775,7 +775,10 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
   it.each([
     ['memory', '0.0%'], ['skills', '0.0%'], ['rlm', '0.00%'],
   ] as const)('renders legacy %s holdout scores in both reports', (target, zero) => {
-    const job = { ...MOCK_REANCHOR_JOB, target, baseline_score: 0, optimized_score: 1, report_json: {} }
+    const job = {
+      ...MOCK_REANCHOR_JOB, target, baseline_score: 0, optimized_score: 1, report_json: {},
+      config_json: { models: { decision_lm: { model: 'typesafe:historical-model' } } },
+    }
     const inspector = renderToStaticMarkup(
       <TooltipProvider>
         <RunInspectorPanel job={job} loading={false} activePromotionJobId={null}
@@ -785,6 +788,7 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     const diff = renderToStaticMarkup(
       <TooltipProvider><RunFullDiffContent job={job} initialTab={0} /></TooltipProvider>,
     )
+    expect(inspector).toContain('typesafe:historical-model')
     for (const html of [inspector, diff]) {
       expect(html).toContain('Holdout score improved over baseline')
       expect(html).toContain(zero)
