@@ -862,6 +862,10 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
         <RunFullDiffContent job={MOCK_RLM_JOB} initialTab={1} />
       </TooltipProvider>,
     )
+    const metricCells = (label: string) =>
+      gepaDiffHtml.match(new RegExp('>' + label + '</td>(.*?)</tr>'))?.[1]?.replace(/<[^>]+>/g, ' ')
+    expect(metricCells('Holdout score')).toMatch(/0\.7%.*0\.8%.*\+0\.1 pts/)
+    expect(metricCells('Correctness')).toMatch(/75\.0%.*88\.0%.*\+13\.0 pts/)
     expect(gepaDiffHtml).toContain('Prompt &amp; instruction diffs')
     expect(gepaDiffHtml).toContain('data-variant="removed"')
     expect(gepaDiffHtml).toContain('data-variant="added"')

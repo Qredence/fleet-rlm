@@ -44,7 +44,7 @@ from sqlalchemy import select
 
 from . import agent, db, interpreter, skills
 from .config import Settings
-from .opt_datasets import VALID_SPLITS, read_jsonl, scrub_secrets
+from .opt_datasets import VALID_SPLITS, VALID_VERIFIER_TYPES, read_jsonl, scrub_secrets
 
 _LOG = logging.getLogger(__name__)
 
@@ -62,7 +62,6 @@ DEFAULT_OUTPUTS: dict[TargetKind, Path] = {
 DEFAULT_MAX_METRIC_CALLS = 80
 DEFAULT_HOLDOUT_REPEATS = 3
 
-_VALID_VERIFIER_TYPES = frozenset({"exact", "json", "fact_checklist", "artifact", "rubric"})
 _AUTO_APPROVE_THRESHOLD = 0.90
 _MAX_CASE_DELTAS = 50
 _MAX_CANDIDATE_HISTORY = 100
@@ -1841,10 +1840,10 @@ def load_rlm_dataset(
         if not isinstance(task, str) or not task.strip() or not isinstance(answer, str):
             raise ValueError(f"{path}:{index}: RLM rows require string 'task' and 'answer'")
         if verifier is not None:
-            if not isinstance(verifier, dict) or verifier.get("type") not in _VALID_VERIFIER_TYPES:
+            if not isinstance(verifier, dict) or verifier.get("type") not in VALID_VERIFIER_TYPES:
                 raise ValueError(
                     f"{path}:{index}: invalid verifier {verifier!r} "
-                    f"(expected type in {sorted(_VALID_VERIFIER_TYPES)})"
+                    f"(expected type in {sorted(VALID_VERIFIER_TYPES)})"
                 )
 
         raw_id = row.get("id")
