@@ -1,11 +1,11 @@
 import { Brain, FolderDown } from 'lucide-react'
 import type { ReactNode } from 'react'
 import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
 } from '@/components/ui/trace'
+import { chatMarkdownProps } from '@/lib/chat-markdown'
 import { followMarkdownFragment } from '@/lib/markdown-fragments'
 import type { Memory } from '@/lib/api'
 import type { FleetPart } from '@/lib/messages'
@@ -51,7 +51,7 @@ export function MessageParts({ parts, live = false, preview, download, refine }:
               </TraceLine>
             </TraceCollapsibleTrigger>
             <TraceCollapsibleContent>
-              <div className="markdown text-sm" onClick={followMarkdownFragment}><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
+              <div className="markdown text-sm" onClick={followMarkdownFragment}><Markdown {...chatMarkdownProps}>{part.text}</Markdown></div>
             </TraceCollapsibleContent>
           </TraceCollapsible>
         )
@@ -78,7 +78,7 @@ export function MessageParts({ parts, live = false, preview, download, refine }:
         )
       }
       case 'text':
-        return <div className="markdown min-w-0" key={index} onClick={followMarkdownFragment}><Markdown remarkPlugins={[remarkGfm]}>{part.text}</Markdown></div>
+        return <div className="markdown min-w-0" key={index} onClick={followMarkdownFragment}><Markdown {...chatMarkdownProps}>{part.text}</Markdown></div>
       default:
         return null
     }
