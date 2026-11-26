@@ -1,0 +1,39 @@
+frontend/src/components/optimization/ActiveRunBanner.tsx
+  s_9af83eb7d7f332::t_973e234961ea54 1,410,419
+frontend/src/components/optimization/ProvidersSection.tsx
+  s_9af83eb7d7f332::t_312119e2e45cf1 821,827,855,869,872,875,881,885,894,897,904,922,930
+frontend/src/components/optimization/RunFullDiffSheet.tsx
+  s_4c5656a3b33387::t_d95dd2134582b9 1,178-179,798
+frontend/src/components/optimization/RunHistorySection.tsx
+  s_9af83eb7d7f332::t_a7d073c5db9b52 1,288
+frontend/src/components/optimization/RunInspectorPanel.tsx
+  s_4c5656a3b33387::t_8e5883aa452f92 1,113-114,339,504,509,853,856
+frontend/src/components/optimization/TargetSummaryGrid.tsx
+  s_9af83eb7d7f332::t_05b03034794acb 1,65,79,81,156,248,258,376
+frontend/src/components/optimization/holdout-score.ts
+  s_9af83eb7d7f332::t_42253468cb700e 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22fa233f057c52bd60cfa02d3f15e9bcd4793c3f",
+  "prompts": {},
+  "sessions": {
+    "s_4c5656a3b33387": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21806-0f55-7b91-ae30-a0affa995212",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_9af83eb7d7f332": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21760-7790-7ba0-b55f-3003070d7c46",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
