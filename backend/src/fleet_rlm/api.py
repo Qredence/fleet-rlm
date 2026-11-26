@@ -1432,6 +1432,8 @@ async def _retire_workspace(runtime: Runtime, sandbox_id: str) -> None:
 
 
 async def _consolidate(runtime: Runtime, turn: Turn, answer: str, memories: list[dict]) -> None:
+    answer = store.transcript_value(answer)
+
     async def save(candidate: agent.MemoryCandidate) -> None:
         if candidate.content is None:
             return
