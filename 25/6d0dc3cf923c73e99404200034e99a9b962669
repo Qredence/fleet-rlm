@@ -1,0 +1,36 @@
+backend/alembic/versions/0009_optimization_extensions.py
+  h_f276322eb5eb9f 1-163
+backend/pyproject.toml
+  h_f276322eb5eb9f 41,89,91,125-126,143-144,153-162
+backend/src/fleet_rlm/config.py
+  h_f276322eb5eb9f 38,55-57,76,105-120
+backend/src/fleet_rlm/db.py
+  h_f276322eb5eb9f 31,53-54,56,206,208-253,262-266,272-273,308-314,335,347-351,369-376,1155-1318,1329-1330,1338-1339,1367-1375,1405,1409-1424,1433,1448-1461,1472,1514,1522,1551-1552,1594-1599,1607,1654-1655,1657-1682,1684-1705,1714-1722,1724-1741,1743-1756
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 21,23,26,34-36,39-41,43-44,47-49,52,54,1241-1669
+backend/src/fleet_rlm/llm_registry.py
+  h_f276322eb5eb9f 1-767
+backend/src/fleet_rlm/opt_datasets.py
+  h_f276322eb5eb9f 1-442
+backend/src/fleet_rlm/storage.py
+  h_f276322eb5eb9f 101-103,105-123,125-163
+backend/tests/test_llm_registry.py
+  h_f276322eb5eb9f 1-389
+backend/tests/test_optimization_db_schema.py
+  h_f276322eb5eb9f 1-400
+backend/tests/test_volume_storage.py
+  h_f276322eb5eb9f 1-469
+backend/uv.lock
+  h_f276322eb5eb9f 622,647
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "256d0dc3cf923c73e99404200034e99a9b962669",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
