@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -145,15 +146,33 @@ class OfflineStore:
             )
             return rows[:limit] if limit is not None else rows
         if entity is db.Memory:
+            if "plainto_tsquery" in sql:
+                return []
             rows = list(self.memories.values())
-            if "id_1" in params:
-                rows = [item for item in rows if item.id == params["id_1"]]
-            if "session_id_1" in params:
-                rows = [item for item in rows if item.session_id == params["session_id_1"]]
+            if "sessions.deleting IS true" in sql:
+                rows = [
+                    item
+                    for item in rows
+                    if not getattr(self.sessions.get(item.session_id), "deleting", False)
+                ]
+            if match := re.search(r"memories\.id = :(\w+)", sql):
+                rows = [item for item in rows if item.id == params[match[1]]]
+            if match := re.search(r"memories\.id < :(\w+)", sql):
+                rows = [item for item in rows if item.id < params[match[1]]]
+            if match := re.search(r"memories\.session_id = :(\w+)", sql):
+                rows = [item for item in rows if item.session_id == params[match[1]]]
+            for column in ("session_id", "source_run_id"):
+                if f"memories.{column} IS NULL" in sql:
+                    rows = [item for item in rows if getattr(item, column) is None]
+                elif f"memories.{column} IS NOT NULL" in sql:
+                    rows = [item for item in rows if getattr(item, column) is not None]
             if "memories.approved IS true" in sql:
                 rows = [item for item in rows if item.approved is True]
             elif "memories.approved IS false" in sql:
                 rows = [item for item in rows if item.approved is False]
+            if match := re.search(r"websearch_to_tsquery\(:\w+, :(\w+)\)", sql):
+                words = params[match[1]].lower().split()
+                rows = [item for item in rows if all(w in item.content.lower() for w in words)]
             rows.sort(key=lambda item: item.id, reverse=True)
             return rows[:limit] if limit is not None else rows
         return []
@@ -2127,6 +2146,67 @@ async def test_memories_crud_filters_and_limit(offline):
     deleted = await offline.client.delete(f"/api/memories/{m1.id}")
     assert deleted.status_code == 204
     assert m1.id not in offline.store.memories
+
+
+@pytest.mark.asyncio
+async def test_memories_search_kind_scope_and_keyset_paging(offline):
+    deleting_session = db.Session(id=uuid4(), title="Deleting", deleting=True)
+    offline.store.add(deleting_session)
+    fact = db.Memory(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        session_id=offline.store.session_id,
+        content="Calibration fact for the session",
+    )
+    procedure = db.Memory(
+        id=UUID("00000000-0000-0000-0000-000000000002"),
+        session_id=offline.store.session_id,
+        source_run_id=uuid4(),
+        skill_name="table",
+        content="Check calibration before export",
+    )
+    global_fact = db.Memory(
+        id=UUID("00000000-0000-0000-0000-000000000003"),
+        session_id=None,
+        content="Global fact",
+        approved=True,
+    )
+    hidden = db.Memory(
+        id=UUID("00000000-0000-0000-0000-000000000004"),
+        session_id=deleting_session.id,
+        content="Calibration fact from a deleting session",
+    )
+    for memory in (fact, procedure, global_fact, hidden):
+        offline.store.add(memory)
+
+    async def ids(**params):
+        response = await offline.client.get("/api/memories", params=params)
+        assert response.status_code == 200
+        return [item["id"] for item in response.json()]
+
+    everything = [str(global_fact.id), str(procedure.id), str(fact.id)]
+    assert await ids() == everything
+    assert await ids(kind="fact") == [str(global_fact.id), str(fact.id)]
+    assert await ids(kind="procedure") == [str(procedure.id)]
+    assert await ids(scope="global") == [str(global_fact.id)]
+    assert await ids(scope="session") == [str(procedure.id), str(fact.id)]
+    assert await ids(scope="session", kind="fact") == [str(fact.id)]
+
+    first = await ids(limit=2)
+    assert first == everything[:2]
+    assert await ids(limit=2, before_id=first[-1]) == everything[2:]
+    assert await ids(before_id=str(fact.id)) == []
+
+    assert await ids(q="calibration") == [str(procedure.id), str(fact.id)]
+    assert await ids(q="calibration", kind="fact") == [str(fact.id)]
+    assert await ids(q="  ", before_id=str(procedure.id)) == [str(fact.id)]
+
+    for params in (
+        {"q": "calibration", "before_id": str(procedure.id)},
+        {"kind": "lesson"},
+        {"scope": "workspace"},
+        {"q": "x" * 501},
+    ):
+        assert (await offline.client.get("/api/memories", params=params)).status_code == 422
 
 
 @pytest.mark.asyncio

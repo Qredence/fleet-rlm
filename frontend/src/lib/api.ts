@@ -32,6 +32,17 @@ export interface Memory {
   created_at: string
 }
 
+export interface MemoryFilters {
+  session_id?: string
+  memory_id?: string
+  approved?: boolean
+  kind?: 'fact' | 'procedure'
+  scope?: 'global' | 'session'
+  q?: string
+  before_id?: string
+  limit?: number
+}
+
 export type MemoryEdit = { content: string; approved?: boolean } | { approved: boolean }
 
 export interface Skill {
@@ -468,11 +479,15 @@ export function createApi(token?: string) {
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     },
-    listMemories(filters: { session_id?: string; memory_id?: string; approved?: boolean; limit?: number } = {}, signal?: AbortSignal) {
+    listMemories(filters: MemoryFilters = {}, signal?: AbortSignal) {
       const params = new URLSearchParams()
       if (filters.session_id) params.set('session_id', filters.session_id)
       if (filters.memory_id) params.set('memory_id', filters.memory_id)
       if (filters.approved !== undefined) params.set('approved', String(filters.approved))
+      if (filters.kind) params.set('kind', filters.kind)
+      if (filters.scope) params.set('scope', filters.scope)
+      if (filters.q) params.set('q', filters.q)
+      if (filters.before_id) params.set('before_id', filters.before_id)
       if (filters.limit !== undefined) params.set('limit', String(filters.limit))
       return json<Memory[]>(`/api/memories${params.size ? `?${params}` : ''}`, { signal })
     },
