@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -27,5 +28,11 @@ export default defineConfig({
       '/healthz': backend,
       '/readyz': backend,
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    clearMocks: true,
+    unstubGlobals: true,
   },
 })
