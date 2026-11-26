@@ -14,6 +14,7 @@ import { RunInspectorPanel } from '@/components/optimization/RunInspectorPanel'
 import { TargetSummaryGrid } from '@/components/optimization/TargetSummaryGrid'
 import { Dialog } from '@/components/ui/dialog'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { Slider } from '@/components/ui/slider'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import {
   createApi,
@@ -798,6 +799,43 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(nonJevReanchorHtml).toContain('Decision model')
     expect(nonJevReanchorHtml).toContain('Calibration notice')
     expect(nonJevReanchorHtml).toContain('TypeSafe Jev System One')
+  })
+
+  it('accepts the same registered TypeSafe model explicitly and as the workspace default', () => {
+    const selection = 'provider/prov-typesafe/jev-latest'
+    const providers = [
+      { ...MOCK_PROVIDERS[0], id: 'prov-typesafe', dialect: 'typesafe' as const },
+    ]
+    for (const decisionLm of [undefined, { model: selection }]) {
+      const html = renderToStaticMarkup(
+        <TooltipProvider>
+          <Dialog open>
+            <LaunchOptimizationFormBody
+              api={createApi('token')}
+              capabilities={{ ...MOCK_OVERVIEW.capabilities, decision_model: selection }}
+              datasets={MOCK_DATASETS}
+              providers={providers}
+              defaults={{ target: 'skills', decisionLm }}
+              onClose={() => {}}
+              onStarted={() => {}}
+              onManageProviders={() => {}}
+            />
+          </Dialog>
+        </TooltipProvider>,
+      )
+      expect(html).toContain('Decision model')
+      expect(html).not.toContain('Calibration notice')
+    }
+  })
+
+  it('gives compact slider inputs the explicit accessible name', () => {
+    const html = renderToStaticMarkup(<>
+      <Slider size="compact" aria-label="Volume" value={2} onChange={() => {}} />
+      <Slider size="compact" aria-label="Window" value={[2, 5]} onChange={() => {}} />
+    </>)
+    for (const label of ['Volume', 'Window minimum', 'Window maximum']) {
+      expect(html).toMatch(new RegExp(`<input[^>]*aria-label="${label}"`))
+    }
   })
 
   it.each([

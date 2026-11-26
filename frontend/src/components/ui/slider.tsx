@@ -129,6 +129,12 @@ function nearestStepIndex(v: number, steps: number[]): number {
   return idx;
 }
 
+// A partial final step still has a selectable maximum.
+function uniformStepValues(min: number, max: number, step: number): number[] {
+  const values = Array.from({ length: Math.ceil((max - min) / step) }, (_, i) => min + i * step);
+  return [...values.filter((value) => value < max), max];
+}
+
 // Inverse of valueToPixel with snapping built in: the nearest `steps` entry,
 // or the step grid clamped to min/max. Press, drag and release all go
 // pixel → snapped value → pixel through here, so a thumb at rest always sits
@@ -222,7 +228,7 @@ function ValueDisplay({
         const clamped = Math.max(min, Math.min(max, parsed));
         const snapped = stepValues
           ? stepValues[nearestStepIndex(clamped, stepValues)]
-          : Math.round((clamped - min) / step) * step + min;
+          : Math.min(max, Math.round((clamped - min) / step) * step + min);
         onCommitEdit(index, snapped);
       } else {
         onCancelEdit();
@@ -424,6 +430,7 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
       valuePosition = "left",
       formatValue = String,
       label,
+      "aria-label": accessibleLabel = label,
       disabled = false,
       trackClassName,
       trackStyle,
@@ -637,42 +644,48 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
       return () => ro.disconnect();
     }, [isRange, motionX0, motionX1]);
 
+    // The controlled opposite endpoint is authoritative, even mid-drag.
+    const clampForRange = useCallback(
+      (candidate: number, thumbIndex: number): number => {
+        if (!isRange) return candidate;
+        const [lower, upper] = valuesRef.current;
+        return thumbIndex === 0 ? Math.min(candidate, upper) : Math.max(candidate, lower);
+      },
+      [isRange]
+    );
+
     // --- Sync motion values on value change (keyboard, programmatic) ---
     // Depend on a primitive key rather than the `values` array — its identity
     // changes every render (toRadixValue allocates), which would restart the
     // animation on unrelated re-renders (hover/tooltip state churn).
-    // Keyboard and programmatic changes spring on spring.moderate. Skipped
-    // mid-drag: the drag already placed the thumb, and springing toward the
-    // emitted value would fight the pointer.
+    // During a drag, sync the stationary thumb and clamp the moving thumb if
+    // a controlled update moved the endpoint past it.
     const valuesKey = values.join(",");
     useEffect(() => {
       if (!initialSyncDone.current) return;
-      if (dragging.current) return;
       const tw = trackWidthRef.current;
       if (tw <= 0) return;
       const v = valuesRef.current;
+      if (dragging.current) {
+        if (!isRange) return;
+        const lowerActive = activeDragThumb.current === 0;
+        const stationary = lowerActive ? motionX1 : motionX0;
+        stationary.jump(valueToPixel(v[lowerActive ? 1 : 0], min, max, tw));
+        const clamped = clampForRange(dragTargetValue.current, activeDragThumb.current);
+        if (clamped !== dragTargetValue.current) {
+          dragTargetValue.current = clamped;
+          const moving = lowerActive ? motionX0 : motionX1;
+          moving.jump(valueToPixel(clamped, min, max, tw));
+        }
+        return;
+      }
       const px0 = valueToPixel(v[0], min, max, tw);
       animate(motionX0, px0, spring.moderate);
       if (isRange && v[1] !== undefined) {
         const px1 = valueToPixel(v[1], min, max, tw);
         animate(motionX1, px1, spring.moderate);
       }
-    }, [valuesKey, min, max, isRange, motionX0, motionX1]);
-
-    // --- Range crossing prevention ---
-    // Each thumb stops half a thumb (10px) short of the other, so the 16px
-    // knobs may overlap a little but never swap sides.
-    const clampForRange = useCallback(
-      (px: number, thumbIndex: number): number => {
-        if (!isRange) return px;
-        if (thumbIndex === 0) {
-          return Math.min(px, motionX1.get() - THUMB_SIZE * 0.5);
-        } else {
-          return Math.max(px, motionX0.get() + THUMB_SIZE * 0.5);
-        }
-      },
-      [isRange, motionX0, motionX1]
-    );
+    }, [valuesKey, min, max, isRange, motionX0, motionX1, clampForRange]);
 
     // --- Emit value change ---
     // Range mode replaces only the moving thumb's entry. Click-to-edit
@@ -680,14 +693,14 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
     const emitChange = useCallback(
       (thumbIndex: number, newValue: number) => {
         if (isRange) {
-          const newValues: [number, number] = [...(values as [number, number])];
+          const newValues: [number, number] = [...(valuesRef.current as [number, number])];
           newValues[thumbIndex] = newValue;
           onChange(newValues);
         } else {
           onChange(newValue);
         }
       },
-      [isRange, values, onChange]
+      [isRange, onChange]
     );
 
     // --- Pointer handlers on track ---
@@ -740,27 +753,11 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
           layoutWidth,
           stepValues
         );
-        const snappedPx = valueToPixel(snappedValue, min, max, layoutWidth);
-
-        // Clamp for range crossing
-        const finalPx = clampForRange(
-          snappedPx,
-          activeDragThumb.current
-        );
+        const finalValue = clampForRange(snappedValue, activeDragThumb.current);
+        const finalPx = valueToPixel(finalValue, min, max, layoutWidth);
         // Spring-animate thumb to clicked position
         animate(motionX, finalPx, spring.moderate);
 
-        // Update value
-        // Derived from the clamped pixel, so the emitted value matches where
-        // the range clamp actually left the thumb.
-        const finalValue = pixelToValue(
-          finalPx,
-          min,
-          max,
-          step,
-          layoutWidth,
-          stepValues
-        );
         dragTargetValue.current = finalValue;
         emitChange(activeDragThumb.current, finalValue);
 
@@ -800,21 +797,8 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
           layoutWidth,
           stepValues
         );
-        const snappedPx = valueToPixel(snappedValue, min, max, layoutWidth);
-        const finalPx = clampForRange(
-          snappedPx,
-          activeDragThumb.current
-        );
-        motionX.set(finalPx);
-
-        const finalValue = pixelToValue(
-          finalPx,
-          min,
-          max,
-          step,
-          layoutWidth,
-          stepValues
-        );
+        const finalValue = clampForRange(snappedValue, activeDragThumb.current);
+        motionX.jump(valueToPixel(finalValue, min, max, layoutWidth));
         dragTargetValue.current = finalValue;
         emitChange(activeDragThumb.current, finalValue);
       },
@@ -828,7 +812,6 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
       setHoverPreview(null);
 
       // Spring settle onto the last emitted value, at the current track width.
-      // This also catches a thumb the range clamp left between steps.
       // Clearing the preview above keeps the stale pre-drag bar from fading
       // back in.
       const tw = trackWidthRef.current;
@@ -864,10 +847,10 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
 
     const handleCommitEdit = useCallback(
       (index: number, v: number) => {
-        emitChange(index, v);
+        emitChange(index, clampForRange(v, index));
         setEditingIndex(null);
       },
-      [emitChange]
+      [emitChange, clampForRange]
     );
 
     const handleCancelEdit = useCallback(() => {
@@ -881,19 +864,10 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
     const stepDots = useMemo(
       () =>
         showSteps
-          ? stepValues
-            ? stepValues.map((v) => ({
-                value: v,
-                percent: max === min ? 0 : (v - min) / (max - min),
-              }))
-            : Array.from(
-                { length: Math.round((max - min) / step) + 1 },
-                (_, i) => {
-                  const v = min + i * step;
-                  const percent = (v - min) / (max - min);
-                  return { value: v, percent };
-                }
-              )
+          ? (stepValues ?? uniformStepValues(min, max, step)).map((v) => ({
+              value: v,
+              percent: max === min ? 0 : (v - min) / (max - min),
+            }))
           : [],
       [showSteps, min, max, step, stepValues]
     );
@@ -903,12 +877,10 @@ const CompactSlider = forwardRef<HTMLDivElement, SliderEngineProps>(
     const isInteracting = isHovered || isPressed;
 
     // --- Per-thumb accessible names ---
-    // aria-label on Root lands on a role-less div and never reaches the
-    // thumb's input, so each Thumb gets its own label.
     const thumbAriaLabel = (index: number): string | undefined => {
-      if (!isRange) return label;
-      if (!label) return index === 0 ? "Minimum" : "Maximum";
-      return index === 0 ? `${label} minimum` : `${label} maximum`;
+      if (!isRange) return accessibleLabel;
+      if (!accessibleLabel) return index === 0 ? "Minimum" : "Maximum";
+      return index === 0 ? `${accessibleLabel} minimum` : `${accessibleLabel} maximum`;
     };
 
     // --- Value display component ---
@@ -1317,7 +1289,7 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     // Row presses and the scrubber's handle strip track their drags apart.
     const dragging = useRef(false);
-    const handleDragging = useRef(false);
+    const handleGrabOffset = useRef<number | null>(null);
     const [isHovered, setIsHovered] = useState(false);
     const [isPressed, setIsPressed] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
@@ -1354,13 +1326,17 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
     );
 
     const pipSteps = useMemo(
-      () => variant === "pips" ? Array.from(
-        { length: Math.round((max - min) / step) + 1 },
-        (_, i) => min + i * step
-      ) : [],
+      () => variant === "pips" ? uniformStepValues(min, max, step) : [],
       [min, max, step, variant]
     );
-    const pipCount = pipSteps.length;
+    const getValueAtFraction = useCallback(
+      (fraction: number) => {
+        const raw = min + Math.max(0, Math.min(1, fraction)) * (max - min);
+        if (variant === "pips") return pipSteps[nearestStepIndex(raw, pipSteps)];
+        return Math.max(min, Math.min(max, Math.round((raw - min) / step) * step + min));
+      },
+      [min, max, step, variant, pipSteps]
+    );
 
     // Fill motion value
     const fillPercent = useMotionValue(
@@ -1417,25 +1393,7 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
         // Use clientWidth (padding box) — CSS % and absolute left/width are relative to it
         const w = el.clientWidth;
         if (w <= 0 || rect.width <= 0) return;
-        // Normalize cursor to layout space so it matches `w` (layout, padding
-        // box). offsetWidth is the layout border-box; the difference vs `w` is
-        // the horizontal border contribution split across both sides.
-        const scale = rect.width / el.offsetWidth;
-        const borderLeftLayout = (el.offsetWidth - w) / 2;
-        const visualX = clientX - rect.left;
-        const layoutX = visualX / scale - borderLeftLayout;
-        const clamped = Math.max(0, Math.min(w, layoutX));
-
-        // Snap to nearest step value
-        let snappedVal: number;
-        if (variant === "pips") {
-          if (pipCount <= 1) return;
-          const index = Math.max(0, Math.min(pipCount - 1, Math.round((clamped / w) * (pipCount - 1))));
-          snappedVal = pipSteps[index];
-        } else {
-          const raw = min + (clamped / w) * (max - min);
-          snappedVal = Math.max(min, Math.min(max, Math.round((raw - min) / step) * step + min));
-        }
+        const snappedVal = getValueAtFraction((clientX - rect.left) / rect.width);
         const snappedPercent = max === min ? 0 : (snappedVal - min) / (max - min);
         const snappedX = snappedPercent * w;
 
@@ -1455,14 +1413,14 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
         const width = Math.abs(edgeX - handleX);
         setHoverPreview({ left, width, snappedValue: snappedVal, cursorX: snappedX });
       },
-      [variant, pipSteps, pipCount, min, max, step, fillPercent, zeroOffset]
+      [variant, getValueAtFraction, min, max, fillPercent, zeroOffset]
     );
 
     // Sync fill on programmatic value change
     // Arrow keys land here too, springing on spring.fast; skipped during
     // either drag.
     useEffect(() => {
-      if (dragging.current || handleDragging.current) return;
+      if (dragging.current || handleGrabOffset.current !== null) return;
       const percent = max === min ? 0 : Math.max(0, Math.min(1, (value - min) / (max - min)));
       animate(fillPercent, percent, spring.fast);
       animate(zeroOffset, value === min ? zeroTarget : 0, spring.fast);
@@ -1474,23 +1432,10 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
     const getValueFromX = useCallback(
       (clientX: number) => {
         const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return min;
-        const x = clientX - rect.left;
-        const clamped = Math.max(0, Math.min(rect.width, x));
-        if (variant === "pips") {
-          if (pipCount <= 1) return min;
-          const index = Math.max(
-            0,
-            Math.min(pipCount - 1, Math.round((clamped / rect.width) * (pipCount - 1)))
-          );
-          return pipSteps[index];
-        } else {
-          const raw = min + (clamped / rect.width) * (max - min);
-          const snapped = Math.round((raw - min) / step) * step + min;
-          return Math.max(min, Math.min(max, snapped));
-        }
+        if (!rect || rect.width <= 0) return min;
+        return getValueAtFraction((clientX - rect.left) / rect.width);
       },
-      [variant, pipSteps, pipCount, min, max, step]
+      [getValueAtFraction, min]
     );
 
     const handlePointerDown = useCallback(
@@ -1537,31 +1482,29 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
       setHoverPreview(null);
     }, []);
 
-    // Resize handle drag handlers (direct cursor position)
-    // Unlike a row press, grabbing the handle sets the fill from the first
-    // event with no spring; stopPropagation keeps the row's press handler
-    // from also firing.
+    // A grab starts at the current value. Keep the offset for the drag so
+    // the handle's wider hit area does not move the value on press.
     const handleResizePointerDown = useCallback(
       (e: React.PointerEvent<HTMLDivElement>) => {
         if (disabled) return;
         if (e.pointerType === "mouse" && e.button !== 0) return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect || rect.width <= 0) return;
         e.preventDefault();
         e.stopPropagation();
-        handleDragging.current = true;
+        const percent = max === min ? 0 : (value - min) / (max - min);
+        handleGrabOffset.current = e.clientX - rect.left - percent * rect.width;
         setIsPressed(true);
-        const newVal = getValueFromX(e.clientX);
-        onChange(newVal);
-        fillPercent.set(Math.max(0, Math.min(1, (newVal - min) / (max - min))));
-        animate(zeroOffset, newVal === min ? zeroTarget : 0, spring.fast);
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       },
-      [disabled, getValueFromX, onChange, fillPercent, zeroOffset, zeroTarget, min, max]
+      [disabled, value, min, max]
     );
 
     const handleResizePointerMove = useCallback(
       (e: React.PointerEvent<HTMLDivElement>) => {
-        if (!handleDragging.current) return;
-        const newVal = getValueFromX(e.clientX);
+        const offset = handleGrabOffset.current;
+        if (offset === null) return;
+        const newVal = getValueFromX(e.clientX - offset);
         onChange(newVal);
         fillPercent.set(Math.max(0, Math.min(1, (newVal - min) / (max - min))));
         animate(zeroOffset, newVal === min ? zeroTarget : 0, spring.fast);
@@ -1570,16 +1513,16 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
     );
 
     const handleResizePointerUp = useCallback(() => {
-      handleDragging.current = false;
+      handleGrabOffset.current = null;
       setIsPressed(false);
       setHoverPreview(null);
     }, []);
 
     const handleRadixChange = useCallback(
       (newValues: number[]) => {
-        onChange(newValues[0]);
+        onChange(variant === "pips" ? pipSteps[newValues[0]] : newValues[0]);
       },
-      [onChange]
+      [onChange, variant, pipSteps]
     );
 
     // Hover or keyboard focus brightens the label and value and grows the
@@ -1599,7 +1542,7 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
           }
         }}
         onMouseMove={(e) => {
-          if (disabled || dragging.current || handleDragging.current) return;
+          if (disabled || dragging.current || handleGrabOffset.current !== null) return;
           computeHoverPreview(e.clientX);
         }}
       >
@@ -1667,11 +1610,11 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
         {/* [&_*]:pointer-events-none keeps its thumb off the hit path too, so
             presses always reach the row. */}
         <SliderPrimitive.Root
-          value={[value]}
+          value={[variant === "pips" ? nearestStepIndex(value, pipSteps) : value]}
           onValueChange={(v) => handleRadixChange(v as number[])}
-          min={min}
-          max={max}
-          step={step}
+          min={variant === "pips" ? 0 : min}
+          max={variant === "pips" ? pipSteps.length - 1 : max}
+          step={variant === "pips" ? 1 : step}
           disabled={disabled}
           className="absolute inset-0 opacity-0 pointer-events-none [&_*]:pointer-events-none"
         >
@@ -1682,6 +1625,7 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
             <SliderPrimitive.Thumb
               index={0}
               aria-label={accessibleLabel}
+              getAriaValueText={variant === "pips" ? () => formatValue(value) : undefined}
               className="block outline-none"
               onFocus={(e) => {
                 if ((e.currentTarget as HTMLElement).matches(":focus-visible")) setIsFocused(true);
@@ -1712,18 +1656,19 @@ const ComfortableSlider = forwardRef<HTMLDivElement, SliderComfortableProps>(
         {/* Pips: dots layer — z-[1] */}
         {variant === "pips" && (
           <motion.div
-            className="absolute inset-0 flex justify-between items-center px-3 pointer-events-none z-[1]"
+            className="absolute inset-0 pointer-events-none z-[1]"
             style={{ WebkitMaskImage: pipsMaskStyle, maskImage: pipsMaskStyle }}
           >
             {pipSteps.map((pipValue) => {
               // The active pip goes full foreground. At rest it only shows at
               // min; elsewhere the mask hides it behind the handle line.
               const isActivePip = pipValue === value;
+              const percent = max === min ? 0 : (pipValue - min) / (max - min);
               return (
                 <div
                   key={pipValue}
-                  className="relative flex items-center justify-center"
-                  style={{ width: PIP_SIZE, height: PIP_SIZE }}
+                  className="absolute top-1/2 -translate-1/2 flex items-center justify-center"
+                  style={{ left: `calc(${percent * 100}% + ${12 - 24 * percent}px)`, width: PIP_SIZE, height: PIP_SIZE }}
                 >
                   <motion.div
                     className="rounded-full"

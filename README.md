@@ -51,7 +51,7 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
 
 ### Manage model providers
 
-Open **Settings → Models → Add provider** to register an endpoint and a key. Fleet stores encrypted provider keys in Neon Postgres. Configure `FLEET_CREDENTIALS_ENCRYPTION_KEY` on every backend worker. Shared deployments require HTTPS, `FLEET_API_BEARER_TOKEN` for workspace access, and a separate `FLEET_PROVIDER_ADMIN_TOKEN` for provider administration. Enter the administrator bearer in Settings → General while managing credentials. Configure reverse proxies to preserve the public host and scheme. Only expose unauthenticated development servers on loopback.
+Open **Settings → Providers → Add provider** to register an endpoint and a key. Fleet stores encrypted provider keys in Neon Postgres. Configure `FLEET_CREDENTIALS_ENCRYPTION_KEY` on every backend worker. Shared deployments require HTTPS and `FLEET_API_BEARER_TOKEN` for workspace access. Provider administration requires a separate `FLEET_PROVIDER_ADMIN_TOKEN` on shared deployments and on loopback deployments that set `FLEET_API_BEARER_TOKEN`. Enter the administrator bearer in Settings → General while managing credentials. Configure reverse proxies to preserve the public host and scheme. Only expose unauthenticated development servers on loopback.
 
 Fetch the provider's models or specify its default model. In **Settings → Models → Global Workspace Models**, select the primary and sub-LLM independently and save. Each selection uses that provider’s endpoint and credentials. The composer can override the primary model for an individual session.
 

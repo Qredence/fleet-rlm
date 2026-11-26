@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from zipfile import BadZipFile
 
 
 def stream_bytes(document):
@@ -388,14 +389,19 @@ def _verify_artifact(name, payload, evidence):
                 != 20
             ):
                 return False
-            sheet["A3"] = 18
-            source = root / "changed.xlsx"
-            book.save(source)
-            recalculated = office_convert(source, out, "xlsx")
-            return (
-                load_workbook(recalculated, data_only=True)[sheet.title]["A4"].value
-                == 30
-            )
+            for address in ("A2", "A3"):
+                original = sheet[address].value
+                sheet[address] = original + 10
+                source = root / f"changed-{address}.xlsx"
+                book.save(source)
+                sheet[address] = original
+                recalculated = office_convert(source, out, "xlsx")
+                if (
+                    load_workbook(recalculated, data_only=True)[sheet.title]["A4"].value
+                    != 30
+                ):
+                    return False
+            return True
         if name.startswith("word"):
             doc = Document(io.BytesIO(payload))
             paragraphs = [p.text for p in doc.paragraphs]
@@ -533,6 +539,8 @@ def review_catalog(output, *, merged_formats=False, combined_workbook=False):
     """Re-score saved live outputs without calling a model or modifying the raw run."""
     import json
 
+    from openpyxl.utils.exceptions import InvalidFileException
+
     definitions = {case.id: case for case in catalog_cases()}
     run = json.loads((output / "workflow.json").read_text())
     reviewed = []
@@ -553,11 +561,22 @@ def review_catalog(output, *, merged_formats=False, combined_workbook=False):
                 if case.artifact:
                     evidence = output / "artifacts" / case.id / str(row["repeat"])
                     path = evidence / Path(case.artifact).name
-                    valid = (
-                        path.exists()
-                        and verify_artifact(case.id, path.read_bytes(), evidence)
-                        and valid
-                    )
+                    try:
+                        valid = (
+                            verify_artifact(case.id, path.read_bytes(), evidence)
+                            and valid
+                        )
+                    except (
+                        ValueError,
+                        SyntaxError,
+                        OSError,
+                        LookupError,
+                        BadZipFile,
+                        InvalidFileException,
+                        subprocess.SubprocessError,
+                    ) as error:
+                        item["verification_error"] = f"{type(error).__name__}: {error}"
+                        valid = False
                 item["output_passed"] = valid
             item["passed"] = (
                 item["routing_passed"] and item.get("output_passed") is not False

@@ -37,6 +37,7 @@ import {
 } from '@/lib/settings-draft'
 
 type SettingsTab = 'general' | 'providers' | 'models' | 'limits' | 'sandbox'
+const CUSTOM_ENVIRONMENT_MODEL = 'custom-environment-model:'
 
 const settingsNavigation = [
   { value: 'general', label: 'General', description: 'Appearance, API access, and infrastructure status.', icon: Activity },
@@ -142,6 +143,7 @@ export function SettingsDialogBody({
   }, [api, version, tab])
   const [settingsView, setSettingsView] = useState<WorkspaceSettingsView | null>(null)
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
+  const [customModelRole, setCustomModelRole] = useState<'llm_model' | 'sub_llm_model' | null>(null)
   const [sessionModelDraft, setSessionModelDraft] = useState<string | null>(null)
   const [tokenDraft, setTokenDraft] = useState(token)
   const [showToken, setShowToken] = useState(false)
@@ -251,6 +253,7 @@ export function SettingsDialogBody({
         effectiveRef.current = updated.effective
         setSettingsView(updated)
         setDraft(toDraft(updated.effective))
+        setCustomModelRole(null)
       }
       if (session && sessionOverrideChanged) {
         const nextOverride = sessionModelValue.trim() || null
@@ -278,6 +281,7 @@ export function SettingsDialogBody({
       effectiveRef.current = reset.effective
       setSettingsView(reset)
       setDraft(toDraft(reset.effective))
+      setCustomModelRole(null)
       setNotice('Reset workspace settings to .env defaults.')
     } catch (failure) {
       setError(errorMessage(failure))
@@ -530,24 +534,44 @@ export function SettingsDialogBody({
                         options.set(`provider/${provider.id}/${name}`, `${provider.name} · ${name}`)
                       }
                     }
-                    if (!options.has(current) && (!decision || /^typesafe:jev(?:-[^\s/]+)?$/.test(current))) {
-                      options.set(current, current)
+                    const savedModel = settingsView?.effective[role]
+                    if (savedModel && !options.has(savedModel)) {
+                      options.set(savedModel, `Current model · ${savedModel}`)
                     }
+                    if (current.trim() && !options.has(current)) options.set(current, current)
+                    if (!decision) options.set(CUSTOM_ENVIRONMENT_MODEL, 'Enter environment model name…')
                     const label = {
                       llm_model: 'Primary LLM Model',
                       sub_llm_model: 'Sub-LLM Model',
                       decision_model: 'Decision Model (TypeSafe Jev)',
                     }[role]
+                    const enteringModel = customModelRole === role
                     return <SettingRow key={role} label={label} id={`workspace-${role}`}>
-                      <Select value={options.has(current) ? current : ''} onValueChange={value => updateField(role, value)}>
-                        <SelectTrigger id={`workspace-${role}`} aria-label={label}
-                          placeholder="Select a model" className="w-56 max-w-full" />
-                        <SelectContent>
-                          <SelectGroup>{[...options].map(([value, title], index) => (
-                            <SelectItem key={value} value={value} index={index}>{title}</SelectItem>
-                          ))}</SelectGroup>
-                        </SelectContent>
-                      </Select>
+                      <div className="grid w-56 max-w-full gap-2">
+                        <Select value={enteringModel ? CUSTOM_ENVIRONMENT_MODEL : current} onValueChange={value => {
+                          if (role !== 'decision_model' && value === CUSTOM_ENVIRONMENT_MODEL) {
+                            setCustomModelRole(role)
+                            if (current.startsWith('provider/')) updateField(role, environmentDefault)
+                            return
+                          }
+                          if (enteringModel) setCustomModelRole(null)
+                          updateField(role, value)
+                        }}>
+                          <SelectTrigger id={`workspace-${role}`} aria-label={label}
+                            placeholder="Select a model" className="w-full" />
+                          <SelectContent>
+                            <SelectGroup>{[...options].map(([value, title], index) => (
+                              <SelectItem key={value} value={value} index={index}>{title}</SelectItem>
+                            ))}</SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        {enteringModel && <Input
+                          aria-label={`${label} environment model name`}
+                          placeholder="e.g. openai/gpt-5-mini"
+                          value={current}
+                          onChange={event => updateField(role, event.target.value)}
+                        />}
+                      </div>
                     </SettingRow>
                   })}
                   </FieldGroup>

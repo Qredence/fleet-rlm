@@ -256,6 +256,9 @@ function ProviderFormBody({
   const [invalidField, setInvalidField] = useState<'name' | 'base_url' | 'api_key' | null>(null)
 
   const preset = DIALECT_MAP[dialect]
+  const secureContext = window.isSecureContext
+  const apiKeyDisabled = clearSavedKey || !encryptionConfigured || !secureContext
+  const insecureKeyMessage = 'Open Fleet over HTTPS to enter an API key.'
 
   function handleDialectChange(nextDialect: LLMProviderDialect) {
     const prevPreset = DIALECT_MAP[dialect]
@@ -340,7 +343,7 @@ function ProviderFormBody({
       return
     }
     if (!editing && preset.requiresApiKey && !trimmedKey) {
-      setFormError(`${preset.label} requires an API key.`)
+      setFormError(secureContext ? `${preset.label} requires an API key.` : insecureKeyMessage)
       setInvalidField('api_key')
       return
     }
@@ -520,7 +523,8 @@ function ProviderFormBody({
                 id={`${formId}-api-key`}
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
-                disabled={clearSavedKey || !encryptionConfigured || !window.isSecureContext}
+                disabled={apiKeyDisabled}
+                aria-describedby={`${formId}-api-key-description`}
                 onChange={(event) => {
                   setApiKey(event.target.value)
                   if (invalidField === 'api_key') setInvalidField(null)
@@ -542,7 +546,7 @@ function ProviderFormBody({
                       <InputGroupButton
                         type="button"
                         size="icon-xs"
-                        disabled={clearSavedKey || !encryptionConfigured || !window.isSecureContext}
+                        disabled={apiKeyDisabled}
                         aria-label={showKey ? 'Hide API key' : 'Show API key'}
                         onClick={() => setShowKey((prev) => !prev)}
                       />
@@ -560,8 +564,8 @@ function ProviderFormBody({
                 </Tooltip>
               </InputGroupAddon>
             </InputGroup>
-            <FieldDescription>
-              Write-only: encrypted on the host with Fernet and never returned to the browser.
+            <FieldDescription id={`${formId}-api-key-description`}>
+              {secureContext ? 'Encrypted on the host with Fernet and never returned to the browser.' : insecureKeyMessage}
             </FieldDescription>
           </Field>
 
@@ -718,9 +722,8 @@ export function ProvidersSection({
     ? 'flex min-w-0 flex-col gap-3 py-4 @lg:flex-row @lg:items-center @lg:justify-between'
     : 'flex min-w-0 flex-col gap-3 rounded-xl p-4 ring-1 ring-foreground/10'
   const editorTrigger = useRef<HTMLButtonElement | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogSession, setDialogSession] = useState(0)
-  const [editingProvider, setEditingProvider] = useState<LLMProviderView | null>(null)
+  const nextEditorId = useRef(0)
+  const [editor, setEditor] = useState<{ id: number; provider: LLMProviderView | null } | null>(null)
 
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [cardNotice, setCardNotice] = useState<Record<string, { ok: boolean; text: string }>>({})
@@ -729,18 +732,9 @@ export function ProvidersSection({
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
-  function openCreateDialog(event: React.MouseEvent<HTMLButtonElement>) {
+  function openEditor(event: React.MouseEvent<HTMLButtonElement>, provider: LLMProviderView | null) {
     editorTrigger.current = event.currentTarget
-    setEditingProvider(null)
-    setDialogSession((prev) => prev + 1)
-    setDialogOpen(true)
-  }
-
-  function openEditDialog(provider: LLMProviderView, event: React.MouseEvent<HTMLButtonElement>) {
-    editorTrigger.current = event.currentTarget
-    setEditingProvider(provider)
-    setDialogSession((prev) => prev + 1)
-    setDialogOpen(true)
+    setEditor({ id: ++nextEditorId.current, provider })
   }
 
   async function handleRefreshModels(provider: LLMProviderView) {
@@ -789,7 +783,7 @@ export function ProvidersSection({
           <Button
             type="button"
             size="sm"
-            onClick={openCreateDialog}
+            onClick={(event) => openEditor(event, null)}
             data-testid="add-provider-button"
           >
             <Plus className="size-3.5" aria-hidden="true" />
@@ -876,7 +870,7 @@ export function ProvidersSection({
             Anthropic, Gemini, OpenRouter, TypeSafe (Jev), or a local Ollama/vLLM endpoint to mix
             providers per optimizer role.
           </p>
-          <Button type="button" size="sm" onClick={openCreateDialog}>
+          <Button type="button" size="sm" onClick={(event) => openEditor(event, null)}>
             <Plus className="size-3.5" aria-hidden="true" />
             Add first provider
           </Button>
@@ -983,7 +977,7 @@ export function ProvidersSection({
                             size="icon-sm"
                             variant="ghost"
                             aria-label={`Edit provider ${provider.name}`}
-                            onClick={(event) => openEditDialog(provider, event)}
+                            onClick={(event) => openEditor(event, provider)}
                             data-testid={`edit-provider-${provider.id}`}
                           />
                         }
@@ -1022,23 +1016,23 @@ export function ProvidersSection({
       )}
 
       {/* Add / Edit Provider Dialog (remounted per open session) */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editor !== null} onOpenChange={open => { if (!open) setEditor(null) }}>
         <DialogContent finalFocus={editorTrigger} className="flex max-h-[min(760px,calc(100dvh-4rem))] flex-col gap-0 p-0 sm:max-w-lg">
-          {dialogOpen && (
+          {editor && (
             <ProviderFormBody
-              key={`${dialogSession}:${editingProvider?.id ?? 'new'}`}
+              key={editor.id}
               api={api}
-              editing={editingProvider}
+              editing={editor.provider}
               encryptionConfigured={encryptionConfigured}
               allowPrivateEndpoints={allowPrivateEndpoints}
-              onCancel={() => setDialogOpen(false)}
+              onCancel={() => setEditor(null)}
               onSaved={(saved, isEdit, refreshError) => {
                 if (refreshError) {
                   setCardNotice(current => ({
                     ...current, [saved.id]: { ok: false, text: `Provider saved. Could not fetch models. ${refreshError}` },
                   }))
                 }
-                setDialogOpen(false)
+                setEditor(current => current?.id === editor.id ? null : current)
                 void onChanged(
                   isEdit ? `Updated provider ${saved.name}.` : `Added provider ${saved.name}.`,
                 )
