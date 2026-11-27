@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ModelSelector } from '@/components/agent/ModelSelector'
+import { ChatGPTPlanSettings } from '@/components/agent/ChatGPTPlanSettings'
 import { ProvidersSection } from '@/components/optimization/ProvidersSection'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import type { ResolvedTheme, ThemePreference } from '@/hooks/use-theme'
 import {
   errorMessage,
+  type ChatGPTPlanStatus,
   type FleetApi,
   type Session,
   type SessionUpdate,
@@ -133,6 +135,34 @@ export function SettingsDialogBody({
   const [result, setResult] = useState<Awaited<ReturnType<FleetApi['listOptimizationProviders']>> | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [version, refresh] = useState(0)
+  const [chatGPTPlan, setChatGPTPlan] = useState<ChatGPTPlanStatus | null>(null)
+  const [chatGPTError, setChatGPTError] = useState('')
+  const planRequest = useRef<AbortController | null>(null)
+  const loadChatGPTPlan = useCallback(async () => {
+    planRequest.current?.abort()
+    const request = new AbortController()
+    planRequest.current = request
+    try {
+      const result = await api.chatGPTPlan(request.signal)
+      if (request.signal.aborted) return
+      setChatGPTPlan(result.enabled ? result : null)
+      setChatGPTError('')
+    } catch (failure) {
+      if (!request.signal.aborted) setChatGPTError(errorMessage(failure))
+    }
+  }, [api])
+  useEffect(() => {
+    if (tab !== 'models' && tab !== 'providers') return
+    function refreshPlan() {
+      void loadChatGPTPlan()
+    }
+    refreshPlan()
+    window.addEventListener('focus', refreshPlan)
+    return () => {
+      planRequest.current?.abort()
+      window.removeEventListener('focus', refreshPlan)
+    }
+  }, [tab, loadChatGPTPlan])
   useEffect(() => {
     if (tab !== 'models' && tab !== 'providers') return
     const request = new AbortController()
@@ -490,6 +520,8 @@ export function SettingsDialogBody({
           </TabsContent>
 
           <TabsContent value="providers">
+            {chatGPTError && <Alert variant="destructive"><AlertDescription>{chatGPTError}</AlertDescription></Alert>}
+            {chatGPTPlan && <ChatGPTPlanSettings api={api} status={chatGPTPlan} onChange={loadChatGPTPlan} />}
             <ProvidersSection
               layout="rows"
               api={api} providers={result?.providers ?? null}
@@ -504,6 +536,8 @@ export function SettingsDialogBody({
 
           <TabsContent value="models" className="grid gap-4">
             {failure && <Alert variant="destructive"><AlertDescription>{failure}</AlertDescription></Alert>}
+            {chatGPTError && <Alert variant="destructive"><AlertDescription>{chatGPTError}</AlertDescription></Alert>}
+            {chatGPTPlan && <ChatGPTPlanSettings api={api} status={chatGPTPlan} onChange={loadChatGPTPlan} modelsOnly />}
             {draft && defaults ? (
               <>
                 <FieldGroup>

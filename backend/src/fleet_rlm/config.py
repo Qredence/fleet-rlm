@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     provider_admin_token: SecretStr | None = None
     api_bearer_token: SecretStr | None = None
+    chatgpt_plan_enabled: bool = False
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     max_concurrent_turns_per_worker: int = Field(default=16, ge=1, le=256)
     stale_run_timeout_seconds: int = Field(default=900, ge=30, le=86_400)

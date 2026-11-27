@@ -64,6 +64,16 @@ export interface ModelCatalog {
   models: CatalogModel[]
 }
 
+export type ChatGPTPlanDefaults = Partial<Record<'primary' | 'sub', string | null>>
+
+export interface ChatGPTPlanStatus {
+  enabled: true
+  active: string | null
+  profiles: { id: string; label: string; status: 'connected' | 'signed_out' | 'reconnect' | 'consent_required' }[]
+  models: CatalogModel[]
+  defaults: ChatGPTPlanDefaults
+}
+
 export interface WorkspaceSettingsFields {
   llm_model: string
   sub_llm_model: string
@@ -505,6 +515,17 @@ export function createApi(token?: string) {
     installSkill: (id: string, path: string, sha256: string) =>
       json<Skill>(`${sessionPath(id)}/skills`, writeJson('POST', { path, sha256 })),
     listModels: (signal?: AbortSignal) => json<ModelCatalog>('/api/models', { signal }),
+    chatGPTPlan: (signal?: AbortSignal) =>
+      json<ChatGPTPlanStatus | { enabled: false }>('/api/chatgpt', { signal }),
+    startChatGPT: (profileId?: string) =>
+      json<{ url: string }>('/api/chatgpt/authorize', writeJson('POST', { profile_id: profileId })),
+    selectChatGPT: (id: string) => request(`/api/chatgpt/profiles/${encodeURIComponent(id)}/select`, { method: 'POST' }),
+    refreshChatGPTModels: (id: string) =>
+      request(`/api/chatgpt/profiles/${encodeURIComponent(id)}/models`, { method: 'POST' }),
+    signOutChatGPT: (id: string) =>
+      json<{ revocation_confirmed: boolean }>(`/api/chatgpt/profiles/${encodeURIComponent(id)}/sign-out`, { method: 'POST' }),
+    updateChatGPTDefaults: (defaults: ChatGPTPlanDefaults) =>
+      request('/api/chatgpt/defaults', writeJson('PATCH', defaults)),
     getSettings: (signal?: AbortSignal) => json<WorkspaceSettingsView>(settingsPath, { signal }),
     updateSettings: (changes: Partial<WorkspaceSettingsFields>) =>
       json<WorkspaceSettingsView>(settingsPath, writeJson('PATCH', changes)),

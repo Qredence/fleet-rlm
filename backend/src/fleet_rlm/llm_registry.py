@@ -835,6 +835,8 @@ _REASONING_EFFORTS = {
 def chat_reasoning_efforts(
     dialect: str, model: str, base_url: str | None = None
 ) -> tuple[str, ...]:
+    if dialect == "chatgpt":
+        return _OPENAI_EFFORTS.get(model, ())
     if dialect not in _REASONING_EFFORTS:
         return ()
     default_url = PROVIDER_DIALECTS[cast(ProviderDialect, dialect)].default_base_url or ""

@@ -10,6 +10,7 @@ from contextlib import AsyncExitStack, asynccontextmanager, closing, suppress
 from contextvars import Context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, gettempdir
 from typing import Annotated, Any, Literal, cast
@@ -34,7 +35,7 @@ from fastapi import (
 )
 from fastapi import File as Upload
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
 from mlflow.entities.trace_location import MlflowExperimentLocation
@@ -45,7 +46,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import agent, llm_registry, opt_datasets, opt_runner, ui_stream
+from . import agent, chatgpt_plan, llm_registry, opt_datasets, opt_runner, ui_stream
 from . import db as store
 from .config import Settings
 from .interpreter import (
@@ -101,6 +102,7 @@ class Runtime:
     optimized_program_state: dict[str, Any] | None
     mlflow_experiment_id: str | None = None
     volume_daytona: AsyncDaytona | None = None
+    chatgpt: chatgpt_plan.ChatGPTPlan | None = None
     artifact_cache_dir: Path = field(
         default_factory=lambda: Path(gettempdir()) / "fleet-rlm-artifacts"
     )
@@ -128,8 +130,11 @@ def _load_optimized_program_state(settings: Settings, sub_lm: dspy.BaseLM) -> di
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = Settings()
+    access_log = logging.getLogger("uvicorn.access")
+    callback_filter = chatgpt_plan.CallbackLogFilter()
     engine, sessionmaker = store.create_db(settings)
     runtime: Runtime | None = None
+    access_log.addFilter(callback_filter)
     try:
         await store.reap_stale_runs(sessionmaker, settings.stale_run_timeout_seconds)
         await store.reap_stale_optimization_jobs(
@@ -154,6 +159,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         cache_dir = opt_runner.ensure_private_cache_dir(
             settings.artifact_cache_dir or (Path(gettempdir()) / "fleet-rlm-artifacts")
         )
+        chatgpt = None
+        if settings.chatgpt_plan_enabled:
+            local_config = Path.home() / ".config/fleet-rlm"
+            chatgpt = chatgpt_plan.ChatGPTPlan(
+                local_config / "chatgpt/credentials.json",
+                local_config / "chatgpt-models/defaults.json",
+            )
         with closing(ObjectStorage(settings)) as storage:
             async with AsyncExitStack() as clients:
                 daytona = await clients.enter_async_context(make_daytona_client(settings))
@@ -179,11 +191,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     optimized_program_state=optimized_program_state,
                     mlflow_experiment_id=experiment_id,
                     artifact_cache_dir=cache_dir,
+                    chatgpt=chatgpt,
                 )
                 clients.push_async_callback(opt_runner.shutdown_optimization_runtime, runtime)
                 app.state.runtime = runtime
                 yield
     finally:
+        access_log.removeFilter(callback_filter)
         if runtime is None:
             with suppress(Exception):
                 await close_dataset_volume_helpers()
@@ -281,6 +295,122 @@ def require_provider_admin(request: Request, runtime: RuntimeDep) -> None:
         or not secrets.compare_digest(token.encode(), admin.get_secret_value().encode())
     ):
         raise HTTPException(403, "Provider administration requires the administrator token")
+
+
+_CHATGPT_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_CHATGPT_LOCAL_ORIGINS = {
+    f"http://{host}:{port}" for host in ("localhost", "127.0.0.1", "[::1]") for port in (5173, 8000)
+}
+_PROXY_HEADERS = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto")
+
+
+def _local_chatgpt(request: Request, runtime: Runtime) -> chatgpt_plan.ChatGPTPlan | None:
+    origin = request.headers.get("origin")
+    local = (
+        request.client is not None
+        and request.client.host in _CHATGPT_LOCAL_HOSTS
+        and request.url.hostname in _CHATGPT_LOCAL_HOSTS
+        and not any(name in request.headers for name in _PROXY_HEADERS)
+        and (origin is None or origin in _CHATGPT_LOCAL_ORIGINS)
+        and request.headers.get("sec-fetch-site") != "cross-site"
+    )
+    return runtime.chatgpt if local else None
+
+
+def _chatgpt_admin(request: Request, runtime: RuntimeDep) -> chatgpt_plan.ChatGPTPlan:
+    service = _local_chatgpt(request, runtime)
+    if service is None:
+        raise HTTPException(403, "ChatGPT plan usage requires an enabled local Fleet installation")
+    require_provider_admin(request, runtime)
+    return service
+
+
+ChatGPTAdmin = Annotated[chatgpt_plan.ChatGPTPlan, Depends(_chatgpt_admin)]
+
+
+class ChatGPTConnection(BaseModel):
+    profile_id: UUID | None = None
+
+
+class ChatGPTDefaults(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary: str | None = None
+    sub: str | None = None
+
+
+@app.exception_handler(chatgpt_plan.PlanError)
+async def _chatgpt_plan_error(request: Request, error: chatgpt_plan.PlanError) -> JSONResponse:
+    return JSONResponse(
+        {"detail": str(error)}, status_code=409, headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/api/chatgpt", dependencies=[Depends(require_auth)])
+def chatgpt_status(request: Request, runtime: RuntimeDep, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    service = _local_chatgpt(request, runtime)
+    return {"enabled": True, **service.status()} if service else {"enabled": False}
+
+
+@app.post("/api/chatgpt/authorize")
+def start_chatgpt(
+    payload: ChatGPTConnection, service: ChatGPTAdmin, response: Response
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    return {"url": service.start(str(payload.profile_id) if payload.profile_id else None)}
+
+
+@app.get(chatgpt_plan.CALLBACK_PATH, response_class=HTMLResponse, include_in_schema=False)
+def chatgpt_callback(
+    request: Request,
+    runtime: RuntimeDep,
+    state: str = "",
+    code: str | None = None,
+    client_id: str | None = None,
+    error: str | None = None,
+) -> HTMLResponse:
+    # The top-level OAuth redirect is cross-site. The single-use state authorizes this callback.
+    if (
+        runtime.chatgpt is None
+        or request.client is None
+        or request.client.host != "127.0.0.1"
+        or request.url.netloc != "127.0.0.1:8000"
+        or any(name in request.headers for name in _PROXY_HEADERS)
+    ):
+        raise HTTPException(404)
+    success, message = runtime.chatgpt.callback(state, code, client_id, error)
+    title = "ChatGPT connected" if success else "ChatGPT sign-in could not complete"
+    detail = f"<p>{escape(message)}</p>" if message else ""
+    return HTMLResponse(
+        f"<!doctype html><title>{title}</title><h1>{title}</h1>{detail}"
+        "<p>Return to Fleet Settings.</p>",
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+        },
+    )
+
+
+@app.post("/api/chatgpt/profiles/{profile_id}/select", status_code=204)
+def select_chatgpt(profile_id: UUID, service: ChatGPTAdmin) -> None:
+    service.select(str(profile_id))
+
+
+@app.post("/api/chatgpt/profiles/{profile_id}/models", status_code=204)
+def refresh_chatgpt_models(profile_id: UUID, service: ChatGPTAdmin) -> None:
+    service.refresh_models(str(profile_id))
+
+
+@app.post("/api/chatgpt/profiles/{profile_id}/sign-out")
+def sign_out_chatgpt(profile_id: UUID, service: ChatGPTAdmin) -> dict[str, bool]:
+    return {"revocation_confirmed": service.sign_out(str(profile_id))}
+
+
+@app.patch("/api/chatgpt/defaults", status_code=204)
+def set_chatgpt_defaults(payload: ChatGPTDefaults, service: ChatGPTAdmin) -> None:
+    service.set_defaults(payload.model_dump(exclude_unset=True))
 
 
 async def get_db(runtime: RuntimeDep) -> AsyncIterator[AsyncSession]:
@@ -625,15 +755,22 @@ async def get_session(session_id: UUID, db: DbDep) -> SessionView:
 
 
 @app.get("/api/sessions/{session_id}/chat-model", dependencies=[Depends(require_auth)])
-async def get_chat_model(session_id: UUID, response: Response, runtime: RuntimeDep) -> ChatModel:
+async def get_chat_model(
+    session_id: UUID, request: Request, response: Response, runtime: RuntimeDep
+) -> ChatModel:
     session = await store.get_session_or_raise(runtime.sessionmaker, session_id)
     settings = await _effective_settings(runtime)
-    model = await _primary_chat_model(runtime, settings, session.model_override)
+    _, defaults = await _chat_defaults(request, runtime)
+    model = await _primary_chat_model(
+        runtime, settings, session.model_override, defaults.get("primary")
+    )
     response.headers["Cache-Control"] = "private, no-store"
     return model.model_copy(update={"effort": _applied_effort(model, session.reasoning_override)})
 
 
-def _session_edit_changes(payload: SessionEdit) -> dict[str, Any]:
+async def _session_edit_changes(
+    payload: SessionEdit, request: Request, runtime: Runtime
+) -> dict[str, Any]:
     if not payload.model_fields_set:
         raise HTTPException(422, "At least one field to update is required")
     changes: dict[str, Any] = {}
@@ -646,23 +783,32 @@ def _session_edit_changes(payload: SessionEdit) -> dict[str, Any]:
         changes["title"] = title
     if "model_override" in payload.model_fields_set:
         override = payload.model_override.strip() if payload.model_override is not None else ""
+        if chatgpt_plan.is_plan_model(override):
+            service = _local_chatgpt(request, runtime)
+            if service is None:
+                raise HTTPException(403, "ChatGPT plan models are available on local Fleet only")
+            await asyncio.to_thread(service.validate_model, override)
         changes["model_override"] = override or None
     return changes
 
 
 @app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
 async def edit_session(
-    session_id: UUID, payload: SessionEdit, db: DbDep, runtime: RuntimeDep
+    session_id: UUID, payload: SessionEdit, db: DbDep, request: Request, runtime: RuntimeDep
 ) -> SessionView:
-    changes = _session_edit_changes(payload)
+    changes = await _session_edit_changes(payload, request, runtime)
     conditions = [store.Session.id == session_id, store.Session.deleting.is_(False)]
     if "reasoning_override" in payload.model_fields_set:
         reasoning = payload.reasoning_override
         if reasoning is not None:
             session = await store.get_session_or_raise(runtime.sessionmaker, session_id)
             settings = await _effective_settings(runtime)
+            _, defaults = await _chat_defaults(request, runtime)
             model = await _primary_chat_model(
-                runtime, settings, changes.get("model_override", session.model_override)
+                runtime,
+                settings,
+                changes.get("model_override", session.model_override),
+                defaults.get("primary"),
             )
             if reasoning.model != model.id:
                 raise HTTPException(409, "The active model changed. Select thinking effort again.")
@@ -857,10 +1003,27 @@ async def _workspace_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseL
     return _request_sub_lm(runtime, effective)
 
 
+async def _chat_defaults(request: Request, runtime: Runtime):
+    plan = _local_chatgpt(request, runtime)
+    return plan, await asyncio.to_thread(plan.defaults) if plan else {}
+
+
+def _chat_model_label(name: str) -> str:
+    label = "GPT-" + name[4:] if name.startswith("gpt-") else name
+    return re.sub(r"-(luna|sol|astra|terra)$", lambda match: " " + match[1].title(), label)
+
+
 async def _primary_chat_model(
-    runtime: Runtime, effective: Settings, override: str | None
+    runtime: Runtime, effective: Settings, override: str | None, local_primary: str | None = None
 ) -> ChatModel:
-    selected = override or effective.llm_model
+    selected = override or local_primary or effective.llm_model
+    if chatgpt_plan.is_plan_model(selected):
+        name = selected.split("/", 2)[-1]
+        return ChatModel(
+            id=selected,
+            label=_chat_model_label(name),
+            efforts=llm_registry.chat_reasoning_efforts("chatgpt", name),
+        )
     if selected.startswith("provider/"):
         try:
             provider, name = await _registered_model(runtime, selected)
@@ -884,9 +1047,7 @@ async def _primary_chat_model(
             efforts = llm_registry.chat_reasoning_efforts(
                 route.provider.removesuffix("-chat"), name, base
             )
-    label = "GPT-" + name[4:] if name.startswith("gpt-") else name
-    label = re.sub(r"-(luna|sol|astra|terra)$", lambda match: " " + match[1].title(), label)
-    return ChatModel(id=selected, label=label, efforts=efforts)
+    return ChatModel(id=selected, label=_chat_model_label(name), efforts=efforts)
 
 
 def _applied_effort(model: ChatModel, preference: dict | None) -> ReasoningEffort | None:
@@ -897,6 +1058,34 @@ def _applied_effort(model: ChatModel, preference: dict | None) -> ReasoningEffor
     ):
         return cast(ReasoningEffort, preference["effort"])
     return None
+
+
+async def _interactive_models(
+    request: Request,
+    runtime: Runtime,
+    effective: Settings,
+    override: str | None,
+    reasoning_override: dict | None = None,
+):
+    plan, defaults = await _chat_defaults(request, runtime)
+    root_selection = override or defaults.get("primary")
+    if root_selection and chatgpt_plan.is_plan_model(root_selection):
+        if plan is None:
+            raise chatgpt_plan.PlanError(
+                "This model requires local ChatGPT plan access. Choose another model."
+            )
+        effort = None
+        if reasoning_override:
+            model = await _primary_chat_model(runtime, effective, root_selection)
+            effort = _applied_effort(model, reasoning_override)
+        root = chatgpt_plan.build_lm(plan, root_selection, effort)
+    else:
+        root = await _chat_model(runtime, effective, root_selection, reasoning_override)
+    if plan and (sub_reference := defaults.get("sub")):
+        sub_lm, _ = chatgpt_plan.build_lm(plan, sub_reference)
+    else:
+        sub_lm = await _workspace_sub_lm(runtime, effective)
+    return root, sub_lm
 
 
 def _is_jev_model(model: str) -> bool:
@@ -962,10 +1151,19 @@ async def _gateway_model_labels(base_url: str, api_key: str) -> list[str]:
 
 
 @app.get("/api/models", dependencies=[Depends(require_auth)])
-async def list_models(runtime: RuntimeDep, response: Response) -> ModelCatalog:
+async def list_models(runtime: RuntimeDep, response: Response, request: Request) -> ModelCatalog:
     effective = await _effective_settings(runtime)
     response.headers["Cache-Control"] = "private, no-store"
     models = []
+    local_default = None
+    if service := _local_chatgpt(request, runtime):
+        try:
+            plan = await asyncio.to_thread(service.status)
+            models.extend(CatalogModel.model_validate(model) for model in plan["models"])
+            local_default = plan["defaults"].get("primary")
+        except (ValueError, chatgpt_plan.PlanError):
+            with suppress(chatgpt_plan.PlanError):
+                local_default = (await asyncio.to_thread(service.defaults)).get("primary")
     for provider in await store.list_llm_providers(runtime.sessionmaker):
         names = [model.id for model in _provider_view(provider).cached_models]
         if provider.default_model:
@@ -985,7 +1183,7 @@ async def list_models(runtime: RuntimeDep, response: Response) -> ModelCatalog:
         except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, ValueError):
             status = "unavailable"
     return ModelCatalog(
-        workspace_default=effective.llm_model,
+        workspace_default=local_default or effective.llm_model,
         catalog_status="ready" if models else status,
         models=models,
     )
@@ -1002,6 +1200,15 @@ async def patch_settings(
     payload: WorkspaceSettingsPatch, runtime: RuntimeDep
 ) -> WorkspaceSettingsView:
     changes = {field: getattr(payload, field) for field in payload.model_fields_set}
+    if any(
+        chatgpt_plan.is_plan_model(changes.get(role))
+        for role in (
+            "llm_model",
+            "sub_llm_model",
+            "decision_model",
+        )
+    ):
+        raise HTTPException(422, "Set ChatGPT plan models in local ChatGPT plan settings")
     if payload.decision_model is not None:
         try:
             await _validate_decision_model(runtime, payload.decision_model)
@@ -1834,6 +2041,11 @@ async def _persist_failed_finalization(
 def _turn_failure_message(
     error: Exception, billing_model: tuple[Literal["primary", "decision"], str] | None
 ) -> str:
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, chatgpt_plan.PlanError):
+            return str(cause)
+        cause = cause.__cause__
     if type(error.__cause__ or error).__name__ in {"BillingError", "LMBillingError"}:
         if billing_model is None:
             return "Model billing failed. Check the workspace model settings."
@@ -2025,10 +2237,9 @@ async def _execute_turn(
                     )
                     await stream.files(run_id, manifest)
 
-            root_model, model_label = await _chat_model(
-                runtime, effective, session.model_override, session.reasoning_override
+            (root_model, model_label), sub_lm = await _interactive_models(
+                request, runtime, effective, session.model_override, session.reasoning_override
             )
-            sub_lm = await _workspace_sub_lm(runtime, effective)
             billing_model = ("primary", model_label)
             result = await agent.run_workspace_task(
                 effective,
@@ -3231,10 +3442,12 @@ async def refresh_optimization_provider_models(
 def _optimization_role_selection(
     selection: LMRoleSelection | None, fallback_model: str
 ) -> LMRoleSelection | None:
-    if selection and selection.provider_id is not None:
-        return selection
     model = (selection.model or "").strip() if selection else ""
     reference = model or fallback_model
+    if chatgpt_plan.is_plan_model(reference):
+        raise HTTPException(422, "ChatGPT plan models are available for interactive chat only")
+    if selection and selection.provider_id is not None:
+        return selection
     if not reference.startswith("provider/"):
         return selection
     try:
