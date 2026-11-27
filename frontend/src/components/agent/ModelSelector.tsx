@@ -7,6 +7,7 @@ import type { ModelPicker } from './ModelPicker'
 export interface ModelSelectorProps {
   api: FleetApi
   model: string | null
+  resolvedLabel?: string
   disabled: boolean
   saving: boolean
   onChange: (model: string | null) => void
@@ -19,7 +20,7 @@ export function ModelSelector(props: ModelSelectorProps) {
   const [loadError, setLoadError] = useState(false)
   const loadingRef = useRef(false)
   const modelName = model?.replace(/^provider\/[^/]+\//, '').replace(/^openai\//, '')
-  const label = modelName?.replace(/^gpt-/i, 'GPT-') || 'Workspace default'
+  const label = props.resolvedLabel ?? (modelName?.replace(/^gpt-/i, 'GPT-') || 'Workspace default')
 
   async function openPicker() {
     if (disabled || loadingRef.current) return

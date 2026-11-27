@@ -168,7 +168,11 @@ class OfflineStore:
                 if "title" in params:
                     session.title = params["title"]
                 if "model_override" in params:
+                    if session.model_override != params["model_override"]:
+                        session.reasoning_override = None
                     session.model_override = params["model_override"]
+                if "reasoning_override" in params:
+                    session.reasoning_override = params["reasoning_override"]
                 session.updated_at = datetime.now(UTC)
                 return session
             if query.table.name == "memories":
@@ -1782,6 +1786,46 @@ async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model_id", ["openai/gpt-6-luna", "gpt-6-luna"])
+async def test_chat_model_reports_and_persists_model_bound_effort(offline, model_id, monkeypatch):
+    monkeypatch.setattr(
+        api.agent, "_model", lambda settings, model: dspy.LM(model, api_base=settings.llm_base_url)
+    )
+    offline.settings.llm_model = model_id
+    original = {"model": model_id, "effort": "high"}
+    url = f"{offline.base}/chat-model"
+    model = (await offline.client.get(url)).json()
+    assert model["id"] == original["model"]
+    assert "Luna" in model["label"]
+    assert model["efforts"] == ["none", "low", "medium", "high", "xhigh", "max"]
+    assert model["effort"] is None
+    assert (
+        await offline.client.patch(offline.base, json={"reasoning_override": original})
+    ).status_code == 200
+    assert (await offline.client.get(url)).json()["effort"] == "high"
+    assert (
+        await offline.client.patch(
+            offline.base, json={"reasoning_override": {**original, "effort": "minimal"}}
+        )
+    ).status_code == 422
+    offline.settings.llm_model = "openai/gpt-4.1"
+    model = (await offline.client.get(url)).json()
+    assert model["label"] == "GPT-4.1" and model["efforts"] == [] and model["effort"] is None
+    assert (
+        await offline.client.patch(offline.base, json={"reasoning_override": original})
+    ).status_code == 409
+    changed = await offline.client.patch(offline.base, json={"model_override": "openai/gpt-6-luna"})
+    assert changed.json()["reasoning_override"] is None
+    explicit = {"model": "openai/gpt-6-luna", "effort": "high"}
+    assert (
+        await offline.client.patch(offline.base, json={"reasoning_override": explicit})
+    ).status_code == 200
+    cleared = await offline.client.patch(offline.base, json={"reasoning_override": None})
+    assert cleared.json()["reasoning_override"] is None
+    assert (await offline.client.get(url)).json()["effort"] is None
+
+
+@pytest.mark.asyncio
 async def test_patch_session_edits_title_and_model_override(offline):
     unauth = await offline.client.patch(
         offline.base, json={"title": "Blocked"}, headers={"Authorization": ""}
@@ -1806,6 +1850,7 @@ async def test_patch_session_edits_title_and_model_override(offline):
         "id",
         "title",
         "model_override",
+        "reasoning_override",
         "daytona_sandbox_id",
         "deleting",
         "created_at",

@@ -11,7 +11,7 @@ import secrets
 import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import dspy
@@ -782,3 +782,65 @@ def build_dspy_lm(
 
 
 build_lm = build_dspy_lm
+
+
+_STANDARD_EFFORTS = ("low", "medium", "high")
+_EXTENDED_EFFORTS = (*_STANDARD_EFFORTS, "xhigh", "max")
+_OPENAI_EFFORTS = {
+    "gpt-6-luna": ("none", *_EXTENDED_EFFORTS),
+    "gpt-6-sol": ("none", *_EXTENDED_EFFORTS),
+    "gpt-6-astra": _EXTENDED_EFFORTS,
+    "gpt-6.1-terra": ("none", *_EXTENDED_EFFORTS),
+    "gpt-6.1-sol": _EXTENDED_EFFORTS,
+    "gpt-6.2-sol": _EXTENDED_EFFORTS,
+    "gpt-6.2-astra": _EXTENDED_EFFORTS,
+    "gpt-5.4": ("none", *_STANDARD_EFFORTS, "xhigh"),
+    "gpt-5.4-mini": ("none", *_STANDARD_EFFORTS, "xhigh"),
+    "gpt-5.4-nano": ("none", *_STANDARD_EFFORTS, "xhigh"),
+}
+# Exact model levels, intersected with the wire formats supported by DSPy 3.5.
+_REASONING_EFFORTS = {
+    "openai": _OPENAI_EFFORTS,
+    "anthropic": {
+        "claude-sonnet-4-6": (*_STANDARD_EFFORTS, "max"),
+        "claude-opus-4-6": (*_STANDARD_EFFORTS, "max"),
+        "claude-opus-4-7": _EXTENDED_EFFORTS,
+        "claude-opus-4-8": _EXTENDED_EFFORTS,
+    },
+    "gemini": {
+        "gemini-3-flash-preview": ("minimal", *_STANDARD_EFFORTS),
+        "gemini-3-pro-preview": ("low", "high"),
+        "gemini-3.1-pro-preview": _STANDARD_EFFORTS,
+        "gemini-3.1-flash-lite": ("minimal", *_STANDARD_EFFORTS),
+    },
+    "xai": {
+        # The installed adapter rewrites "none" to "low" for Grok 4.3.
+        "grok-4.3": ("low", "medium"),
+        "grok-4.5": _STANDARD_EFFORTS,
+        "grok-4.6": (*_STANDARD_EFFORTS, "xhigh"),
+        "grok-4.7": (*_STANDARD_EFFORTS, "xhigh"),
+    },
+    "deepseek": {
+        "deepseek-flash": ("none", "low", "high", "max"),
+        "deepseek-v4-pro": ("none", "low", "high", "max"),
+        "deepseek-v4-flash": ("none", "low", "high", "max"),
+        "deepseek-v4.1-flash": ("none", "low", "high", "max"),
+    },
+    "openrouter": {
+        "openai/gpt-5.4": ("none", *_STANDARD_EFFORTS, "xhigh"),
+    },
+}
+
+
+def chat_reasoning_efforts(
+    dialect: str, model: str, base_url: str | None = None
+) -> tuple[str, ...]:
+    if dialect not in _REASONING_EFFORTS:
+        return ()
+    default_url = PROVIDER_DIALECTS[cast(ProviderDialect, dialect)].default_base_url or ""
+    if base_url and base_url.rstrip("/") != default_url.rstrip("/"):
+        return ()
+    bare = model.removeprefix(f"{dialect}/").removeprefix("models/")
+    if dialect == "openai":
+        bare = bare.removeprefix("openai-chat:")
+    return _REASONING_EFFORTS[dialect].get(bare, ())

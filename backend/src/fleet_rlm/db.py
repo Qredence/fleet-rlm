@@ -84,6 +84,7 @@ class Session(Base):
         JSONB, server_default=text("""'{"messages": []}'::jsonb""")
     )
     model_override: Mapped[str | None] = mapped_column(Text)
+    reasoning_override: Mapped[JsonObject | None] = mapped_column(JSONB(none_as_null=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 import dspy
 import httpx
 import mlflow
+from dspy.clients.backend_selection import select_backend
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -39,7 +40,7 @@ from mlflow.entities import LiveSpan
 from mlflow.entities.trace_location import MlflowExperimentLocation
 from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
-from sqlalchemy import func, select, text, update
+from sqlalchemy import case, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -302,11 +303,22 @@ class SessionCreate(BaseModel):
     title: str = Field(default="New session", min_length=1)
 
 
+type ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
+class ReasoningOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    effort: ReasoningEffort
+
+
 class SessionEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
     model_override: str | None = None
+    reasoning_override: ReasoningOverride | None = None
 
 
 class SessionView(BaseModel):
@@ -315,6 +327,7 @@ class SessionView(BaseModel):
     id: UUID
     title: str
     model_override: str | None = None
+    reasoning_override: ReasoningOverride | None = None
     daytona_sandbox_id: str | None = None
     deleting: bool = False
     created_at: datetime
@@ -399,6 +412,11 @@ class WorkspaceSettingsView(BaseModel):
 class CatalogModel(BaseModel):
     id: str
     label: str
+
+
+class ChatModel(CatalogModel):
+    efforts: tuple[str, ...] = ()
+    effort: ReasoningEffort | None = None
 
 
 class ModelCatalog(BaseModel):
@@ -606,8 +624,16 @@ async def get_session(session_id: UUID, db: DbDep) -> SessionView:
     return SessionView.model_validate(session)
 
 
-@app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
-async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> SessionView:
+@app.get("/api/sessions/{session_id}/chat-model", dependencies=[Depends(require_auth)])
+async def get_chat_model(session_id: UUID, response: Response, runtime: RuntimeDep) -> ChatModel:
+    session = await store.get_session_or_raise(runtime.sessionmaker, session_id)
+    settings = await _effective_settings(runtime)
+    model = await _primary_chat_model(runtime, settings, session.model_override)
+    response.headers["Cache-Control"] = "private, no-store"
+    return model.model_copy(update={"effort": _applied_effort(model, session.reasoning_override)})
+
+
+def _session_edit_changes(payload: SessionEdit) -> dict[str, Any]:
     if not payload.model_fields_set:
         raise HTTPException(422, "At least one field to update is required")
     changes: dict[str, Any] = {}
@@ -621,6 +647,36 @@ async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> Ses
     if "model_override" in payload.model_fields_set:
         override = payload.model_override.strip() if payload.model_override is not None else ""
         changes["model_override"] = override or None
+    return changes
+
+
+@app.patch("/api/sessions/{session_id}", dependencies=[Depends(require_auth)])
+async def edit_session(
+    session_id: UUID, payload: SessionEdit, db: DbDep, runtime: RuntimeDep
+) -> SessionView:
+    changes = _session_edit_changes(payload)
+    conditions = [store.Session.id == session_id, store.Session.deleting.is_(False)]
+    if "reasoning_override" in payload.model_fields_set:
+        reasoning = payload.reasoning_override
+        if reasoning is not None:
+            session = await store.get_session_or_raise(runtime.sessionmaker, session_id)
+            settings = await _effective_settings(runtime)
+            model = await _primary_chat_model(
+                runtime, settings, changes.get("model_override", session.model_override)
+            )
+            if reasoning.model != model.id:
+                raise HTTPException(409, "The active model changed. Select thinking effort again.")
+            if reasoning.effort not in model.efforts:
+                raise HTTPException(422, "This model does not support the selected thinking effort")
+            conditions.append(
+                store.Session.model_override.is_not_distinct_from(session.model_override)
+            )
+        changes["reasoning_override"] = reasoning.model_dump() if reasoning is not None else None
+    elif "model_override" in changes:
+        changes["reasoning_override"] = case(
+            (store.Session.model_override.is_distinct_from(changes["model_override"]), None),
+            else_=store.Session.reasoning_override,
+        )
     async with db.begin():
         try:
             await store.lock_model_providers(db, (changes.get("model_override"),))
@@ -628,11 +684,13 @@ async def edit_session(session_id: UUID, payload: SessionEdit, db: DbDep) -> Ses
             raise HTTPException(409, str(error)) from error
         session = await db.scalar(
             update(store.Session)
-            .where(store.Session.id == session_id, store.Session.deleting.is_(False))
+            .where(*conditions)
             .values(**changes, updated_at=func.now())
             .returning(store.Session)
         )
         if session is None:
+            if len(conditions) > 2 and await db.get(store.Session, session_id) is not None:
+                raise HTTPException(409, "The active model changed. Select thinking effort again.")
             raise store.SessionNotFoundError(session_id)
     return SessionView.model_validate(session)
 
@@ -720,14 +778,24 @@ def _request_root_lm(runtime: Runtime, effective: Settings) -> dspy.BaseLM:
     return runtime.lm
 
 
-async def _chat_model(runtime: Runtime, effective: Settings, override: str | None):
+async def _chat_model(
+    runtime: Runtime, effective: Settings, override: str | None, preference: dict | None = None
+):
     selected = override or effective.llm_model
+    effort = (
+        _applied_effort(await _primary_chat_model(runtime, effective, override), preference)
+        if preference
+        else None
+    )
     if not selected.startswith("provider/"):
         endpoint = urlsplit(effective.llm_base_url or "").hostname or "workspace provider"
-        return override or _request_root_lm(
-            runtime, effective
-        ), f"{endpoint} · {override or effective.llm_model}"
-    return await _registered_chat_model(runtime, effective, selected)
+        model = override or _request_root_lm(runtime, effective)
+        if effort is not None:
+            model = (agent._model(effective, model) if isinstance(model, str) else model).copy(
+                reasoning_effort=effort
+            )
+        return model, f"{endpoint} · {selected}"
+    return await _registered_chat_model(runtime, effective, selected, effort)
 
 
 def _registered_model_reference(selected: str) -> tuple[UUID, str]:
@@ -748,7 +816,9 @@ async def _registered_model(runtime: Runtime, selected: str) -> tuple[store.LLMP
     return provider, name
 
 
-async def _registered_chat_model(runtime: Runtime, effective: Settings, selected: str):
+async def _registered_chat_model(
+    runtime: Runtime, effective: Settings, selected: str, effort: str | None = None
+):
     provider, name = await _registered_model(runtime, selected)
     base = provider.base_url
     if base:
@@ -769,6 +839,7 @@ async def _registered_chat_model(runtime: Runtime, effective: Settings, selected
         name,
         key,
         base,
+        **({"reasoning_effort": effort} if effort is not None else {}),
     )
     return lm, f"{provider.name} · {name}"
 
@@ -784,6 +855,48 @@ async def _workspace_sub_lm(runtime: Runtime, effective: Settings) -> dspy.BaseL
         lm, _ = await _registered_chat_model(runtime, effective, effective.sub_llm_model)
         return lm
     return _request_sub_lm(runtime, effective)
+
+
+async def _primary_chat_model(
+    runtime: Runtime, effective: Settings, override: str | None
+) -> ChatModel:
+    selected = override or effective.llm_model
+    if selected.startswith("provider/"):
+        try:
+            provider, name = await _registered_model(runtime, selected)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        lm = llm_registry.build_dspy_lm(
+            cast(llm_registry.ProviderDialect, provider.dialect),
+            cast(llm_registry.ProviderApiMode, provider.api_mode),
+            name,
+            base_url=provider.base_url,
+        )
+    else:
+        name = re.split(r"[/:]", selected, maxsplit=1)[-1]
+        lm = agent._model(effective, selected)
+    selection = select_backend(lm)
+    efforts = ()
+    if route := selection.resolution:
+        name = route.model
+        if selection.native:
+            base = selection.clients.get("api_base") or selection.clients.get("base_url")
+            efforts = llm_registry.chat_reasoning_efforts(
+                route.provider.removesuffix("-chat"), name, base
+            )
+    label = "GPT-" + name[4:] if name.startswith("gpt-") else name
+    label = re.sub(r"-(luna|sol|astra|terra)$", lambda match: " " + match[1].title(), label)
+    return ChatModel(id=selected, label=label, efforts=efforts)
+
+
+def _applied_effort(model: ChatModel, preference: dict | None) -> ReasoningEffort | None:
+    if (
+        preference
+        and preference.get("model") == model.id
+        and preference.get("effort") in model.efforts
+    ):
+        return cast(ReasoningEffort, preference["effort"])
+    return None
 
 
 def _is_jev_model(model: str) -> bool:
@@ -1912,7 +2025,9 @@ async def _execute_turn(
                     )
                     await stream.files(run_id, manifest)
 
-            root_model, model_label = await _chat_model(runtime, effective, session.model_override)
+            root_model, model_label = await _chat_model(
+                runtime, effective, session.model_override, session.reasoning_override
+            )
             sub_lm = await _workspace_sub_lm(runtime, effective)
             billing_model = ("primary", model_label)
             result = await agent.run_workspace_task(

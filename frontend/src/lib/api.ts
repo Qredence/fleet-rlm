@@ -1,9 +1,13 @@
 import type { FleetMessage, WorkspaceFileEntry } from './messages'
 
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+type ReasoningOverride = { model: string; effort: ReasoningEffort }
+
 export interface Session {
   id: string
   title: string
   model_override: string | null
+  reasoning_override?: ReasoningOverride | null
   daytona_sandbox_id: string | null
   deleting: boolean
   created_at: string
@@ -13,6 +17,7 @@ export interface Session {
 export interface SessionUpdate {
   title?: string
   model_override?: string | null
+  reasoning_override?: ReasoningOverride | null
 }
 
 export interface WorkspaceFile extends WorkspaceFileEntry {
@@ -46,6 +51,11 @@ export interface SkillDetail extends Skill {
 export interface CatalogModel {
   id: string
   label: string
+}
+
+export interface ChatModel extends CatalogModel {
+  efforts: ReasoningEffort[]
+  effort: ReasoningEffort | null
 }
 
 export interface ModelCatalog {
@@ -441,6 +451,8 @@ export function createApi(token?: string) {
     readiness: (signal?: AbortSignal) => json<{ status: 'ok' }>('/readyz', { signal }, false),
     listSessions: (signal?: AbortSignal) => json<Session[]>(sessionsPath, { signal }),
     getSession: (id: string, signal?: AbortSignal) => json<Session>(sessionPath(id), { signal }),
+    getChatModel: (id: string, signal?: AbortSignal) =>
+      json<ChatModel>(`${sessionPath(id)}/chat-model`, { signal }),
     createSession: (title?: string) => json<Session>(sessionsPath, writeJson('POST', { title })),
     updateSession: (id: string, changes: SessionUpdate) =>
       json<Session>(sessionPath(id), writeJson('PATCH', changes)),
