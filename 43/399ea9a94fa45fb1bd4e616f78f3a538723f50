@@ -1,0 +1,14 @@
+frontend/src/components/agent/SessionWorkspace.tsx
+  h_f276322eb5eb9f 92-95,159-160,162,177-180,368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "43399ea9a94fa45fb1bd4e616f78f3a538723f50",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
