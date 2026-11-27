@@ -1,0 +1,19 @@
+scripts/neon/fleet_roles.sql
+  s_d2ae1814815e1f::t_c187722abf1d03 1-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6fd9c3185a21a0e8eda5c16d6b2269464da37a7",
+  "prompts": {},
+  "sessions": {
+    "s_d2ae1814815e1f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21df4-1cb6-7343-943a-771f036f2ba3",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
