@@ -19,8 +19,9 @@ export function ModelSelector(props: ModelSelectorProps) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const loadingRef = useRef(false)
-  const modelName = model?.replace(/^provider\/[^/]+\//, '').replace(/^openai\//, '')
-  const label = props.resolvedLabel ?? (modelName?.replace(/^gpt-/i, 'GPT-') || 'Workspace default')
+  const modelName = model?.replace(/^(?:provider|chatgpt)\/[^/]+\//, '').replace(/^openai\//, '')
+  const name = modelName?.replace(/^gpt-/i, 'GPT-') || 'Workspace default'
+  const label = props.resolvedLabel ?? (model?.startsWith('chatgpt/') ? `${name} · Using ChatGPT plan` : name)
 
   async function openPicker() {
     if (disabled || loadingRef.current) return

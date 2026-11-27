@@ -55,6 +55,14 @@ Open **Settings → Providers → Add provider** to register an endpoint and a k
 
 Fetch the provider's models or specify its default model. In **Settings → Models → Global Workspace Models**, select the primary and sub-LLM independently and save. Each selection uses that provider’s endpoint and credentials. The composer can override the primary model for an individual session.
 
+### Use your ChatGPT plan locally
+
+On a single-user Fleet installation, set `FLEET_CHATGPT_PLAN_ENABLED=true` in `backend/.env` and restart the backend bound to `127.0.0.1:8000`. Open the local frontend at `http://localhost:5173`, choose **Settings → Providers → Continue with ChatGPT**, and approve plan usage in the OpenAI tab. After the callback shows the result, return to Fleet Settings to see the connection. If Fleet uses bearer authentication, use the provider administrator token to connect and manage accounts.
+
+Choose a discovered model in the composer or set local primary and sub-model defaults under **Settings → Models → Local ChatGPT Plan Models**. Fleet offers GPT-6 Luna when your account’s catalog includes it. Plan usage applies to interactive chat and its delegated workspace actions. Optimization jobs and decision models use their existing settings. Learn about [eligible plans and usage limits](https://developers.openai.com/siwc/token-sharing-open-source).
+
+Use **Manage usage** to review the allowance and **Sign out** to clear Fleet’s local tokens. If Fleet cannot confirm revocation, disconnect Fleet from ChatGPT settings. Set `FLEET_CHATGPT_PLAN_ENABLED=false` and restart the backend to disable the feature. Keep it disabled on hosted or shared deployments.
+
 ### Build and roll out the sandbox image
 
 Use the Daytona CLI for the target project and set `FLEET_DAYTONA_REGION` to the deployment region. Archive a committed revision. The archive contains the Dockerfile, locked dependencies, and tracked bundled Skills.

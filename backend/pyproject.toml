@@ -39,6 +39,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "mlflow>=3.18.0",
     "cryptography>=50.0.2",
+    "pyjwt[crypto]>=2.10",
 ]
 
 [project.urls]
