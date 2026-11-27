@@ -1,0 +1,28 @@
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 31,484,486,662-665,731,753
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 83-84,91,105,184,188-191,1888-1890,1899-1900,1905,1965-1970,1973-1974,1984-1986,1996-1999,2007-2008,2119,2125-2126,2131,2140,2154-2157,2187-2188,2197,2199,2205,2207,2209,2315-2316,2320,2446,2531
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 58,789,793-794,796-797,802,834,848,850-854,901
+backend/src/fleet_rlm/telemetry.py
+  h_f276322eb5eb9f 1-116
+backend/src/fleet_rlm/tracing.py
+  h_f276322eb5eb9f 4,6-7,96-98,163-211,220,223-239
+backend/tests/test_optimization_ui_api.py
+  h_f276322eb5eb9f 629-630,634-636
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 10,451-482,498,3102-3268
+docs/plans/fleet-neon-mlflow-rollout.md
+  h_f276322eb5eb9f 1-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8013c8373a7ce65d4571eb1857ec29582bd30e0e",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
