@@ -1,0 +1,14 @@
+scripts/neon/rehearse_roles.py
+  h_f276322eb5eb9f 219-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6acca1e9ec8274b944bc6f0b425236419b31c08",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
