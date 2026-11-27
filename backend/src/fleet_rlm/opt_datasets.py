@@ -7,7 +7,7 @@ import re
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, overload
-from urllib.parse import urlsplit
+from urllib.parse import unquote, unquote_plus, urlsplit
 
 from .config import Settings
 
@@ -62,6 +62,32 @@ class DatasetValidationError(ValueError):
 def contains_secret(text: str) -> bool:
     """Return True if *text* matches any raw credential or secret pattern."""
     return bool(_SECRET_SCAN_RE.search(text))
+
+
+def database_url_secrets(settings: Settings, *urls: str | None) -> list[str]:
+    """Collect PostgreSQL DSNs and password values for exact-match redaction."""
+    secrets = []
+    optimization_url = settings.optimization_database_url
+    for url in (
+        settings.database_url,
+        settings.database_direct_url,
+        optimization_url.get_secret_value() if optimization_url is not None else None,
+        *urls,
+    ):
+        if not url:
+            continue
+        secrets.append(url)
+        try:
+            parts = urlsplit(url)
+            if password := parts.password:
+                secrets.extend((password, unquote(password)))
+            for pair in parts.query.split("&"):
+                key, _, value = pair.partition("=")
+                if value and unquote_plus(key) == "password":
+                    secrets.extend((value, unquote_plus(value)))
+        except ValueError:
+            continue
+    return secrets
 
 
 @overload

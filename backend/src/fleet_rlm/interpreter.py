@@ -15,10 +15,9 @@ from collections.abc import (
     Callable,
     Collection,
     Coroutine,
-    Generator,
     Mapping,
 )
-from contextlib import AsyncExitStack, aclosing, asynccontextmanager, contextmanager, suppress
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager, suppress
 from contextvars import Context, copy_context
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -54,9 +53,11 @@ from daytona.v2.process import AsyncProcessHandle
 from daytona.v2.types import StreamLogEvent, VolumeMount
 from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.primitives.sandbox_guest import INTERPRETER_TOOL
-from mlflow.entities import LiveSpan
+from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
 
 from .config import Settings
+from .tracing import payload as trace_payload
+from .tracing import span as workspace_span
 
 WORKSPACE = "/workspace"
 ARTIFACTS = f"{WORKSPACE}/artifacts"
@@ -68,36 +69,22 @@ ExecutionObserver = Callable[[str, Execution], Awaitable[str | FinalOutput]]
 ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitable[Any]]
 
 
-@contextmanager
-def workspace_span(
-    name: str, *, root: bool = False, attributes: dict[str, Any] | None = None
-) -> Generator[LiveSpan | None]:
-    if not root and mlflow.get_current_active_span() is None:
-        yield None
-        return
-    with mlflow.start_span(name, span_type="CHAIN", attributes=attributes) as span:
-        try:
-            yield span
-        except BaseException as error:
-            # Provider exception details can contain URLs or other request data.
-            # End the span before re-raising so MLflow records only the error type.
-            span.set_status("ERROR")
-            span.set_attribute("error.type", type(error).__name__)
-            failure = error
-        else:
-            return
-    raise failure
-
-
 @asynccontextmanager
 async def make_daytona_client(settings: Settings) -> AsyncGenerator[AsyncDaytona]:
     if "DAYTONA_API_URL" in os.environ or "DAYTONA_V2_API_URL" in os.environ:
         raise ValueError("Unset DAYTONA_API_URL and DAYTONA_V2_API_URL for Daytona v2")
+    shared_mlflow_provider = (
+        settings.mlflow_tracking_uri and not MLFLOW_USE_DEFAULT_TRACER_PROVIDER.get()
+    )
+    sdk_otel = settings.daytona_otel_enabled
+    if sdk_otel and shared_mlflow_provider and not settings.mlflow_full_trace_capture:
+        _LOG.info("Using Fleet Daytona spans for bounded MLflow tracing")
+        sdk_otel = False
     async with AsyncDaytona(
         DaytonaConfig(
             api_key=settings.daytona_api_key.get_secret_value(),
             request_timeout=30,
-            otel_enabled=settings.daytona_otel_enabled,
+            otel_enabled=sdk_otel,
         )
     ) as daytona:
         yield daytona
@@ -762,17 +749,17 @@ class DaytonaCodeInterpreter:
             await self._start()
 
             async def cell() -> str | FinalOutput:
-                if mlflow.get_current_active_span() is None:
-                    return await self._execute(code, variables or {})
-                with mlflow.start_span(
-                    name="daytona.python.execute",
+                with workspace_span(
+                    "daytona.python.execute",
                     span_type="TOOL",
                     attributes={
                         "daytona.sandbox_id": self._sandbox.id,
                         "daytona.worker_id": self._handle.id if self._handle else "",
                     },
                 ) as span:
-                    span.set_inputs({"code": code})
+                    if span is None:
+                        return await self._execute(code, variables or {})
+                    span.set_inputs(trace_payload({"code": code}))
                     try:
                         output = await self._execute(code, variables or {})
                     except asyncio.CancelledError:
@@ -780,9 +767,11 @@ class DaytonaCodeInterpreter:
                         span.set_attribute("daytona.execution.status", "cancelled")
                         raise
                     span.set_outputs(
-                        {"submission": output.output}
-                        if isinstance(output, FinalOutput)
-                        else {"stdout": output}
+                        trace_payload(
+                            {"submission": output.output}
+                            if isinstance(output, FinalOutput)
+                            else {"stdout": output}
+                        )
                     )
                     return output
 

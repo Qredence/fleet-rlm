@@ -44,7 +44,13 @@ from sqlalchemy import select
 
 from . import agent, db, interpreter, skills
 from .config import Settings
-from .opt_datasets import VALID_SPLITS, VALID_VERIFIER_TYPES, read_jsonl, scrub_secrets
+from .opt_datasets import (
+    VALID_SPLITS,
+    VALID_VERIFIER_TYPES,
+    database_url_secrets,
+    read_jsonl,
+    scrub_secrets,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -87,16 +93,7 @@ def _collect_settings_secrets(
     database_url: str | None = None,
     role_models: Mapping[RoleName, "RoleModelConfig"] | None = None,
 ) -> list[str]:
-    secrets: list[str] = []
-    for raw in (settings.database_url, settings.database_direct_url, database_url):
-        if raw:
-            secrets.append(raw)
-            try:
-                parsed = urlsplit(raw)
-                if parsed.password:
-                    secrets.append(parsed.password)
-            except ValueError:
-                pass
+    secrets = database_url_secrets(settings, database_url)
     for attr in (
         "api_bearer_token",
         "daytona_api_key",
@@ -104,7 +101,6 @@ def _collect_settings_secrets(
         "s3_access_key_id",
         "s3_secret_access_key",
         "llm_api_key",
-        "optimization_database_url",
         "neon_api_key",
     ):
         val = getattr(settings, attr, None)

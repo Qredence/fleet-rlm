@@ -7,6 +7,7 @@ import json
 import logging
 import socket
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1865,7 +1866,11 @@ async def test_neon_branch_cleanup_progress_partial_lines_mlflow_url_and_s3_fall
 
     # 2. mlflow_run_url returns None instead of broken experiment '0' when experiment ID unknown
     runtime = api.app.state.runtime
-    assert opt_runner.mlflow_run_url(runtime, "fleet-rlm", "run-1") is not None
+    historical = opt_runner.mlflow_run_url(runtime, "fleet-rlm", "run-1")
+    assert "#/experiments/7/runs/run-1" in historical
+    separated = replace(runtime, mlflow_optimization_experiment_id="8")
+    new = opt_runner.mlflow_run_url(separated, "fleet-rlm-optimization", "run-2")
+    assert "#/experiments/8/runs/run-2" in new
     assert opt_runner.mlflow_run_url(runtime, "other-exp", "run-1") is None
     _swap_runtime_settings(opt_app.settings, mlflow_experiment_id=None)
     assert opt_runner.mlflow_run_url(api.app.state.runtime, "fleet-rlm", "run-1") is None
