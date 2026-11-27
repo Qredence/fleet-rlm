@@ -1,0 +1,21 @@
+backend/snapshot/requirements.in
+  s_dc0f1aa28f3d44::t_059b589ff6b578 2,4
+backend/snapshot/requirements.lock
+  s_dc0f1aa28f3d44::t_16388e8595053b 364-448,845-848
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5e3d91df46254a050d2557326748bb43972fce3d",
+  "prompts": {},
+  "sessions": {
+    "s_dc0f1aa28f3d44": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21b37-1ddf-7560-8130-8511b50732b2",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
