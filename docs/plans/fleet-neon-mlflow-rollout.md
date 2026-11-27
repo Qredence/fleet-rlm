@@ -35,24 +35,36 @@ On November 27, 2026 the Neon plugin listed an unprotected default main, a canar
 
 **Implementation prompt.** Write role provisioning and a disposable-branch rehearsal. Provision ordinary SQL login roles. Let app_migrator own Fleet’s schema and objects and perform migration backfills. Grant app_runtime CONNECT, schema USAGE and required table/sequence DML for existing and future objects created by app_migrator. Remove inherited owner membership and PUBLIC CREATE/TEMP privileges where applicable. Use the pooled hostname for runtime and the direct hostname for Alembic with NullPool. Both can use port 5432. [Neon connection pooling](https://neon.com/docs/connect/connection-pooling) and [branch lifecycle](https://neon.com/docs/introduction/branching). Serialize migrations per branch. Budget workers × (pool size + overflow), optimizer processes and migration headroom against actual compute limits. Collect peak active sessions, pool wait and query latency under concurrent turn/optimization load before proposing indexes.
 
-Require the branch creation harness to export a freshly created, expiring child ID and role URLs. Fail closed on mismatched branch identity before any write. Exercise old rows, new tables and sequence allocation as runtime, then run the normal root-lock concurrency tests there.
+### Slice 2 review gate
 
-```bash
-set -eu
-for uri in "$MIGRATOR_DIRECT_URL" "$RUNTIME_POOL_URL"; do
-  test "$(psql -XAt "$uri" -c 'SHOW neon.branch_id')" = "${REHEARSAL_BRANCH_ID:?}"
-done
-test "$REHEARSAL_BRANCH_ID" != br-red-bonus-baxo3rv9
-(cd backend && FLEET_DATABASE_DIRECT_URL="$MIGRATOR_DIRECT_URL" FLEET_DATABASE_URL="$RUNTIME_POOL_URL" uv run alembic upgrade head)
-psql -X -v ON_ERROR_STOP=1 "$RUNTIME_POOL_URL" <<'SQL'
-DO $$ BEGIN
-  CREATE TABLE public.__fleet_privilege_probe (id integer);
-  RAISE EXCEPTION 'app_runtime can create permanent tables';
-EXCEPTION WHEN insufficient_privilege THEN NULL;
-END $$;
-SQL
-psql -X "$MIGRATOR_DIRECT_URL" -c 'SHOW max_connections' -c 'SELECT datname,state,count(*) FROM pg_stat_activity GROUP BY 1,2'
+On November 27, 2026 the Neon plugin created [fleet-role-rehearsal-cacb2dca](https://console.neon.tech/app/projects/polished-cherry-13944788/branches/br-misty-king-bac8yhbr) in the existing project. Its ID is `br-misty-king-bac8yhbr` and its expiry is November 28 at 17:44 UTC. The project had reached its schema-only root quota. Neon also disallows children of expiring parents. The rehearsal used a child of the existing schema-only reference `br-flat-rice-baxyhhya`. A preflight count on the parent found one Alembic revision row and zero application rows. Only the child received writes.
+
+| Gate | Observed on the disposable child |
+| --- | --- |
+| Direct login and real schema upgrade | `app_migrator` ran `alembic upgrade head` from `0003_fk_and_query_indexes` through `0011_session_reasoning_override`. The Neon plugin independently confirmed the revision and ownership of the public schema and all 11 Fleet tables, including the revision table. |
+| Pooled runtime writes | Both session and current user were `app_runtime`. A row inserted before the upgrade survived. SELECT, INSERT, UPDATE and DELETE succeeded on the existing sessions table and a new migrator-owned identity table. Explicit sequence allocation succeeded. |
+| DDL and migration metadata | Permanent CREATE TABLE, ALTER TABLE, DROP TABLE, CREATE TEMP TABLE and CREATE SCHEMA each raised SQLSTATE `42501`. Updating the revision table also returned `42501`. |
+| Application concurrency | The existing root-lock test passed using the pooled runtime credentials. Two concurrent contenders produced one winner and one conflict. |
+
+**Reproduce on a fresh disposable branch.** From the repository root, with the Neon CLI authenticated to the Fleet project, run:
+
+```sh
+(cd backend && PGSSLROOTCERT=/etc/ssl/cert.pem uv run --locked python ../scripts/neon/rehearse_roles.py)
 ```
+
+The [rehearsal runner](../../scripts/neon/rehearse_roles.py) creates a 24-hour child of the reference. It verifies the branch metadata, both endpoint types and the SQL identities, then runs [the provisioning transaction](../../scripts/neon/fleet_roles.sql), Alembic, permission probes and the application contention test. Use the path to your system CA bundle if it differs. The observed run used the plugin-created child and existing loopback forwards because outbound port 5432 timed out. TLS still verified the Neon hostname.
+
+```sh
+(
+  cd backend
+  export PGSSLROOTCERT=/etc/ssl/cert.pem REHEARSAL_DIRECT_PORT=15433 REHEARSAL_POOL_PORT=15432
+  uv run --locked python ../scripts/neon/rehearse_roles.py br-misty-king-bac8yhbr
+)
+```
+
+The runner provisions random role passwords over verified TLS and retrieves each role’s URL using the authenticated Neon CLI. A rerun on the same child reuses the existing credentials. Expected output includes the old and new revisions, six `42501` results, and `1 passed` for the contention test. A failure exits nonzero. The explicit database grants give the migrator TEMP for the temporary helper function in revision 0004. The runtime has DML on application tables and no write grant on migration metadata.
+
+**Review boundary.** This establishes permissions on `neondb` in the rehearsal child. Main branch protection, application credential rollout and representative capacity or latency measurements remain separate decisions. The Neon plugin reported `max_connections = 450` on the test compute. The two-contender check establishes correctness under contention. Throughput remains unmeasured.
 
 ## 3. Deploy and qualify one shared tracking endpoint
 
