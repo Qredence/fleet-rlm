@@ -2369,8 +2369,12 @@ async def _execute_turn(
             known_files = {file.path: (file.sha256, file.size_bytes) for file in files}
 
             async def emit(run_id: str, event: agent.RunEvent) -> None:
-                if run_id == root_id and isinstance(event, agent.RunResultEvent):
-                    return  # The root result becomes visible only after artifacts are committed.
+                # The root result waits for artifact commit. A Python preview forwards a
+                # single frame without suspending before the queue put.
+                if (run_id == root_id and isinstance(event, agent.RunResultEvent)) or (
+                    isinstance(event, agent.PythonExecProgressEvent) and queue.full()
+                ):
+                    return
                 await stream.publish(run_id, event)
                 if isinstance(event, agent.RunStartedEvent) and event.kind == "workspace":
                     await stream.skills(

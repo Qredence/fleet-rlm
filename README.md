@@ -26,7 +26,7 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    ```bash
    cp backend/.env.example backend/.env
    ```
-   Set the Postgres URLs, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_IMAGE`, `FLEET_DAYTONA_REGION`, and the `FLEET_S3_*` variables shown in the example. Set `FLEET_LLM_MODEL`, `FLEET_SUB_LLM_MODEL`, `FLEET_LLM_API_KEY`, and `TYPESAFE_API_KEY`. Unset `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` when running the v2 client. See [Build and roll out the sandbox image](#build-and-roll-out-the-sandbox-image).
+   Use the pooled Postgres URL for `FLEET_DATABASE_URL` and the direct URL for `FLEET_DATABASE_DIRECT_URL`. Point both at the same Neon branch and database and keep TLS and channel binding enabled. Set `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_IMAGE`, `FLEET_DAYTONA_REGION`, the `FLEET_S3_*` variables, `FLEET_LLM_MODEL`, `FLEET_SUB_LLM_MODEL`, `FLEET_LLM_API_KEY`, and `TYPESAFE_API_KEY` as shown in the example. Unset `DAYTONA_API_URL` and `DAYTONA_V2_API_URL` when running the v2 client. See [Neon connection security](https://neon.com/docs/connect/connect-securely) and [Build and roll out the sandbox image](#build-and-roll-out-the-sandbox-image).
 
    > Models, RLM and history budgets, and the Python cell timeout can be edited in **Settings**. Environment variables control the Daytona image, region, and lifecycle, the storage bucket, the model gateway, MLflow, and worker concurrency.
 

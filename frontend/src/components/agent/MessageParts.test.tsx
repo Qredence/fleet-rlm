@@ -28,4 +28,14 @@ it('preserves unmarked Python results as actions and distinguishes a running cal
     .toContain('Activity · 3 Python actions · 1 recovered error')
   expect(render([{ type: 'tool-python_exec', toolCallId: 'running', state: 'input-available', input: 'compute()' }], true))
     .toContain('Activity · Running Python')
+  const progress: FleetPart = {
+    type: 'tool-python_exec', toolCallId: 'running', state: 'output-available',
+    input: 'compute()', output: 'Working on the result', preliminary: true,
+  }
+  const marker: FleetPart = { type: 'data-python-submission', data: { tool_call_id: 'running' } }
+  const live = render([progress, marker], true)
+  expect(live).toContain('Activity · Running Python')
+  expect(live).toContain('Working on the result')
+  expect(live).not.toContain('Turn details')
+  expect(render([progress, marker])).toContain('Activity · 1 Python action')
 })

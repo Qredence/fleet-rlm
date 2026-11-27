@@ -285,3 +285,15 @@ On 2026-11-26, the workspace default sent the primary model request for `openai/
 | [Excel chat](http://localhost:5173/#/sessions/01a21905-921d-7e6e-a98a-bdf9d26c3960) | Uploaded ledger.xlsx through Workspace. A natural request activated xlsx. The first attempt ended without an artifact. A second request produced repaired.xlsx. Artifacts offered a download. The downloaded workbook retained its hidden row and Summary sheet, had a cached subtotal of 20, and recalculated to 30 after changing the second input from 8 to 18. |
 
 These are single browser acceptance runs. The catalog's five-repeat release qualification remains open.
+
+
+## MLflow capture canary, 2026-11-27
+
+Replayed five paired synthetic tool-heavy chats through the FastAPI SSE route, using the production RLM and Python worker with fixture models, local sandbox emulation, and stubbed persistence. Both capture modes exported to the running MLflow 3.18 server. All ten SSE-advertised turn traces resolved after flush within the 60-second readback budget, all ten had correlated memory traces, and the nested fixture preserved the child RLM hierarchy.
+
+| Capture | Persisted turns | Median stored bytes |
+| --- | ---: | ---: |
+| Full DSPy capture | 5/5 | 377,002 |
+| Bounded interactive capture | 5/5 | 87,797 |
+
+Median storage fell **76.7%**. The replay reader recovered a task from the full-capture trace. A historical optimization run and a synthetic optimization run both resolved through the experiment recorded for each job. The canary exercised MLflow delivery with synthetic workloads and local dependencies. [Full-capture traces](http://127.0.0.1:5001/#/experiments/78/traces) · [Bounded traces](http://127.0.0.1:5001/#/experiments/79/traces) · [Nested trace](http://127.0.0.1:5001/#/experiments/79/traces?traceId=tr-1af4ab10eec0c0f6d29d4cf28aef61dc) · [Historical optimization run](http://127.0.0.1:5001/#/experiments/1/runs/e2a84f714cf14f2597fe766b437d1ba6) · [Synthetic optimization run](http://127.0.0.1:5001/#/experiments/80/runs/9372da5ee284456eb8d2a142922d912a)

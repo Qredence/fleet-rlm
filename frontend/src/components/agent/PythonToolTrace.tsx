@@ -1,5 +1,5 @@
 import { CircleAlert, Terminal } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceIcon, TraceLine, TraceTitle,
@@ -61,7 +61,9 @@ export function StackTrace({ error }: { error: string }) {
 }
 
 export function PythonToolTrace({ part, live, children }: { part: PythonPart; live: boolean; children?: ReactNode }) {
+  const [open, setOpen] = useState<boolean>()
   const pending = part.state === 'input-streaming' || part.state === 'input-available'
+    || (part.state === 'output-available' && part.preliminary === true)
   const running = live && pending
   const failed = part.state === 'output-error'
   const raw = 'rawInput' in part ? part.rawInput : undefined
@@ -80,7 +82,7 @@ export function PythonToolTrace({ part, live, children }: { part: PythonPart; li
   if (!code && stdout === undefined && !failed && !children) return line
 
   return (
-    <TraceCollapsible>
+    <TraceCollapsible open={open ?? (running && stdout !== undefined)} onOpenChange={setOpen}>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
         <div className="flex min-w-0 flex-col gap-2">
