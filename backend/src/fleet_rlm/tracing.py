@@ -1,9 +1,10 @@
 """Fleet's capture policy for MLflow runtime traces."""
 
 import json
+import logging
 import re
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
@@ -92,7 +93,9 @@ def capture(settings: Settings) -> Generator[None]:
             yield
         else:
             callbacks = [c for c in dspy.settings.callbacks if not isinstance(c, MlflowCallback)]
-            with dspy.context(callbacks=[*callbacks, FleetMlflowCallback()]):
+            with telemetry_operation("create DSPy callback"):
+                callbacks.append(FleetMlflowCallback())
+            with dspy.context(callbacks=callbacks):
                 yield
     finally:
         _CONTEXT.reset(token)
@@ -157,6 +160,55 @@ def payload(value: Any, extra_secrets: Sequence[str] = ()) -> Any:
         return {"content": _OMITTED}
 
 
+_ENABLED = ContextVar("fleet_tracing_enabled", default=True)
+
+
+@contextmanager
+def trace_context(
+    *, enabled: bool | None = None, tags: dict[str, str] | None = None
+) -> Generator[None]:
+    stack = ExitStack()
+    with telemetry_operation("enter trace context"):
+        stack.enter_context(mlflow.tracing.context(enabled=enabled, tags=tags))
+    try:
+        yield
+    finally:
+        with telemetry_operation("exit trace context"):
+            stack.close()
+
+
+@contextmanager
+def without_tracing() -> Generator[None]:
+    token = _ENABLED.set(False)
+    try:
+        callbacks = [c for c in dspy.settings.callbacks if not isinstance(c, MlflowCallback)]
+        with trace_context(enabled=False), dspy.context(callbacks=callbacks):
+            yield
+    finally:
+        _ENABLED.reset(token)
+
+
+@contextmanager
+def telemetry_operation(name: str) -> Generator[None]:
+    """Guard a single SDK operation. Application work belongs outside this scope."""
+    try:
+        yield
+    except Exception as error:
+        logging.getLogger(__name__).warning("MLflow %s failed (%s)", name, type(error).__name__)
+
+
+def record[**P](operation: Callable[P, Any], *args: P.args, **kwargs: P.kwargs) -> None:
+    with telemetry_operation(getattr(operation, "__name__", "record")):
+        operation(*args, **kwargs)
+
+
+def active_span() -> LiveSpan | None:
+    if _ENABLED.get():
+        with telemetry_operation("get active span"):
+            return mlflow.get_current_active_span()
+    return None
+
+
 @contextmanager
 def span(
     name: str,
@@ -165,20 +217,26 @@ def span(
     span_type: str = SpanType.CHAIN,
     attributes: dict[str, Any] | None = None,
 ) -> Generator[LiveSpan | None]:
-    if not root and mlflow.get_current_active_span() is None:
+    if not _ENABLED.get() or (not root and active_span() is None):
         yield None
         return
-    with mlflow.start_span(name, span_type=span_type, attributes=attributes) as active:
-        try:
-            yield active if isinstance(active, LiveSpan) else None
-        except BaseException as error:
-            # End the span before propagating the exception to MLflow's context manager.
-            active.set_status("ERROR")
-            active.set_attribute("error.type", type(error).__name__)
-            failure = error
-        else:
-            return
-    raise failure
+    stack = ExitStack()
+    active = None
+    with telemetry_operation("start span"):
+        active = stack.enter_context(
+            mlflow.start_span(name, span_type=span_type, attributes=attributes)
+        )
+    try:
+        yield active if isinstance(active, LiveSpan) else None
+    except BaseException as error:
+        if active is not None:
+            with telemetry_operation("record span error"):
+                active.set_status("ERROR")
+                active.set_attribute("error.type", type(error).__name__)
+        raise
+    finally:
+        with telemetry_operation("end span"):
+            stack.close()
 
 
 def _reported_usage(response: Any) -> dict[str, int]:

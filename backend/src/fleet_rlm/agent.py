@@ -28,7 +28,7 @@ from mlflow.entities import LiveSpan
 from pydantic import BaseModel, Field
 
 from .config import Settings
-from .tracing import bounded_capture
+from .tracing import bounded_capture, record, trace_context
 from .tracing import span as trace_span
 
 _SKILL_PREVIEW_CHARS = 4000
@@ -481,9 +481,9 @@ def _trace_rlm_request(span: LiveSpan | None, root_run_id: str | None, prompt: s
     if span is None:
         return
     if root_run_id is not None:
-        mlflow.update_current_trace(tags={"fleet.run_id": root_run_id})
+        record(mlflow.update_current_trace, tags={"fleet.run_id": root_run_id})
     if not bounded_capture():
-        span.set_inputs({"task": prompt})
+        record(span.set_inputs, {"task": prompt})
 
 
 async def run_workspace_task(
@@ -659,7 +659,10 @@ async def run_workspace_task(
                     "fleet.rlm.llm_query", "CHAIN", child_id, current_run_id, depth + 1
                 ) as span:
                     if span is not None:
-                        span.set_attributes({"fleet.tool": name, "fleet.query_count": query_count})
+                        record(
+                            span.set_attributes,
+                            {"fleet.tool": name, "fleet.query_count": query_count},
+                        )
                     telemetry.sub_lm_queries += query_count
                     value = await invoke()
                 if batched:
@@ -725,7 +728,7 @@ async def run_workspace_task(
 
         def invoke() -> dspy.Prediction:
             with (
-                mlflow.tracing.context(tags={"fleet.run_id": run_id}),
+                trace_context(tags={"fleet.run_id": run_id}),
                 trace_run("fleet.rlm.run", "AGENT", current_run_id, parent_run_id, depth) as span,
                 dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory),
             ):
@@ -747,7 +750,7 @@ async def run_workspace_task(
                     history=previous,
                 )
                 if span is not None and not bounded_capture():
-                    span.set_outputs({"answer": prediction.answer})
+                    record(span.set_outputs, {"answer": prediction.answer})
                 return prediction
 
         if depth == 0:

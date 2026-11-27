@@ -26,7 +26,6 @@ from time import monotonic
 from typing import Any, cast
 from uuid import uuid4
 
-import mlflow
 from daytona import AsyncDaytona, DaytonaConfig
 from daytona.v2 import AsyncSandbox
 from daytona.v2.errors import (
@@ -56,6 +55,7 @@ from dspy.primitives.sandbox_guest import INTERPRETER_TOOL
 from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
 
 from .config import Settings
+from .tracing import active_span, record
 from .tracing import payload as trace_payload
 from .tracing import span as workspace_span
 
@@ -786,19 +786,20 @@ class DaytonaCodeInterpreter:
                 ) as span:
                     if span is None:
                         return await self._execute(code, variables or {}, on_stdout)
-                    span.set_inputs(trace_payload({"code": code}))
+                    record(span.set_inputs, trace_payload({"code": code}))
                     try:
                         output = await self._execute(code, variables or {}, on_stdout)
                     except asyncio.CancelledError:
-                        span.set_status("ERROR")
-                        span.set_attribute("daytona.execution.status", "cancelled")
+                        record(span.set_status, "ERROR")
+                        record(span.set_attribute, "daytona.execution.status", "cancelled")
                         raise
-                    span.set_outputs(
+                    record(
+                        span.set_outputs,
                         trace_payload(
                             {"submission": output.output}
                             if isinstance(output, FinalOutput)
                             else {"stdout": output}
-                        )
+                        ),
                     )
                     return output
 
@@ -830,7 +831,7 @@ class DaytonaCodeInterpreter:
                 raise TimeoutError("Turn timed out before Daytona worker startup")
         self._tag = f"fleet-python-{uuid4().hex}"
         self._cursor = None
-        if mlflow.get_current_active_span() is not None:
+        if active_span() is not None:
             self._worker_context = copy_context()
         try:
             with workspace_span(
@@ -844,9 +845,13 @@ class DaytonaCodeInterpreter:
                     execution_timeout=remaining,
                 )
                 if span is not None:
-                    span.set_attribute("daytona.worker_id", self._handle.id)
+                    record(span.set_attribute, "daytona.worker_id", self._handle.id)
                     if remaining is not None:
-                        span.set_attribute("daytona.worker.execution_timeout_seconds", remaining)
+                        record(
+                            span.set_attribute,
+                            "daytona.worker.execution_timeout_seconds",
+                            remaining,
+                        )
         except (Exception, asyncio.CancelledError) as error:
             self._closed = True
             await self._reset()
@@ -893,7 +898,7 @@ class DaytonaCodeInterpreter:
             "daytona.worker.stop", attributes={"daytona.sandbox_id": self._sandbox.id}
         ) as span:
             if span is not None and self._handle is not None:
-                span.set_attribute("daytona.worker_id", self._handle.id)
+                record(span.set_attribute, "daytona.worker_id", self._handle.id)
             try:
                 with suppress(NotFoundError):
                     await self._sandbox.process.kill_all(tag=self._tag, timeout=10)

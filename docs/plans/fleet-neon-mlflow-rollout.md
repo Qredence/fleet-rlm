@@ -1,0 +1,88 @@
+# Harden Fleet’s Neon branches and deploy shared MLflow
+
+Review one slice per diff. Record its revision, exact commands, results and outstanding live checks before starting the next slice. An unsuccessful gate keeps the existing writer authoritative.
+
+## Risks in deployment order
+
+1. A sleeping or unreachable tracker can stall FastAPI startup and consume turn deadlines. Fleet owns admission and persistence in Postgres. MLflow owns optional observations. A telemetry error must never replay a model call or obscure cancellation.
+2. A SQLite copy taken during active writes can omit committed WAL pages. Metadata can reference files written later, absolute Docker paths, or missing artifacts. Sending old and new workers to different stores silently forks history.
+3. Branch copies inherit data and privileges. Separate databases share branch lifecycle and compute. A runtime role that owns tables can still perform DDL. Concurrent optimizer jobs can exhaust Fleet’s connection budget even with PgBouncer.
+4. Access login redirects can look like HTTP 200 HTML after redirect following. Generic HTTP headers can carry service credentials to redirected artifact hosts. Container-local files and subprocesses can disappear on sleep or restart.
+
+## 1. Remove tracking from Fleet availability
+
+**Implementation prompt.** Work only on Fleet’s telemetry client in the installed fleet_rlm package and its nearest tests. Keep experiment setup off the serving loop, bound request timeout and retries, allow one initializer per worker and retry failed setup. Withhold tracing until initialization succeeds. Preserve healthy run correlation, observable degradation and bounded shutdown. Keep span failures outside model execution and terminal persistence.
+
+Run from the repository root. The placeholder host selects the offline suite in Fleet’s locking tests. Require a committed answer, one execution and a terminal SSE frame with a refused or stalled tracker. Repeat with a trace operation failing during the turn. Verify healthy trace correlation separately.
+
+```sh
+unset DAYTONA_API_URL DAYTONA_V2_API_URL
+export FLEET_DATABASE_URL=postgresql://ep-example.invalid/offline
+export FLEET_DATABASE_DIRECT_URL="$FLEET_DATABASE_URL"
+(cd backend && uv run --locked pytest -q tests/test_phase3_api.py -k 'trac or mlflow or disconnect')
+make check-backend
+```
+
+**Pre-Slice 2 review, November 27, 2026.** Reviewed the working-tree diff based on `9636d570f`. The initial timeout released the FastAPI lifespan, but Python’s default executor could still wait for a blocked SDK thread when closing the event loop. Fleet now uses daemon threads for experiment lookup and final flush. Two regression cases keep each SDK operation blocked and require the worker’s event loop to exit before releasing it. This verifies Fleet-owned shutdown. Container termination with MLflow’s own exporter queues pending belongs to the deployment rehearsal.
+
+The review also found unguarded MLflow context entry, context exit and DSPy callback construction. Fault injection now checks that the original turn cancellation survives context errors and a callback setup error still permits one completed chat turn. With a refused or stalled HTTP tracker, the real FastAPI lifespan served readiness HTTP 200, the offline store recorded one completion, and the client received its answer and `[DONE]`.
+
+Both commands above passed on the reviewed diff. The focused gate passed 16 tests. The full backend gate passed 293 with 13 skipped under the offline configuration. A separate MLflow 3.18 SQLite canary retrieved one trace from the selected experiment with the expected Fleet run ID. Live shared-tracker Browser acceptance and the Neon permissions rehearsal remain pending.
+
+## 2. Rehearse Neon role separation
+
+On November 27, 2026 the Neon plugin listed an unprotected default main, a canary cloned with parent data and a schema-only review branch due to expire November 28. Inventory each branch’s consumer before changing protection or retiring branches. Use schema-only disposable branches for migration tests and a sanitized baseline for optimizer work. Keep Fleet on native Postgres. Adding the Neon Data API duplicates the HTTP surface already owned by FastAPI.
+
+**Implementation prompt.** Write role provisioning and a disposable-branch rehearsal. Provision ordinary SQL login roles. Let app_migrator own Fleet’s schema and objects and perform migration backfills. Grant app_runtime CONNECT, schema USAGE and required table/sequence DML for existing and future objects created by app_migrator. Remove inherited owner membership and PUBLIC CREATE/TEMP privileges where applicable. Use the pooled hostname for runtime and the direct hostname for Alembic with NullPool. Both can use port 5432. [Neon connection pooling](https://neon.com/docs/connect/connection-pooling) and [branch lifecycle](https://neon.com/docs/introduction/branching). Serialize migrations per branch. Budget workers × (pool size + overflow), optimizer processes and migration headroom against actual compute limits. Collect peak active sessions, pool wait and query latency under concurrent turn/optimization load before proposing indexes.
+
+Require the branch creation harness to export a freshly created, expiring child ID and role URLs. Fail closed on mismatched branch identity before any write. Exercise old rows, new tables and sequence allocation as runtime, then run the normal root-lock concurrency tests there.
+
+```bash
+set -eu
+for uri in "$MIGRATOR_DIRECT_URL" "$RUNTIME_POOL_URL"; do
+  test "$(psql -XAt "$uri" -c 'SHOW neon.branch_id')" = "${REHEARSAL_BRANCH_ID:?}"
+done
+test "$REHEARSAL_BRANCH_ID" != br-red-bonus-baxo3rv9
+(cd backend && FLEET_DATABASE_DIRECT_URL="$MIGRATOR_DIRECT_URL" FLEET_DATABASE_URL="$RUNTIME_POOL_URL" uv run alembic upgrade head)
+psql -X -v ON_ERROR_STOP=1 "$RUNTIME_POOL_URL" <<'SQL'
+DO $$ BEGIN
+  CREATE TABLE public.__fleet_privilege_probe (id integer);
+  RAISE EXCEPTION 'app_runtime can create permanent tables';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+SQL
+psql -X "$MIGRATOR_DIRECT_URL" -c 'SHOW max_connections' -c 'SELECT datname,state,count(*) FROM pg_stat_activity GROUP BY 1,2'
+```
+
+## 3. Deploy and qualify one shared tracking endpoint
+
+**Implementation prompt.** Deploy a staging tracking endpoint and exercise it with Fleet’s actual MLflow client. Use a dedicated Neon project for shared MLflow so Fleet branch restores and optimizer clones exclude tracking metadata. A separate database in Fleet’s existing project is a lower-overhead option if shared restore and access boundaries are acceptable and a concurrent load test demonstrates sufficient compute headroom. Keep optimization compute with Fleet. The container serves MLflow only. Use a single named container behind the platform’s minimal Worker ingress, private R2 with proxied artifacts and a pinned server image matching Fleet. Use the Cloudflare plugin to inventory Container applications, Access applications/policies/service tokens and R2 buckets, then apply the reviewed configuration and read back bindings, public routes and Access coverage. The plugin’s OpenAPI search exposes account-level containers/applications, access/service_tokens and r2/buckets operations. [Container lifecycle](https://developers.cloudflare.com/containers/examples/status-hooks/) and [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
+
+Use a Service Auth policy with machine-denial responses. Inject CF-Access-Client-Id and CF-Access-Client-Secret server-side only for the exact HTTPS tracking origin. Disable cross-origin redirects for authenticated requests. Keep UI sign-in under a separate human policy. Browser traffic goes through Fleet, so opening MLflow CORS buys nothing. For acceptance use a protected CI secret file containing curl header directives, mode 0600, and disable shell tracing.
+
+```bash
+set -eu
+endpoint="${MLFLOW_ORIGIN:?}/api/2.0/mlflow/experiments/search"
+body=$(mktemp)
+trap 'rm -f "$body"' EXIT
+probe() { curl -sS --max-time 60 -o "$body" -w '%{http_code}' "$@" -H 'Content-Type: application/json' -d '{"max_results":1}' "$endpoint"; }
+case "$(probe)" in 401|403) ;; *) exit 1;; esac
+test "$(probe --config "${CF_TOKEN_CURL_CONFIG:?}")" = 200
+jq -e '.experiments | type == "array"' "$body"
+```
+
+Repeat after idle sleep and forced restart. Reject a revoked token, verify alternate hostnames cannot bypass Access, and use a controlled redirect receiver to assert zero credential headers. Measure time to first authenticated JSON response. While the tracker wakes, run a Fleet turn and a long optimizer job. Confirm one committed answer and one terminal job with a downloadable artifact matching its checksum.
+
+## 4. Freeze SQLite and switch writers
+
+**Implementation prompt.** Produce the read-only archive, rehearse restoration and perform the writer switch only after the restore passes. Archive historical runs in place and start a fresh experiment on Neon/R2 unless searchable historical migration becomes a separate requirement. The reported 21,618 traces and 2,101 artifact files are comparison points. Recount at freeze. Stop new admissions and schedules, drain active turns/jobs and asynchronous exporters, then stop every tracking writer including local CLIs. Create a consistent SQLite backup plus the entire artifact tree. Record source paths and MLflow image version so stored URIs resolve in a read-only restore. Keep the original volume.
+
+```bash
+set -eu
+test "$(sqlite3 -readonly "${ARCHIVE_DB:?}" 'PRAGMA integrity_check')" = ok
+sqlite3 -readonly "$ARCHIVE_DB" 'SELECT count(*) AS traces FROM trace_info; SELECT count(*) AS runs FROM runs;'
+(cd "${ARCHIVE_ROOT:?}" && shasum -a 256 -c "${ABSOLUTE_MANIFEST_PATH:?}")
+test "$(curl -fsS "${FLEET_ORIGIN:?}/readyz" | jq -r .status)" = ok
+```
+
+Generate the relative-path manifest at freeze over the database snapshot and each artifact, store it outside the tree and compare a fresh file inventory on restore. Verify one old trace, run and downloaded artifact by stable ID and hash. Switch every writer together. Submit one identified Browser chat, match the persisted answer and Fleet run ID to its trace, then download a new optimizer artifact after container restart. If rollback follows any new write, freeze again, retain both stores and record the boundary run IDs before switching writers. Never merge histories by overwriting either database.

@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from io import BytesIO
@@ -448,7 +448,38 @@ class OfflineStorage:
 
 
 @pytest_asyncio.fixture
-async def offline(monkeypatch, tmp_path):
+async def tracking_endpoint(request):
+    mode = getattr(request, "param", None)
+    if mode is None:
+        yield None
+        return
+    accepted = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stall(reader, writer):
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            accepted.set()
+            await release.wait()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(stall, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    if mode == "refused":
+        server.close()
+        await server.wait_closed()
+    try:
+        yield SimpleNamespace(uri=f"http://127.0.0.1:{port}", mode=mode, accepted=accepted)
+    finally:
+        release.set()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest_asyncio.fixture
+async def offline(monkeypatch, tmp_path, tracking_endpoint):
     skill = tmp_path / "table"
     skill.mkdir()
     (skill / "SKILL.md").write_text(
@@ -464,7 +495,7 @@ async def offline(monkeypatch, tmp_path):
         llm_model="openai/gpt-4o-mini",
         sub_llm_model="openai/gpt-4o-mini",
         llm_api_key="offline",
-        mlflow_tracking_uri=None,
+        mlflow_tracking_uri=tracking_endpoint.uri if tracking_endpoint else None,
         api_bearer_token="offline-token",
         cors_origins=["https://client.example"],
         skills_dir=tmp_path,
@@ -3068,3 +3099,170 @@ def test_turn_details_link_targets_the_mlflow_trace(offline):
     assert api._trace_link(runtime, SimpleNamespace(trace_id="tr-test")) == (
         "http://localhost:5001/metrics/#/experiments/1/traces?traceId=tr-test"
     )
+
+
+async def _assert_chat_commits_once(offline, monkeypatch):
+    async def answer(_settings, *, run_id, emit, **_):
+        await emit(run_id, api.agent.RunStartedEvent("workspace"))
+        await emit(run_id, api.agent.RunResultEvent("Verified"))
+        return dspy.Prediction(answer="Verified", history=dspy.History(messages=[]))
+
+    model = AsyncMock(side_effect=answer)
+    monkeypatch.setattr(api.agent, "run_workspace_task", model)
+
+    ready = await offline.client.get("/readyz")
+    assert ready.status_code == 200 and ready.json() == {"status": "ok"}
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.status_code == 200 and "Verified" in response.text
+    assert "data: [DONE]" in response.text
+    model.assert_awaited_once()
+    offline.finish.assert_awaited_once()
+    assert offline.finish.await_args.kwargs["status"] == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracking_endpoint", ["stalled", "refused"], indirect=True)
+async def test_mlflow_unreachable_during_lifespan(offline, monkeypatch, tracking_endpoint, caplog):
+    if tracking_endpoint.mode == "stalled":
+        await asyncio.wait_for(tracking_endpoint.accepted.wait(), timeout=3)
+    await _assert_chat_commits_once(offline, monkeypatch)
+    async with asyncio.timeout(4):
+        while "MLflow unavailable" not in caplog.text:
+            await asyncio.sleep(0.01)
+    assert api.app.state.runtime.tracking_pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["trace_update", "span_entry", "span_exit", "callback_init"])
+async def test_mlflow_failure_after_admission(offline, monkeypatch, trace_uri, failure):
+    runtime = replace(
+        api.app.state.runtime,
+        settings=offline.settings.model_copy(update={"mlflow_tracking_uri": trace_uri}),
+    )
+    monkeypatch.setattr(api.app.state, "runtime", runtime)
+    original_span = mlflow.start_span
+
+    @contextmanager
+    def faulty_span(*args, **kwargs):
+        if failure == "span_entry":
+            raise OSError("start failed")
+        with original_span(*args, **kwargs) as active:
+            yield active
+        if failure == "span_exit":
+            raise OSError("end failed")
+
+    monkeypatch.setattr(mlflow, "start_span", faulty_span)
+    if failure == "trace_update":
+        monkeypatch.setattr(mlflow, "update_current_trace", Mock(side_effect=OSError("offline")))
+
+    if failure == "callback_init":
+        monkeypatch.setattr("fleet_rlm.tracing.FleetMlflowCallback", Mock(side_effect=OSError()))
+
+    await _assert_chat_commits_once(offline, monkeypatch)
+
+
+@pytest.mark.asyncio
+async def test_mlflow_setup_discards_late_result_and_recovers(offline, monkeypatch, trace_uri):
+    from fleet_rlm import telemetry
+
+    runtime = replace(
+        api.app.state.runtime,
+        settings=offline.settings.model_copy(update={"mlflow_tracking_uri": trace_uri}),
+        tracking_pending=True,
+    )
+    release = threading.Event()
+    entered = threading.Event()
+    attempts = 0
+
+    def lookup(*_):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            assert release.wait(5)
+            return "late", None
+        return "0", None
+
+    monkeypatch.setattr(telemetry, "_experiment_ids", lookup)
+    monkeypatch.setattr(telemetry, "_SETUP_SECONDS", 0.05)
+    monkeypatch.setattr(telemetry, "_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
+    destination = Mock()
+    monkeypatch.setattr(mlflow.tracing, "set_destination", destination)
+    try:
+        async with telemetry.tracking_client(runtime, "optimizer"):
+            assert await asyncio.to_thread(entered.wait, 2)
+            await asyncio.sleep(0.12)
+            assert runtime.tracking_pending and attempts == 1
+            release.set()
+            async with asyncio.timeout(2):
+                while runtime.tracking_pending:
+                    await asyncio.sleep(0.005)
+            assert runtime.mlflow_experiment_id == "0"
+            destination.assert_called_once()
+            assert destination.call_args.args[0].experiment_id == "0"
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("failure", ["entry", "exit"])
+def test_mlflow_context_preserves_turn_cancellation(monkeypatch, failure):
+    from fleet_rlm.tracing import without_tracing
+
+    @contextmanager
+    def faulty_context(**_):
+        if failure == "entry":
+            raise OSError("context entry failed")
+        yield
+        raise OSError("context exit failed")
+
+    monkeypatch.setattr(mlflow.tracing, "context", faulty_context)
+    cancellation = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError) as raised, without_tracing():
+        raise cancellation
+    assert raised.value is cancellation
+
+
+@pytest.mark.parametrize("blocked", ["setup", "flush"])
+def test_mlflow_shutdown_releases_event_loop_with_blocked_sdk(monkeypatch, blocked):
+    from fleet_rlm import telemetry
+
+    entered = threading.Event()
+    release = threading.Event()
+    stopped = threading.Event()
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(mlflow_tracking_uri="http://127.0.0.1:1"),
+        tracking_pending=True,
+    )
+
+    def stuck(*_):
+        entered.set()
+        release.wait()
+        return "0", None
+
+    monkeypatch.setattr(telemetry, "_FLUSH_SECONDS", 0.05)
+    monkeypatch.setattr(
+        telemetry, "_experiment_ids", stuck if blocked == "setup" else lambda *_: ("0", None)
+    )
+    monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _: None)
+    monkeypatch.setattr(mlflow.tracing, "set_destination", lambda _: None)
+    monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
+    monkeypatch.setattr(mlflow, "flush_trace_async_logging", stuck)
+
+    async def serve():
+        async with telemetry.tracking_client(runtime, "optimizer"):
+            while runtime.tracking_pending and not entered.is_set():
+                await asyncio.sleep(0.005)
+
+    def run_worker():
+        asyncio.run(serve())
+        stopped.set()
+
+    worker = threading.Thread(target=run_worker)
+    worker.start()
+    try:
+        assert entered.wait(2)
+        assert stopped.wait(2), "loop shutdown waited for the MLflow SDK"
+    finally:
+        release.set()
+        worker.join(3)

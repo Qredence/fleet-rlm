@@ -626,12 +626,14 @@ async def opt_app(monkeypatch, tmp_path):
         api.store, "list_target_promotion_history", mem_store.list_promotion_history
     )
     monkeypatch.setattr(api.mlflow, "set_tracking_uri", lambda _u: None)
-    monkeypatch.setattr(
-        api.mlflow, "set_experiment", lambda *_a, **_k: SimpleNamespace(experiment_id="7")
-    )
+    monkeypatch.setattr("fleet_rlm.telemetry._experiment_ids", lambda *_: ("7", "7"))
+    monkeypatch.setattr(api.mlflow.tracing, "set_destination", lambda *_: None)
     monkeypatch.setattr(api.mlflow.dspy, "autolog", lambda *_a, **_k: None)
 
     async with api.lifespan(api.app):
+        async with asyncio.timeout(2):
+            while api.app.state.runtime.tracking_pending:
+                await asyncio.sleep(0.001)
         transport = httpx.ASGITransport(app=api.app)
         async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
             yield SimpleNamespace(

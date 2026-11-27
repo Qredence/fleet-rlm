@@ -38,8 +38,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
-from mlflow.entities.trace_location import MlflowExperimentLocation
-from mlflow.environment_variables import MLFLOW_USE_DEFAULT_TRACER_PROVIDER
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -82,14 +80,15 @@ from .skills import (
     select_skills,
 )
 from .storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
-from .tracing import capture, preview
+from .telemetry import tracking_client
+from .tracing import active_span, capture, preview, record, without_tracing
 from .tracing import span as workspace_span
 
 _STREAM_HEADER = "x-vercel-ai-ui-message-stream"
 _LOG = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Runtime:
     settings: Settings
     sessionmaker: store.SessionFactory
@@ -103,6 +102,7 @@ class Runtime:
     optimized_program_state: dict[str, Any] | None
     mlflow_experiment_id: str | None = None
     mlflow_optimization_experiment_id: str | None = None
+    tracking_pending: bool = False
     volume_daytona: AsyncDaytona | None = None
     chatgpt: chatgpt_plan.ChatGPTPlan | None = None
     artifact_cache_dir: Path = field(
@@ -142,23 +142,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await store.reap_stale_optimization_jobs(
             sessionmaker, settings.optimization_heartbeat_stale_seconds
         )
-        experiment_id = None
-        optimization_experiment_id = None
-        if settings.mlflow_tracking_uri:
-            mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-            try:
-                optimization_experiment_id = mlflow.set_experiment(
-                    opt_runner.optimization_experiment(settings)
-                ).experiment_id
-            except mlflow.MlflowException as error:
-                _LOG.warning("Could not initialize optimization experiment (%s)", error.error_code)
-            experiment = mlflow.set_experiment(settings.mlflow_experiment)
-            experiment_id = experiment.experiment_id
-            # Concurrent creation can return the experiment without activating it.
-            mlflow.set_experiment(experiment_id=experiment.experiment_id)
-            if settings.daytona_otel_enabled and not MLFLOW_USE_DEFAULT_TRACER_PROVIDER.get():
-                mlflow.tracing.set_destination(MlflowExperimentLocation(experiment.experiment_id))
-            mlflow.dspy.autolog()
         skills = SkillRegistry.load(settings.skills_dir, fallback_to_bundled=True)
         lm = agent._model(settings, settings.llm_model)
         sub_lm = agent._model(settings, settings.sub_llm_model)
@@ -198,11 +181,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     decision_lm=decision_lm,
                     turn_semaphore=turn_semaphore,
                     optimized_program_state=optimized_program_state,
-                    mlflow_experiment_id=experiment_id,
-                    mlflow_optimization_experiment_id=optimization_experiment_id,
+                    tracking_pending=bool(settings.mlflow_tracking_uri),
                     artifact_cache_dir=cache_dir,
                     chatgpt=chatgpt,
                 )
+                if runtime.tracking_pending:
+                    await clients.enter_async_context(
+                        tracking_client(runtime, opt_runner.optimization_experiment(settings))
+                    )
                 clients.push_async_callback(opt_runner.shutdown_optimization_runtime, runtime)
                 app.state.runtime = runtime
                 yield
@@ -213,8 +199,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 await close_dataset_volume_helpers()
         app.state.runtime = None
         await engine.dispose()
-        if settings.mlflow_tracking_uri:
-            await asyncio.to_thread(mlflow.flush_trace_async_logging)
 
 
 class _SettingsCORS:
@@ -1901,8 +1885,9 @@ async def _consolidate(
     memories: list[dict],
     trace_id: str | None,
 ) -> None:
-    if not runtime.settings.mlflow_tracking_uri:
-        await _consolidate_memory(runtime, turn, answer, memories)
+    if runtime.tracking_pending or not runtime.settings.mlflow_tracking_uri:
+        with without_tracing():
+            await _consolidate_memory(runtime, turn, answer, memories)
         return
 
     async def traced() -> None:
@@ -1911,12 +1896,13 @@ async def _consolidate(
             workspace_span("fleet.memory.consolidate", root=True) as active,
         ):
             if active is None:
-                await _consolidate_memory(runtime, turn, answer, memories)
+                with without_tracing():
+                    await _consolidate_memory(runtime, turn, answer, memories)
                 return
             tags = {"fleet.run_id": str(turn.run_id), "fleet.trace.kind": "memory"}
             if trace_id:
                 tags["fleet.parent_trace_id"] = trace_id
-            mlflow.update_current_trace(tags=tags, session_id=str(turn.session_id))
+            record(mlflow.update_current_trace, tags=tags, session_id=str(turn.session_id))
             await _consolidate_memory(runtime, turn, answer, memories)
 
     await asyncio.create_task(traced(), context=Context())
@@ -1976,15 +1962,16 @@ async def _consolidate_memory(
         )
     except Exception as error:
         _LOG.warning("Memory consolidation failed for %s (%s)", turn.run_id, type(error).__name__)
-        if runtime.settings.mlflow_tracking_uri and (active := mlflow.get_current_active_span()):
-            active.set_status("ERROR")
-            active.set_attribute("error.type", type(error).__name__)
-            mlflow.update_current_trace(
-                tags={"fleet.outcome": "failed", "fleet.error.stage": "memory"}
+        if runtime.settings.mlflow_tracking_uri and (active := active_span()):
+            record(active.set_status, "ERROR")
+            record(active.set_attribute, "error.type", type(error).__name__)
+            record(
+                mlflow.update_current_trace,
+                tags={"fleet.outcome": "failed", "fleet.error.stage": "memory"},
             )
     else:
-        if runtime.settings.mlflow_tracking_uri and mlflow.get_current_active_span() is not None:
-            mlflow.update_current_trace(tags={"fleet.outcome": "completed"})
+        if runtime.settings.mlflow_tracking_uri and active_span() is not None:
+            record(mlflow.update_current_trace, tags={"fleet.outcome": "completed"})
 
 
 async def _run_turn(
@@ -1994,8 +1981,9 @@ async def _run_turn(
     queue: asyncio.Queue[dict],
     background: BackgroundTasks,
 ) -> list[dict]:
-    if not runtime.settings.mlflow_tracking_uri:
-        return await _execute_turn(request, runtime, turn, queue, background, trace=None)
+    if runtime.tracking_pending or not runtime.settings.mlflow_tracking_uri:
+        with without_tracing():
+            return await _execute_turn(request, runtime, turn, queue, background, trace=None)
     with (
         capture(runtime.settings),
         workspace_span(
@@ -2005,8 +1993,10 @@ async def _run_turn(
         ) as trace,
     ):
         if trace is None:
-            return await _execute_turn(request, runtime, turn, queue, background, trace=None)
-        mlflow.update_current_trace(
+            with without_tracing():
+                return await _execute_turn(request, runtime, turn, queue, background, trace=None)
+        record(
+            mlflow.update_current_trace,
             tags={"fleet.run_id": str(turn.run_id), "fleet.trace.kind": "turn"},
             session_id=str(turn.session_id),
             request_preview=preview(turn.prompt),
@@ -2014,7 +2004,8 @@ async def _run_turn(
         try:
             return await _execute_turn(request, runtime, turn, queue, background, trace=trace)
         except Exception:
-            mlflow.update_current_trace(
+            record(
+                mlflow.update_current_trace,
                 tags={"fleet.outcome": "failed", "fleet.error.stage": "turn.finalize"},
                 response_preview="failed during turn.finalize",
             )
@@ -2125,18 +2116,19 @@ def _turn_failure_message(
 
 
 def _active_trace_id() -> str | None:
-    active = mlflow.get_current_active_span()
+    active = active_span()
     return active.trace_id if active is not None else None
 
 
 def _record_skill_route(routing: LiveSpan | None, pinned: list[str], selected: list[str]) -> None:
     if routing is not None:
-        routing.set_attributes(
+        record(
+            routing.set_attributes,
             {
                 "fleet.skills.selected": selected,
                 "fleet.skills.route": "pinned" if pinned else "automatic",
                 "fleet.skills.outcome": "selected" if selected else "none",
-            }
+            },
         )
 
 
@@ -2145,7 +2137,7 @@ async def _retrieve_turn_memories(
 ) -> tuple[list[store.Memory], list[store.Memory], list[store.Memory]]:
     with workspace_span("fleet.memory.retrieve", span_type="RETRIEVER") as retrieval:
         if retrieval is not None:
-            retrieval.set_inputs({"selected_skills": selected})
+            record(retrieval.set_inputs, {"selected_skills": selected})
         records = await store.search_memories(runtime.sessionmaker, turn.session_id, turn.prompt)
         procedures = await store.recall_procedures(
             runtime.sessionmaker,
@@ -2159,7 +2151,10 @@ async def _retrieve_turn_memories(
                 runtime.sessionmaker, turn.session_id
             )
         if retrieval is not None:
-            retrieval.set_outputs({"memories": len(task_memories), "procedures": len(procedures)})
+            record(
+                retrieval.set_outputs,
+                {"memories": len(task_memories), "procedures": len(procedures)},
+            )
         return records, procedures, task_memories
 
 
@@ -2189,7 +2184,8 @@ def _record_turn_outcome(
         status, stage = "failed", "turn.finalize"
     outcome = status
     trace_outcome = "timeout" if timed_out and outcome == "failed" else outcome
-    trace.set_attributes(
+    record(
+        trace.set_attributes,
         {
             "fleet.turn.status": outcome,
             "fleet.rlm.root_actions": telemetry.root_actions,
@@ -2198,19 +2194,19 @@ def _record_turn_outcome(
             "fleet.rlm.completion": telemetry.completion
             if outcome == "completed"
             else trace_outcome,
-        }
+        },
     )
-    trace.set_status("OK" if outcome == "completed" else "ERROR")
+    record(trace.set_status, "OK" if outcome == "completed" else "ERROR")
     tags = {"fleet.outcome": trace_outcome}
     if outcome == "completed":
         response_preview = preview(answer or "")
     else:
         tags["fleet.error.stage"] = stage
-        trace.set_attribute("fleet.error.stage", stage)
+        record(trace.set_attribute, "fleet.error.stage", stage)
         if error_type is not None:
-            trace.set_attribute("error.type", error_type)
+            record(trace.set_attribute, "error.type", error_type)
         response_preview = f"{trace_outcome} during {stage}"
-    mlflow.update_current_trace(tags=tags, response_preview=response_preview)
+    record(mlflow.update_current_trace, tags=tags, response_preview=response_preview)
 
 
 async def _execute_turn(
@@ -2316,11 +2312,12 @@ async def _execute_turn(
                 existing_sandbox_id = session.daytona_sandbox_id
                 sandbox = await _chat_sandbox(runtime, session, effective, owner_run_id=turn.run_id)
                 if acquisition is not None:
-                    acquisition.set_attributes(
+                    record(
+                        acquisition.set_attributes,
                         {
                             "daytona.sandbox_id": sandbox.id,
                             "daytona.sandbox.reused": sandbox.id == existing_sandbox_id,
-                        }
+                        },
                     )
             stage = "workspace.hydrate"
             files = await store.list_session_files(sessionmaker, turn.session_id)
@@ -2446,7 +2443,7 @@ async def _execute_turn(
                         }
                     )
                 if publication is not None:
-                    publication.set_attribute("fleet.file_count", len(artifacts))
+                    record(publication.set_attribute, "fleet.file_count", len(artifacts))
             if await request.is_disconnected():
                 raise asyncio.CancelledError
             failure_parts = stream.snapshot(root_id)
@@ -2531,7 +2528,7 @@ async def _execute_turn(
                 status = "failed"
                 committed = False
             if finalization is not None and not committed:
-                finalization.set_status("ERROR")
+                record(finalization.set_status, "ERROR")
         with workspace_span("fleet.workspace.cleanup"):
             if fence_committed and turn.sandbox_for_cleanup is not None:
                 await _retire_workspace(runtime, turn.sandbox_for_cleanup)
