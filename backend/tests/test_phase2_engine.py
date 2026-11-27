@@ -34,6 +34,8 @@ from fleet_rlm.agent import (
     ChildCallbacks,
     DistillMemory,
     MemoryGate,
+    PythonExecCompletedEvent,
+    PythonExecProgressEvent,
     PythonExecStartedEvent,
     ReasoningEvent,
     RunResultEvent,
@@ -1028,6 +1030,104 @@ async def test_native_rlm_recursion_and_history_round_trip(settings, tmp_path):
     assert (child.id, RunResultEvent("7")) in events
     assert ("root", RunResultEvent("7")) in events
     assert events[-1] == ("followup", RunResultEvent("Still 7"))
+
+
+@pytest.mark.asyncio
+async def test_should_publish_stdout_while_python_is_running(settings, tmp_path):
+    sandbox = _LocalSandbox(tmp_path)
+    factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())
+    previews = {stdout: asyncio.Event() for stdout in ("working\n", "working\nstill working\n")}
+    observed = []
+    completed = []
+
+    async def checkpoint(stdout: str) -> None:
+        """Wait for a preview before allowing the Python cell to continue."""
+        await asyncio.wait_for(previews[stdout].wait(), timeout=2)
+
+    async def emit(run_id, event):
+        if run_id == "root" and isinstance(event, PythonExecProgressEvent):
+            observed.append(event.stdout)
+            previews[event.stdout].set()
+        if isinstance(event, PythonExecCompletedEvent) and not event.submission:
+            completed.append(event.output)
+
+    _skill(tmp_path, "probe")
+    selection = select_skills(settings, SkillRegistry.load(tmp_path), "Print progress", ["probe"])
+    lm = DummyLM(
+        [
+            {
+                "plan": "Print both progress lines and wait for each preview",
+                "code": (
+                    "print('working')\ninspect_csv('working\\n')\n"
+                    "print('still working')\nprint('tail', end='')\n"
+                    "inspect_csv('working\\nstill working\\n')"
+                ),
+            },
+            {"plan": "Done", "code": "SUBMIT('done', [])"},
+        ]
+    )
+    result = await run_workspace_task(
+        settings,
+        task="Print progress",
+        files_manifest=[],
+        memories=[],
+        interpreter_factory=factory,
+        emit=emit,
+        run_id="root",
+        selection=selection,
+        host_tools={"inspect_csv": checkpoint},
+        model_override=lm,
+    )
+    assert result.answer == "done"
+    assert observed == list(previews)
+    assert completed == ["working\nstill working\ntail"]
+    assert [reply["value"] for reply in sandbox.replies] == [None, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("abort", [False, True])
+async def test_blocked_stdout_publisher_stops_with_cell(settings, tmp_path, abort):
+    sandbox = _LocalSandbox(tmp_path)
+    settings = settings.model_copy(update={"daytona_exec_timeout_seconds": 1})
+    queue = asyncio.Queue(maxsize=1)
+    queue.put_nowait("earlier frame")
+    publishing = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def publish(stdout):
+        publishing.set()
+        try:
+            await queue.put(stdout)
+        finally:
+            stopped.set()
+
+    async def observe(_code, execute):
+        return await execute(publish)
+
+    async def checkpoint():
+        await asyncio.wait_for(publishing.wait(), timeout=2)
+
+    factory = make_interpreter_factory(sandbox, settings, asyncio.get_running_loop())
+    interpreter = factory(on_execution=observe)
+    interpreter.tools["checkpoint"] = checkpoint
+    code = "print('working')\ncheckpoint()"
+    if abort:
+        code += "\nimport time\ntime.sleep(5)"
+    running = asyncio.create_task(asyncio.to_thread(interpreter.execute, code))
+    try:
+        await asyncio.wait_for(publishing.wait(), timeout=2)
+        if abort:
+            await interpreter.abort()
+            with pytest.raises(asyncio.CancelledError):
+                await running
+        else:
+            assert await running == "working\n"
+            assert not sandbox.deleted
+        assert stopped.is_set()
+        assert queue.get_nowait() == "earlier frame"
+        assert queue.empty()
+    finally:
+        await interpreter.abort()
 
 
 @pytest.mark.asyncio

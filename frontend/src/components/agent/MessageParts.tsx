@@ -24,21 +24,22 @@ export function MessageParts({ parts, live = false, preview, download, refine }:
   refine?: () => Promise<Memory | null>
 }) {
   const [activityOpen, setActivityOpen] = useState<boolean>()
-  const submissionIds = new Set(parts.flatMap((part) =>
+  const submissionMarkers = new Set(parts.flatMap((part) =>
     part.type === 'data-python-submission' ? [part.data.tool_call_id] : [],
   ))
-  const submissions = parts.flatMap((part) =>
-    part.type === 'tool-python_exec' && part.state === 'output-available' && submissionIds.has(part.toolCallId)
-      ? [part.output] : [],
-  )
+  const submissions = new Map(parts.flatMap((part) =>
+    part.type === 'tool-python_exec' && part.state === 'output-available'
+      && part.preliminary !== true && submissionMarkers.has(part.toolCallId)
+      ? [[part.toolCallId, part.output] as const] : [],
+  ))
   const details = parts.find((part) => part.type === 'data-turn-details')
   const isAction = (part: FleetPart): part is ActionPart => part.type === 'data-web-call' || part.type === 'tool-subagent'
-    || (part.type === 'tool-python_exec' && !submissionIds.has(part.toolCallId))
+    || (part.type === 'tool-python_exec' && !submissions.has(part.toolCallId))
   const actions = parts.filter(isAction)
   const activity = parts.map((part, index) => ({ part, index })).filter(({ part, index }) => {
     if (part.type !== 'reasoning') return isAction(part)
     const next = parts[index + 1]
-    return next?.type !== 'tool-python_exec' || submissionIds.has(next.toolCallId)
+    return next?.type !== 'tool-python_exec' || submissions.has(next.toolCallId)
   })
   const counts = [
     [actions.filter((part) => part.type === 'tool-python_exec').length, 'Python action'],
@@ -149,9 +150,9 @@ export function MessageParts({ parts, live = false, preview, download, refine }:
         </Trace>
       )}
       {parts.map((part, index) => (part.type === 'text' || part.type === 'data-file-tree') && renderPart(part, index))}
-      {(details || submissions.length > 0) && (
+      {(details || submissions.size > 0) && (
         <Trace>
-          <TurnDetailsActivity details={details?.data} submissions={submissions} refine={live ? undefined : refine} />
+          <TurnDetailsActivity details={details?.data} submissions={[...submissions.values()]} refine={live ? undefined : refine} />
         </Trace>
       )}
     </div>

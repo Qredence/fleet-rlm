@@ -79,6 +79,9 @@ class UiPartAccumulator:
         return part
 
     def python(self, call_id: str, code: str) -> Iterator[dict]:
+        code = code.strip()
+        if code.startswith("```") and code.endswith("```") and "\n" in code:
+            code = code.split("\n", 1)[1][:-3].rstrip()
         part = self._tool(call_id, "python_exec", "input-streaming")
         part["inputEncoding"] = "text"
         yield {
@@ -197,12 +200,15 @@ class UiStream:
 
     @staticmethod
     def _python_result(
-        parts: UiPartAccumulator, execution_id: int, output: Any, submission: bool
+        parts: UiPartAccumulator,
+        event: agent.PythonExecCompletedEvent,
     ) -> Iterator[dict]:
-        call_id = parts.python_calls.pop(execution_id)
-        if submission:
+        call_id = parts.python_calls.pop(event.execution_id)
+        # Record the terminal result before publishing the submission marker.
+        output = parts.tool_output(call_id, event.output)
+        if event.submission:
             yield parts.data("python-submission", {"tool_call_id": call_id}, key=call_id)
-        yield parts.tool_output(call_id, output)
+        yield output
 
     def _frames(self, parts: UiPartAccumulator, event: agent.RunEvent) -> Iterator[dict]:
         match event:
@@ -213,12 +219,11 @@ class UiStream:
             case agent.PythonExecStartedEvent(execution_id, code):
                 call_id = parts.new_id()
                 parts.python_calls[execution_id] = call_id
-                code = code.strip()
-                if code.startswith("```") and code.endswith("```") and "\n" in code:
-                    code = code.split("\n", 1)[1][:-3].rstrip()
                 yield from parts.python(call_id, code)
-            case agent.PythonExecCompletedEvent(execution_id, output, submission):
-                yield from self._python_result(parts, execution_id, output, submission)
+            case agent.PythonExecProgressEvent(execution_id, stdout):
+                yield parts.tool_output(parts.python_calls[execution_id], stdout, preliminary=True)
+            case agent.PythonExecCompletedEvent():
+                yield from self._python_result(parts, event)
             case agent.PythonExecFailedEvent(execution_id, error):
                 yield parts.tool_error(parts.python_calls.pop(execution_id), error)
             case agent.SubagentStartedEvent(child):
@@ -237,6 +242,5 @@ class UiStream:
         if isinstance(event, agent.WebCallEvent):
             await self.web_call(event)
             return
-        # Apply and forward one frame at a time so each snapshot shows its exact state.
         for frame in self._frames(self._parts(run_id), event):
             await self._forward(run_id, frame)

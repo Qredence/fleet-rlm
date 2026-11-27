@@ -234,7 +234,7 @@ def build_program(
     return program
 
 
-Execution = Callable[[], Awaitable[str | FinalOutput]]
+Execution = Callable[[Callable[[str], Awaitable[None]] | None], Awaitable[str | FinalOutput]]
 ChildStatus = Literal["completed", "failed", "cancelled"]
 
 
@@ -332,6 +332,12 @@ class ReasoningEvent:
 class PythonExecStartedEvent:
     execution_id: int
     code: str
+
+
+@dataclass(frozen=True)
+class PythonExecProgressEvent:
+    execution_id: int
+    stdout: str
 
 
 @dataclass(frozen=True)
@@ -441,6 +447,7 @@ type RunEvent = (
     RunStartedEvent
     | ReasoningEvent
     | PythonExecStartedEvent
+    | PythonExecProgressEvent
     | PythonExecCompletedEvent
     | PythonExecFailedEvent
     | SubagentStartedEvent
@@ -671,7 +678,7 @@ async def run_workspace_task(
         async def observe_execution(_code: str, execute: Execution) -> str | FinalOutput:
             current, action.action = action.action, None
             if current is None:
-                return await execute()  # DSPy's interpreter setup and input injection.
+                return await execute(None)  # DSPy's interpreter setup and input injection.
             if depth == 0:
                 telemetry.root_actions += 1
             if current.reasoning:
@@ -679,7 +686,11 @@ async def run_workspace_task(
             execution_id = next(executions)
             await emit(current_run_id, PythonExecStartedEvent(execution_id, current.code))
             try:
-                output = await execute()
+                output = await execute(
+                    lambda stdout: emit(
+                        current_run_id, PythonExecProgressEvent(execution_id, stdout)
+                    )
+                )
             except CodeExecutionError as error:
                 await emit(current_run_id, PythonExecFailedEvent(execution_id, str(error)))
                 raise

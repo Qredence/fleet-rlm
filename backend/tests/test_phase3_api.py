@@ -1062,27 +1062,39 @@ async def test_install_skill_rejects_invalid_or_changed_artifacts(
 @pytest.mark.asyncio
 async def test_ui_stream_marks_only_terminal_python_output_as_submission():
     frames = []
+    snapshots_at_marker = []
 
     async def emit(frame):
         frames.append(frame)
+        if frame["type"] == "data-python-submission":
+            snapshots_at_marker.append(stream.snapshot("root"))
 
     stream = api.ui_stream.UiStream("root", emit)
     payload = {"answer": "5", "artifact_paths": []}
     for execution_id, submission in enumerate((False, True)):
         await stream.publish("root", api.agent.PythonExecStartedEvent(execution_id, "run()"))
+        if submission:
+            await stream.publish(
+                "root", api.agent.PythonExecProgressEvent(execution_id, "working\n")
+            )
         await stream.publish(
             "root", api.agent.PythonExecCompletedEvent(execution_id, payload, submission=submission)
         )
 
-    ordinary, marker, submitted = [
+    ordinary, preview, marker, submitted = [
         frame
         for frame in frames
         if frame["type"] in {"tool-output-available", "data-python-submission"}
     ]
     assert ordinary["output"] == submitted["output"] == payload
+    assert preview["preliminary"] is True and preview["output"] == "working\n"
+    assert preview["toolCallId"] == submitted["toolCallId"]
     assert marker["data"] == {"tool_call_id": submitted["toolCallId"]}
     assert ordinary["toolCallId"] != submitted["toolCallId"]
-    assert marker in stream.snapshot("root")
+    assert snapshots_at_marker == [stream.snapshot("root")]
+    _, final_part, persisted_marker = snapshots_at_marker[0]
+    assert persisted_marker == marker
+    assert final_part["output"] == payload and "preliminary" not in final_part
 
 
 def test_ui_frames_and_lossless_nested_snapshots():
@@ -1618,6 +1630,15 @@ async def test_chat_billing_error_matches_failing_model(offline, monkeypatch, ro
 async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     child_id, nested_id = uuid4(), uuid4()
     offline.create_child.side_effect = [SimpleNamespace(id=child_id), SimpleNamespace(id=nested_id)]
+    run_turn = api._run_turn
+    sse_queue = None
+
+    async def capture_queue(request, runtime, turn, queue, background):
+        nonlocal sse_queue
+        sse_queue = queue
+        return await run_turn(request, runtime, turn, queue, background)
+
+    monkeypatch.setattr(api, "_run_turn", capture_queue)
 
     async def complete(_settings, *, task, run_id, selection, emit, callbacks, **_):
         assert offline.store.checkouts == 0
@@ -1625,6 +1646,12 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         await emit(run_id, api.agent.RunStartedEvent("workspace"))
         await emit(run_id, api.agent.ReasoningEvent("Inspect the data"))
         await emit(run_id, api.agent.PythonExecStartedEvent(1, "```python\nprint(x)\n```"))
+        assert sse_queue.full()
+        await emit(run_id, api.agent.PythonExecProgressEvent(1, "skipped preview\n"))
+        async with asyncio.timeout(2):
+            while sse_queue.full():
+                await asyncio.sleep(0)
+        await emit(run_id, api.agent.PythonExecProgressEvent(1, "working\n"))
         await emit(run_id, api.agent.PythonExecFailedEvent(1, "NameError: x"))
 
         child = api.agent.ChildRun(str(child_id), run_id, 1, "subagent", "Read the table")
@@ -1671,6 +1698,7 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         "reasoning-end",
         "tool-input-start",
         "tool-input-delta",
+        "tool-output-available",
         "tool-output-error",
         "tool-input-available",
         *["tool-output-available"] * 15,
@@ -1692,12 +1720,18 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     assert frames[2]["id"] == frames[-6]["id"] == f"{root_id}:file-tree"
     assert frames[-6]["data"]["files"][0]["path"] == "artifacts/report.txt"
     assert [frame["id"] for frame in frames[3:6]] == [f"{root_id}:1"] * 3
-    assert frames[6]["toolCallId"] == frames[8]["toolCallId"] == f"{root_id}:2"
+    assert frames[6]["toolCallId"] == frames[9]["toolCallId"] == f"{root_id}:2"
     assert frames[6]["inputEncoding"] == "text"
     assert frames[7]["inputTextDelta"] == "print(x)"
-    assert frames[8]["errorText"] == "NameError: x"
-    assert frames[9]["toolCallId"] == f"{root_id}:3"
-    progress = frames[10:-6]
+    assert frames[8] == {
+        "type": "tool-output-available",
+        "toolCallId": f"{root_id}:2",
+        "output": "working\n",
+        "preliminary": True,
+    }
+    assert frames[9]["errorText"] == "NameError: x"
+    assert frames[10]["toolCallId"] == f"{root_id}:3"
+    progress = frames[11:-6]
     assert all(frame["preliminary"] is True for frame in progress[:-1])
     assert progress[0]["output"] == {"id": str(child_id), "role": "assistant", "parts": []}
 
@@ -1717,6 +1751,7 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     assert child_parts[2]["preliminary"] is False
     assert root_finish.kwargs["ui_parts"][-3]["output"] == progress[-1]["output"]
     assert root_finish.kwargs["ui_parts"][1] == frames[-6]
+    assert "output" not in root_finish.kwargs["ui_parts"][3]
     assert [item["path"] for item in root_finish.kwargs["files"]] == ["artifacts/report.txt"]
     assert offline.store.files[(offline.store.session_id, "artifacts/report.txt")].size_bytes == 6
     assert offline.create_child.await_count == 2

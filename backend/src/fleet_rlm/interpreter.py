@@ -64,7 +64,8 @@ ARTIFACTS = f"{WORKSPACE}/artifacts"
 _MAX_FRAME = 1024 * 1024
 _LOG = logging.getLogger(__name__)
 
-Execution = Callable[[], Awaitable[str | FinalOutput]]
+StdoutObserver = Callable[[str], Awaitable[None]]
+Execution = Callable[[StdoutObserver | None], Awaitable[str | FinalOutput]]
 ExecutionObserver = Callable[[str, Execution], Awaitable[str | FinalOutput]]
 ToolObserver = Callable[[str, list, dict, Callable[[], Awaitable[Any]]], Awaitable[Any]]
 
@@ -652,11 +653,13 @@ class _Output:
         self.parts: list[str] = []
         self.buffer = ""
         self.received = 0
+        self._updated = asyncio.Event()
 
     def _append(self, value: str) -> None:
         if value and self.remaining:
             self.parts.append(value[: self.remaining])
             self.remaining -= min(len(value), self.remaining)
+            self._updated.set()
 
     def feed(self, message: str) -> None:
         self.received += len(message)
@@ -690,13 +693,37 @@ class _Output:
         self._append(self.buffer)
         return "".join(self.parts)
 
+    async def publish_stdout(self, observer: StdoutObserver, done: asyncio.Future[dict]) -> None:
+        loop = asyncio.get_running_loop()
+        published_chars = 0
+        next_update = 0.0
+        try:
+            while not done.done():
+                await self._updated.wait()
+                if (delay := next_update - loop.time()) > 0:
+                    await asyncio.sleep(delay)
+                if done.done():
+                    return
+                self._updated.clear()
+                stdout = "".join(self.parts)
+                # A log frame can split a line. The final result includes any tail.
+                end = stdout.rfind("\n") + 1
+                if end > published_chars:
+                    published_chars = end
+                    next_update = loop.time() + 0.5
+                    await observer(stdout[:end])
+        except Exception as error:
+            _LOG.warning("Could not publish Python stdout (%s)", type(error).__name__)
+
 
 class DaytonaCodeInterpreter:
     """One isolated Daytona context, driven by a DSPy worker thread."""
 
     execution_instructions = (
         "Execute Python in /workspace. Inputs are under /workspace/files. "
-        "Place generated files under /workspace/artifacts. Use spawn_agent for recursive RLM "
+        "Place generated files under /workspace/artifacts. For high-precision arithmetic, "
+        "prefer gmpy2 (MPFR) or mpmath when available. Package installation may be "
+        "unavailable in the sandbox. Use spawn_agent for recursive RLM "
         "delegation through the host's depth limit. Keep each Python cell well within the "
         "execution timeout; once an answer is verified with a trusted library or two independent "
         "checks, call SUBMIT rather than re-implementing heavy algorithms from scratch."
@@ -748,7 +775,7 @@ class DaytonaCodeInterpreter:
         async def run() -> str | FinalOutput:
             await self._start()
 
-            async def cell() -> str | FinalOutput:
+            async def cell(on_stdout: StdoutObserver | None = None) -> str | FinalOutput:
                 with workspace_span(
                     "daytona.python.execute",
                     span_type="TOOL",
@@ -758,10 +785,10 @@ class DaytonaCodeInterpreter:
                     },
                 ) as span:
                     if span is None:
-                        return await self._execute(code, variables or {})
+                        return await self._execute(code, variables or {}, on_stdout)
                     span.set_inputs(trace_payload({"code": code}))
                     try:
-                        output = await self._execute(code, variables or {})
+                        output = await self._execute(code, variables or {}, on_stdout)
                     except asyncio.CancelledError:
                         span.set_status("ERROR")
                         span.set_attribute("daytona.execution.status", "cancelled")
@@ -928,7 +955,9 @@ class DaytonaCodeInterpreter:
                     raise
         raise AssertionError("Unreachable Daytona stream retry state")
 
-    async def _execute(self, code: str, variables: dict) -> str | FinalOutput:
+    async def _execute(
+        self, code: str, variables: dict, on_stdout: StdoutObserver | None
+    ) -> str | FinalOutput:
         handle = self._handle
         if handle is None:
             raise CodeInterpreterError("Daytona worker is unavailable")
@@ -1052,12 +1081,14 @@ class DaytonaCodeInterpreter:
             async with asyncio.TaskGroup() as group:
                 await self._send(handle, message)
                 started = active_started_at = loop.time()
-                task = group.create_task(self._read_cell(handle, output, done))
-                watchdog = (
-                    group.create_task(watch(task, started + wall_timeout))
-                    if self._timeout
-                    else None
+                background = (
+                    [group.create_task(output.publish_stdout(on_stdout, done))]
+                    if on_stdout is not None
+                    else []
                 )
+                task = group.create_task(self._read_cell(handle, output, done))
+                if self._timeout:
+                    background.append(group.create_task(watch(task, started + wall_timeout)))
                 try:
                     result = await task
                 except asyncio.CancelledError:
@@ -1065,9 +1096,7 @@ class DaytonaCodeInterpreter:
                         raise
                 finally:
                     active = False
-                    if watchdog is not None:
-                        watchdog.cancel()
-                    for pending in tasks.copy():
+                    for pending in (*tasks, *background):
                         pending.cancel()
         except asyncio.CancelledError:
             raise
