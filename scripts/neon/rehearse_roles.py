@@ -216,7 +216,9 @@ def main(resources):
     with checked(migrator, branch_id) as conn:
         require(
             conn.execute(
-                "SELECT pg_has_role(current_user, 'neon_superuser','MEMBER')"
+                "SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls "
+                "OR pg_has_role(current_user,'neon_superuser','MEMBER') "
+                "FROM pg_roles WHERE rolname=current_user"
             ).fetchone()
             == (False,),
             "Elevated migrator",
