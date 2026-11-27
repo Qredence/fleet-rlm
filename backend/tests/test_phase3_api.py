@@ -3180,10 +3180,10 @@ async def test_mlflow_setup_discards_late_result_and_recovers(offline, monkeypat
         if attempts == 1:
             entered.set()
             assert release.wait(5)
-            return "late", None
-        return "0", None
+            return "late"
+        return "0"
 
-    monkeypatch.setattr(telemetry, "_experiment_ids", lookup)
+    monkeypatch.setattr(telemetry, "_experiment_id", lookup)
     monkeypatch.setattr(telemetry, "_SETUP_SECONDS", 0.05)
     monkeypatch.setattr(telemetry, "_RETRY_SECONDS", 0.01)
     monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
@@ -3231,18 +3231,20 @@ def test_mlflow_shutdown_releases_event_loop_with_blocked_sdk(monkeypatch, block
     release = threading.Event()
     stopped = threading.Event()
     runtime = SimpleNamespace(
-        settings=SimpleNamespace(mlflow_tracking_uri="http://127.0.0.1:1"),
+        settings=SimpleNamespace(
+            mlflow_tracking_uri="http://127.0.0.1:1", mlflow_experiment="chat"
+        ),
         tracking_pending=True,
     )
 
     def stuck(*_):
         entered.set()
         release.wait()
-        return "0", None
+        return "0"
 
     monkeypatch.setattr(telemetry, "_FLUSH_SECONDS", 0.05)
     monkeypatch.setattr(
-        telemetry, "_experiment_ids", stuck if blocked == "setup" else lambda *_: ("0", None)
+        telemetry, "_experiment_id", stuck if blocked == "setup" else lambda *_: "0"
     )
     monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _: None)
     monkeypatch.setattr(mlflow.tracing, "set_destination", lambda _: None)
@@ -3266,3 +3268,32 @@ def test_mlflow_shutdown_releases_event_loop_with_blocked_sdk(monkeypatch, block
     finally:
         release.set()
         worker.join(3)
+
+
+@pytest.mark.asyncio
+async def test_optimizer_lookup_retries_after_chat_is_ready(offline, monkeypatch, trace_uri):
+    from fleet_rlm import telemetry
+
+    runtime = replace(
+        api.app.state.runtime,
+        settings=offline.settings.model_copy(update={"mlflow_tracking_uri": trace_uri}),
+        tracking_pending=True,
+    )
+    calls = []
+
+    def lookup(_settings, name):
+        calls.append(name)
+        if name == "optimizer":
+            assert not runtime.tracking_pending and runtime.mlflow_experiment_id == "0"
+            if calls.count(name) == 1:
+                raise OSError("tracker unavailable")
+            return "1"
+        return "0"
+
+    monkeypatch.setattr(telemetry, "_experiment_id", lookup)
+    monkeypatch.setattr(telemetry, "_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
+    async with asyncio.timeout(2):
+        await telemetry._initialize(runtime, "optimizer")
+    assert calls == [runtime.settings.mlflow_experiment, "optimizer", "optimizer"]
+    assert runtime.mlflow_optimization_experiment_id == "1"

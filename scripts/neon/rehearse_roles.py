@@ -1,4 +1,4 @@
-"""Run from backend with uv. See the Slice 2 gate in docs/plans/fleet-neon-mlflow-rollout.md."""
+"""Run from backend with uv. See the Slice 2 gate in docs/plans/fleet-neon-role-rehearsal.md."""
 
 import argparse
 import json
@@ -138,13 +138,15 @@ def provision(owner):
 
 
 def verify_runtime(conn, existing_id):
-    require(
-        conn.execute(
-            "DELETE FROM public.sessions WHERE id=%s RETURNING title", (existing_id,)
-        ).fetchone()
-        == ("pre-migration row",),
-        "Pre-migration session missing",
-    )
+    if existing_id is not None:
+        require(
+            conn.execute(
+                "DELETE FROM public.sessions WHERE id=%s RETURNING title",
+                (existing_id,),
+            ).fetchone()
+            == ("pre-migration row",),
+            "Pre-migration session missing",
+        )
     for table, column in (("sessions", "title"), ("role_rehearsal_probe", "label")):
         relation, field = sql.Identifier("public", table), sql.Identifier(column)
         key = conn.execute(
@@ -208,6 +210,8 @@ def main(resources):
     )
     owner.commit()
     before = provision(owner)
+    os.chdir(BACKEND)
+    head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
     migrator, runtime = endpoints(branch_id, "app_migrator", "app_runtime")
     with checked(migrator, branch_id) as conn:
         require(
@@ -229,11 +233,12 @@ def main(resources):
             "Elevated runtime",
         )
 
-        existing_id = conn.execute(
-            "INSERT INTO public.sessions(title) VALUES ('pre-migration row') RETURNING id"
-        ).fetchone()[0]
+        existing_id = None
+        if before != head:
+            existing_id = conn.execute(
+                "INSERT INTO public.sessions(title) VALUES ('pre-migration row') RETURNING id"
+            ).fetchone()[0]
 
-    os.chdir(BACKEND)
     env = {
         **os.environ,
         "FLEET_DAYTONA_API_KEY": "unused",
@@ -243,10 +248,15 @@ def main(resources):
         "FLEET_DATABASE_URL": runtime.render_as_string(hide_password=False),
         "FLEET_DATABASE_DIRECT_URL": migrator.render_as_string(hide_password=False),
     }
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"], env=env, check=True
-    )
-    head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+    if before == head:
+        print(
+            f"{branch_id}: SKIPPED migration and row-survival checks (already at {head})",
+            flush=True,
+        )
+    else:
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"], env=env, check=True
+        )
     with checked(migrator, branch_id) as conn:
         require(
             conn.execute("SELECT version_num FROM public.alembic_version").fetchone()
@@ -257,10 +267,14 @@ def main(resources):
             "CREATE TABLE public.role_rehearsal_probe (id bigint GENERATED ALWAYS AS IDENTITY "
             "PRIMARY KEY, label text)"
         )
-    print(f"{branch_id}: direct app_migrator migrated {before} -> {head}", flush=True)
     try:
         with checked(runtime, branch_id) as conn:
             verify_runtime(conn, existing_id)
+        if before != head:
+            print(
+                f"{branch_id}: migrated {before} -> {head}; pre-migration row survived",
+                flush=True,
+            )
         lock_test = subprocess.run(
             [
                 sys.executable,

@@ -1,4 +1,4 @@
-"""Worker-local lifecycle for optional remote MLflow tracking."""
+"""Manage each FastAPI worker’s optional connection to the local Docker MLflow tracker."""
 
 import asyncio
 import logging
@@ -45,53 +45,51 @@ def _background_call[T, **P](
     return asyncio.wrap_future(result)
 
 
-def _experiment_ids(settings: Settings, optimizer: str) -> tuple[str, str | None]:
+def _experiment_id(settings: Settings, name: str) -> str:
     client = mlflow.MlflowClient(tracking_uri=settings.mlflow_tracking_uri)
-
-    def resolve(name: str) -> str:
-        experiment = client.get_experiment_by_name(name)
-        if experiment is None:
-            return client.create_experiment(name)
-        if experiment.lifecycle_stage != "active":
-            raise ValueError("Tracking experiment is inactive")
-        return experiment.experiment_id
-
-    chat_id = resolve(settings.mlflow_experiment)
-    optimizer_id = None
-    with telemetry_operation("resolve optimizer experiment"):
-        optimizer_id = resolve(optimizer)
-    return chat_id, optimizer_id
+    experiment = client.get_experiment_by_name(name)
+    if experiment is None:
+        return client.create_experiment(name)
+    if experiment.lifecycle_stage != "active":
+        raise ValueError("Tracking experiment is inactive")
+    return experiment.experiment_id
 
 
 async def _initialize(runtime: "Runtime", optimizer: str) -> None:
     uri = runtime.settings.mlflow_tracking_uri
     if not uri:
         return
+    await _initialize_experiment(runtime, uri, runtime.settings.mlflow_experiment, chat=True)
+    await _initialize_experiment(runtime, uri, optimizer, chat=False)
+
+
+async def _initialize_experiment(runtime: "Runtime", uri: str, name: str, *, chat: bool) -> None:
     degraded = False
     while True:
         # The lookup is scoped to its client. Only this task can publish its result.
-        attempt = _background_call(_experiment_ids, runtime.settings, optimizer)
+        attempt = _background_call(_experiment_id, runtime.settings, name)
         try:
             async with asyncio.timeout(_SETUP_SECONDS):
-                experiment, optimizer_id = await asyncio.shield(attempt)
-            mlflow.set_tracking_uri(uri)
-            mlflow.tracing.set_destination(MlflowExperimentLocation(experiment))
-            mlflow.dspy.autolog()
+                experiment = await asyncio.shield(attempt)
+            if chat:
+                mlflow.set_tracking_uri(uri)
+                mlflow.tracing.set_destination(MlflowExperimentLocation(experiment))
+                mlflow.dspy.autolog()
+                runtime.mlflow_experiment_id = experiment
+                runtime.tracking_pending = False
+                _LOG.info("MLflow tracing ready")
+            else:
+                runtime.mlflow_optimization_experiment_id = experiment
+            return
         except Exception as error:
             if not degraded:
                 _LOG.warning(
-                    "MLflow unavailable, serving without tracing (%s)", type(error).__name__
+                    "MLflow unavailable for experiment %s (%s)", name, type(error).__name__
                 )
                 degraded = True
             # A timeout does not kill a thread. Drain it before the next attempt.
             await asyncio.gather(attempt, return_exceptions=True)
             await asyncio.sleep(_RETRY_SECONDS)
-        else:
-            runtime.mlflow_experiment_id = experiment
-            runtime.mlflow_optimization_experiment_id = optimizer_id
-            runtime.tracking_pending = False
-            _LOG.info("MLflow tracing ready")
-            return
         finally:
             if not attempt.done():
                 attempt.cancel()
