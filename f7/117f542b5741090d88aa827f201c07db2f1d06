@@ -1,0 +1,16 @@
+README.md
+  h_f276322eb5eb9f 29
+backend/.env.example
+  h_f276322eb5eb9f 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f7117f542b5741090d88aa827f201c07db2f1d06",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
