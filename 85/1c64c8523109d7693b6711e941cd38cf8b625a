@@ -1,0 +1,14 @@
+backend/src/fleet_rlm/chatgpt_plan.py
+  h_f276322eb5eb9f 12,454-455,504,653,674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "851c64c8523109d7693b6711e941cd38cf8b625a",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
