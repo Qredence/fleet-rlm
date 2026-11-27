@@ -1,0 +1,41 @@
+README.md
+  s_6af0d350307db7::t_30a7f4066d951a 58-65
+backend/.env.example
+  s_6af0d350307db7::t_7d2088c5a394af 9
+backend/pyproject.toml
+  s_6af0d350307db7::t_43913a9c5ad041 42
+backend/src/fleet_rlm/chatgpt_plan.py
+  s_6af0d350307db7::t_4e008762af5755 1-708
+backend/src/fleet_rlm/config.py
+  s_6af0d350307db7::t_4f86046c8c48a8 26
+backend/src/fleet_rlm/llm_registry.py
+  s_6af0d350307db7::t_7d0f8fb99bf0f4 838-839
+backend/uv.lock
+  s_6af0d350307db7::t_4336afa6719f03 630,656,1773-1786
+docs/architecture.md
+  s_6af0d350307db7::t_c4d61a6dd92614 9-12
+frontend/src/components/agent/ChatGPTPlanSettings.tsx
+  s_6af0d350307db7::t_34206e6665d6b7 1-143
+frontend/src/components/agent/ModelSelector.tsx
+  s_6af0d350307db7::t_f34c95027294fa 22-24
+frontend/src/components/agent/SettingsDialogBody.tsx
+  s_6af0d350307db7::t_73b6831eac4f1f 7,26,138-165,523-524,539-540
+frontend/src/lib/api.ts
+  s_6af0d350307db7::t_5fc8dd153ab90d 67-76,518-528
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a48a8e0bba0b89a385b1d5ec87c1f5db9104f97",
+  "prompts": {},
+  "sessions": {
+    "s_6af0d350307db7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21d04-0c6c-7573-87c5-191f9cfcc28c",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
