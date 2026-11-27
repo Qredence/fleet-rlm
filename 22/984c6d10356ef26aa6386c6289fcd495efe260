@@ -1,0 +1,40 @@
+README.md
+  h_f276322eb5eb9f 44
+backend/.env.example
+  h_f276322eb5eb9f 25,57-58
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 27,31-32,473-481,528,530,721,738
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 85-86,105,146,149-154,202,1897-1927,1979-1987,1999-2008,2010-2012,2016-2021,2023,2127-2215,2239-2240,2314,2325,2334-2341,2343-2358,2385,2418,2468,2476,2508,2535-2544,2547-2554,3014,3924
+backend/src/fleet_rlm/config.py
+  h_f276322eb5eb9f 5,87-97
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 20,56,59-60,76-82,87,752-753,760-762,770-774
+backend/src/fleet_rlm/opt_datasets.py
+  h_f276322eb5eb9f 10,67-92
+backend/src/fleet_rlm/opt_runner.py
+  h_f276322eb5eb9f 102-103,297-300,308-312,1122,1152,1734
+backend/src/fleet_rlm/optimize.py
+  h_f276322eb5eb9f 47-53,96
+backend/src/fleet_rlm/tracing.py
+  h_f276322eb5eb9f 1-346
+backend/tests/test_optimization_ui_api.py
+  h_f276322eb5eb9f 10,1869-1873
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 19,26,28,30,569-701
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 1402-1412,1415,1417,1456-1460,1471-1577,1819-1829,1916-1923
+docs/architecture.md
+  h_f276322eb5eb9f 19-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22984c6d10356ef26aa6386c6289fcd495efe260",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
