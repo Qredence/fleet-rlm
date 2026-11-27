@@ -3096,7 +3096,7 @@ def test_turn_details_link_targets_the_mlflow_trace(offline):
             update={"mlflow_tracking_uri": "http://localhost:5001/metrics?token=excluded"}
         ),
     )
-    assert api._trace_link(runtime, SimpleNamespace(trace_id="tr-test")) == (
+    assert api._trace_link(runtime, "tr-test") == (
         "http://localhost:5001/metrics/#/experiments/1/traces?traceId=tr-test"
     )
 
@@ -3297,3 +3297,30 @@ async def test_optimizer_lookup_retries_after_chat_is_ready(offline, monkeypatch
         await telemetry._initialize(runtime, "optimizer")
     assert calls == [runtime.settings.mlflow_experiment, "optimizer", "optimizer"]
     assert runtime.mlflow_optimization_experiment_id == "1"
+
+
+@pytest.mark.asyncio
+async def test_trace_link_requires_a_stored_trace(offline, monkeypatch):
+    from mlflow.exceptions import MlflowException
+
+    runtime = api.app.state.runtime
+    settings = runtime.settings.model_copy(update={"mlflow_tracking_uri": "http://127.0.0.1:5001"})
+    monkeypatch.setattr(
+        api.app.state, "runtime", replace(runtime, settings=settings, mlflow_experiment_id="1")
+    )
+    stored = SimpleNamespace(
+        info=SimpleNamespace(
+            trace_location=SimpleNamespace(mlflow_experiment=SimpleNamespace(experiment_id="1"))
+        )
+    )
+    lookup = Mock(side_effect=[MlflowException("tracker offline"), stored])
+    monkeypatch.setattr(
+        mlflow, "MlflowClient", Mock(return_value=SimpleNamespace(get_trace=lookup))
+    )
+    trace_id = "tr-" + "a" * 32
+    path = f"/api/traces/{trace_id}/link"
+    assert (await offline.client.get(path)).json() == {"url": None}
+    assert (await offline.client.get(path)).json() == {
+        "url": f"http://127.0.0.1:5001/#/experiments/1/traces?traceId={trace_id}"
+    }
+    lookup.assert_called_with(trace_id, display=False)

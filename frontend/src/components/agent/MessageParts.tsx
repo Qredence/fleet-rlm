@@ -12,16 +12,17 @@ import type { FleetPart } from '@/lib/messages'
 import { FileTree } from './FileTree'
 import { PythonToolTrace } from './PythonToolTrace'
 import { SubagentTrace } from './SubagentTrace'
-import { TurnDetailsActivity, WebResearchActivity } from './TurnActivity'
+import { TurnDetailsActivity, WebResearchActivity, type TraceLinkResolver } from './TurnActivity'
 
 type ActionPart = Extract<FleetPart, { type: 'data-web-call' | 'tool-subagent' | 'tool-python_exec' }>
 
-export function MessageParts({ parts, live = false, preview, download, refine }: {
+export function MessageParts({ parts, live = false, preview, download, refine, resolveTraceLink }: {
   parts: FleetPart[]
   live?: boolean
   preview: (path: string) => void
   download: (path: string) => void
   refine?: () => Promise<Memory | null>
+  resolveTraceLink?: TraceLinkResolver
 }) {
   const [activityOpen, setActivityOpen] = useState<boolean>()
   const submissionMarkers = new Set(parts.flatMap((part) =>
@@ -152,7 +153,7 @@ export function MessageParts({ parts, live = false, preview, download, refine }:
       {parts.map((part, index) => (part.type === 'text' || part.type === 'data-file-tree') && renderPart(part, index))}
       {(details || submissions.size > 0) && (
         <Trace>
-          <TurnDetailsActivity details={details?.data} submissions={[...submissions.values()]} refine={live ? undefined : refine} />
+          <TurnDetailsActivity details={details?.data} submissions={[...submissions.values()]} refine={live ? undefined : refine} resolveTraceLink={resolveTraceLink} />
         </Trace>
       )}
     </div>

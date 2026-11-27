@@ -459,6 +459,8 @@ export function createApi(token?: string) {
   return {
     health: (signal?: AbortSignal) => json<{ status: 'ok' }>('/healthz', { signal }, false),
     readiness: (signal?: AbortSignal) => json<{ status: 'ok' }>('/readyz', { signal }, false),
+    resolveTraceLink: (id: string, signal: AbortSignal) =>
+      json<{ url: string | null }>(`/api/traces/${encodeURIComponent(id)}/link`, { signal }),
     listSessions: (signal?: AbortSignal) => json<Session[]>(sessionsPath, { signal }),
     getSession: (id: string, signal?: AbortSignal) => json<Session>(sessionPath(id), { signal }),
     getChatModel: (id: string, signal?: AbortSignal) =>

@@ -38,6 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
+from mlflow.exceptions import MlflowException
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -2014,9 +2015,9 @@ async def _run_turn(
             _LOG.info("Turn %s MLflow trace %s", turn.run_id, trace.trace_id)
 
 
-def _trace_link(runtime: Runtime, trace: LiveSpan | None) -> str | None:
+def _trace_link(runtime: Runtime, trace_id: str | None) -> str | None:
     if (
-        trace is None
+        trace_id is None
         or not runtime.mlflow_experiment_id
         or not runtime.settings.mlflow_tracking_uri
     ):
@@ -2028,7 +2029,7 @@ def _trace_link(runtime: Runtime, trace: LiveSpan | None) -> str | None:
     except ValueError:
         return None
     experiment = quote(runtime.mlflow_experiment_id, safe="")
-    trace_id = quote(trace.trace_id, safe="")
+    trace_id = quote(trace_id, safe="")
     return urlunsplit(
         (
             uri.scheme,
@@ -2038,6 +2039,25 @@ def _trace_link(runtime: Runtime, trace: LiveSpan | None) -> str | None:
             f"/experiments/{experiment}/traces?traceId={trace_id}",
         )
     )
+
+
+@app.get("/api/traces/{trace_id}/link", dependencies=[Depends(require_auth)])
+async def resolve_trace_link(trace_id: str, runtime: RuntimeDep) -> dict[str, str | None]:
+    link = _trace_link(runtime, trace_id)
+    uri = runtime.settings.mlflow_tracking_uri
+    if not link or not uri or not re.fullmatch(r"tr-[a-f0-9]{32}", trace_id):
+        return {"url": None}
+    try:
+        async with asyncio.timeout(3):
+            trace = await asyncio.to_thread(
+                mlflow.MlflowClient(tracking_uri=uri).get_trace, trace_id, display=False
+            )
+    except (MlflowException, OSError, TimeoutError):
+        return {"url": None}
+    experiment = trace.info.trace_location.mlflow_experiment
+    if experiment is None or experiment.experiment_id != runtime.mlflow_experiment_id:
+        return {"url": None}
+    return {"url": link}
 
 
 async def _persist_turn_outcome(
@@ -2262,7 +2282,7 @@ async def _execute_turn(
             "sub_lm_queries": telemetry.sub_lm_queries,
             "elapsed_ms": telemetry.elapsed_ms,
             "completion": completion,
-            "trace_url": _trace_link(runtime, trace),
+            "trace_url": _trace_link(runtime, trace.trace_id if trace else None),
         }
 
     async def start_child(child: agent.ChildRun) -> UUID:
