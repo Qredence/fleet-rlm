@@ -99,7 +99,9 @@ class OptimizationRuntimeLike(Protocol):
     @property
     def mlflow_experiment_id(self) -> str | None: ...
     @property
-    def mlflow_optimization_experiment_id(self) -> str | None: ...
+    def mlflow_optimization_experiment_id(self) -> str | None:
+        raise NotImplementedError
+
     @property
     def artifact_cache_dir(self) -> Path: ...
     @property
