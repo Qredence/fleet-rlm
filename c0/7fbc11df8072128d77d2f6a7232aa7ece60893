@@ -1,0 +1,36 @@
+backend/alembic/versions/0011_session_reasoning_override.py
+  h_f276322eb5eb9f 1-18
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 22,43,306-315,321,330,417-421,627-636,650-679,687,692-693,781-783,785-789,792-798,819-821,842,860-901,2028-2030
+backend/src/fleet_rlm/db.py
+  h_f276322eb5eb9f 87
+backend/src/fleet_rlm/llm_registry.py
+  h_f276322eb5eb9f 14,785-846
+backend/tests/test_llm_registry.py
+  h_f276322eb5eb9f 12,23,34-70
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 171-172,174-175,1788-1827,1853
+frontend/src/App.tsx
+  h_f276322eb5eb9f 168
+frontend/src/components/agent/ModelPicker.tsx
+  h_f276322eb5eb9f 36-37,41
+frontend/src/components/agent/ModelSelector.tsx
+  h_f276322eb5eb9f 10,23
+frontend/src/components/agent/SessionWorkspace.tsx
+  h_f276322eb5eb9f 1,7,23,52-58,63,74-76,109-133,164-165,170-171,173,175,361-391
+frontend/src/lib/api.ts
+  h_f276322eb5eb9f 3-5,10,20,56-60,454-455
+frontend/src/pages/OptimizationPage.test.tsx
+  h_f276322eb5eb9f 675-680
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c07fbc11df8072128d77d2f6a7232aa7ece60893",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
