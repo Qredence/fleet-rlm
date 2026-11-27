@@ -41,7 +41,7 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
    ```bash
    make mlflow
    ```
-   With `FLEET_MLFLOW_TRACKING_URI` configured, admitted chat requests record a `fleet.turn` span in an MLflow trace keyed by `fleet.run_id`. The span covers sandbox acquisition, workspace hydration, RLM execution, artifact publication, and finalization. To include Daytona SDK request spans, set both `FLEET_DAYTONA_OTEL_ENABLED=true` and `MLFLOW_USE_DEFAULT_TRACER_PROVIDER=false` in the backend process environment.
+   With `FLEET_MLFLOW_TRACKING_URI` configured, MLflow displays chat turns with request and response previews, searchable outcomes, and linked memory consolidation. Find a turn by `fleet.run_id` or by its MLflow session ID. New API optimization jobs use `<chat-experiment>-optimization`. See [tracing and fixture capture](./docs/architecture.md#tracing) for the payload policy and setup.
 
 4. **Run the backend and frontend:**
    ```bash

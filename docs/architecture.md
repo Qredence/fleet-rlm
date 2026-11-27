@@ -16,6 +16,14 @@ The optimization API resolves roles and validates datasets. Postgres owns provid
 
 Promotion selects eligible saved artifacts for future turns. Serving restores instructions with request-local tools and model selection. Keep evaluation-only Flex runs separate from serving RLM artifacts. See [job and promotion tests](../backend/tests/test_optimization_ui_api.py) and [optimizer tests](../backend/tests/test_phase5_optimize.py).
 
+## Tracing
+
+The [Fleet capture policy](../backend/src/fleet_rlm/tracing.py) keeps DSPy autologging under one independent `fleet.turn` per admitted chat. The root has a 768-byte request and response preview, MLflow session metadata, and searchable `fleet.run_id`, `fleet.trace.kind`, `fleet.outcome` and `fleet.error.stage` tags. The separate `fleet.memory.consolidate` trace carries the same run and session IDs and a `fleet.parent_trace_id` when the chat trace was recorded. Lookup by the SSE-advertised trace ID verifies asynchronous delivery.
+
+Interactive traces keep redacted model messages and replies plus tool arguments and results, including Python code and output. Each input and output is capped at 16 KiB of serialized UTF-8. Wrapper and adapter spans carry structure and timing. The callback attaches reported token usage to model spans for MLflow to aggregate. DSPy cache hits contribute no billed tokens, and unavailable usage is marked on the model span. Fleet spans record error classes and omit exception bodies, stacks, and binary attachments.
+
+API optimization jobs use `<chat-experiment>-optimization`. The standalone optimizer still uses its configured `FLEET_MLFLOW_EXPERIMENT`. For replay of synthetic chat fixtures, set `FLEET_MLFLOW_FULL_TRACE_CAPTURE=true` in a backend process with a dedicated `FLEET_MLFLOW_EXPERIMENT`. Full capture retains the DSPy task, context and outputs needed to reconstruct examples. To include raw Daytona SDK transport spans in that fixture experiment, also set `FLEET_DAYTONA_OTEL_ENABLED=true` and `MLFLOW_USE_DEFAULT_TRACER_PROVIDER=false`. Interactive MLflow uses Fleet's Daytona spans, with sanitized failure details.
+
 ## Verification and operations
 
 [CircleCI](../.circleci/continue-config.yml) runs both package checks for pull requests and main. The [release pipeline](../.circleci/deploy.yml) checks the built wheel and public PyPI download. See the [migration runbook](daytona-v2-migration.md) for staged recovery and the [evaluation baseline](evaluation-baseline.md) for dated model results.

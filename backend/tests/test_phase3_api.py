@@ -1399,14 +1399,22 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
     ]
 
 
+@pytest.fixture
+def trace_uri(tmp_path):
+    uri = f"sqlite:///{tmp_path / 'traces.db'}"
+    previous = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(uri)
+    try:
+        yield uri
+    finally:
+        mlflow.set_tracking_uri(previous)
+
+
 @pytest.mark.asyncio
 async def test_workspace_startup_failure_returns_actionable_stream_error(
-    offline, monkeypatch, tmp_path, caplog, request
+    offline, monkeypatch, caplog, trace_uri
 ):
-    tracking_uri = f"sqlite:///{tmp_path / 'traces.db'}"
-    previous_uri = mlflow.get_tracking_uri()
-    mlflow.set_tracking_uri(tracking_uri)
-    request.addfinalizer(lambda: mlflow.set_tracking_uri(previous_uri))
+    tracking_uri = trace_uri
     runtime = api.app.state.runtime
     api.app.state.runtime = replace(
         runtime, settings=offline.settings.model_copy(update={"mlflow_tracking_uri": tracking_uri})
@@ -1445,6 +1453,11 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     assert (root.name, root.attributes["fleet.turn.status"]) == ("fleet.turn", "failed")
     assert root.status.status_code.name == "ERROR"
     assert trace.info.tags["fleet.run_id"] == str(offline.finish.await_args.args[1])
+    assert trace.info.tags["fleet.trace.kind"] == "turn"
+    assert trace.info.tags["fleet.outcome"] == "failed"
+    assert trace.info.tags["fleet.error.stage"] == "sandbox.acquire"
+    assert trace.info.request_preview == "Hello"
+    assert trace.info.response_preview == "failed during sandbox.acquire"
     assert [span.name for span in (acquisition, finalize, cleanup)] == [
         "daytona.sandbox.acquire",
         "fleet.turn.finalize",
@@ -1453,6 +1466,113 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     assert all(span.parent_id == root.span_id for span in (acquisition, finalize, cleanup))
     assert acquisition.attributes["error.type"] == "SandboxStartupError"
     assert "private provider diagnostics" not in trace.to_json()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_chat_traces_correlate_memory_and_commit_previews(
+    offline,
+    monkeypatch,
+    trace_uri,
+):
+    tracking_uri = trace_uri
+    runtime = api.app.state.runtime
+    api.app.state.runtime = replace(
+        runtime,
+        settings=offline.settings.model_copy(update={"mlflow_tracking_uri": tracking_uri}),
+    )
+    other = (await offline.client.post("/api/sessions", json={"title": "Other"})).json()["id"]
+    offline.store.sessions[UUID(other)].daytona_sandbox_id = "test-sandbox"
+    both_running = asyncio.Event()
+    arrivals = 0
+
+    async def run(_settings, *, task, **_):
+        nonlocal arrivals
+        arrivals += 1
+        if arrivals == 2:
+            both_running.set()
+        await asyncio.wait_for(both_running.wait(), timeout=2)
+        return dspy.Prediction(
+            answer=f"Committed {task}: " + "界" * 400,
+            history=dspy.History(messages=[]),
+        )
+
+    monkeypatch.setattr(api.agent, "run_workspace_task", run)
+    offline.memory.side_effect = None
+    seed = "sk-canary-only-not-real-1234567890"
+
+    async def send_turn(session_id, marker):
+        return await offline.client.post(
+            f"/api/sessions/{session_id}/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"type": "text", "text": f"{marker} @table {seed}"},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    await asyncio.gather(send_turn(offline.store.session_id, "First"), send_turn(other, "Second"))
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.search_traces(locations=["0"], return_type="list")
+    turns = [t for t in traces if t.info.tags.get("fleet.trace.kind") == "turn"]
+    memories = [t for t in traces if t.info.tags.get("fleet.trace.kind") == "memory"]
+    assert len(turns) == len(memories) == 2
+    assert {t.info.trace_metadata["mlflow.trace.session"] for t in turns} == {
+        str(offline.store.session_id),
+        other,
+    }
+    for turn in turns:
+        run_id = turn.info.tags["fleet.run_id"]
+        memory = next(t for t in memories if t.info.tags["fleet.run_id"] == run_id)
+        assert (
+            memory.info.trace_metadata["mlflow.trace.session"]
+            == (turn.info.trace_metadata["mlflow.trace.session"])
+        )
+        assert memory.info.tags["fleet.parent_trace_id"] == turn.info.trace_id
+        assert memory.data.spans[0].parent_id is None
+        assert turn.info.tags["fleet.outcome"] == memory.info.tags["fleet.outcome"] == "completed"
+        assert turn.info.response_preview.startswith("Committed ")
+        assert len(turn.info.response_preview.encode()) <= 768
+        assert "[REDACTED]" in turn.info.request_preview
+        assert seed not in turn.to_json()
+        root = turn.data.spans[0]
+        spans = {span.name: span for span in turn.data.spans}
+        assert spans["fleet.skills.route"].attributes["fleet.skills.route"] == "pinned"
+        assert spans["fleet.memory.retrieve"].outputs == {"memories": 0, "procedures": 0}
+        assert (
+            spans["fleet.skills.route"].parent_id
+            == spans["fleet.memory.retrieve"].parent_id
+            == root.span_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_timeout_is_searchable_in_mlflow(offline, monkeypatch, trace_uri):
+    uri = trace_uri
+    runtime = api.app.state.runtime
+    api.app.state.runtime = replace(
+        runtime,
+        settings=runtime.settings.model_copy(update={"mlflow_tracking_uri": uri}),
+    )
+    turn_worker = AsyncMock(side_effect=TimeoutError("Private provider timeout"))
+    monkeypatch.setattr(api.agent, "run_workspace_task", turn_worker)
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.status_code == 200
+    run_id = offline.finish.await_args.args[1]
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.MlflowClient(tracking_uri=uri).search_traces(
+        locations=["0"],
+        filter_string=f"tag.`fleet.run_id` = '{run_id}'",
+    )
+    trace = traces[0]
+    assert trace.info.tags["fleet.outcome"] == "timeout"
+    assert trace.info.tags["fleet.error.stage"] == "rlm"
+    assert trace.info.response_preview == "timeout during rlm"
+    assert "Private provider timeout" not in trace.to_json()
 
 
 @pytest.mark.asyncio
@@ -1696,7 +1816,17 @@ async def test_incomplete_child_snapshot_survives_root_teardown(
 
 @pytest.mark.parametrize("asgi_version", ["2.3", "2.4"])
 @pytest.mark.asyncio
-async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
+async def test_disconnect_aborts_context_and_cancels_run(
+    offline,
+    asgi_version,
+    trace_uri,
+):
+    uri = trace_uri
+    runtime = api.app.state.runtime
+    api.app.state.runtime = replace(
+        runtime,
+        settings=runtime.settings.model_copy(update={"mlflow_tracking_uri": uri}),
+    )
     executing = asyncio.Event()
     disconnected = asyncio.Event()
     frames = asyncio.Queue()
@@ -1783,6 +1913,14 @@ async def test_disconnect_aborts_context_and_cancels_run(offline, asgi_version):
     assert offline.store.active is None and offline.store.checkouts == 0
     assert not any(b"[DONE]" in message.get("body", b"") for message in sent)
     offline.memory.assert_not_awaited()
+    mlflow.flush_trace_async_logging()
+    traces = mlflow.MlflowClient(tracking_uri=uri).search_traces(
+        locations=["0"],
+        filter_string=f"tag.`fleet.run_id` = '{root_id}'",
+    )
+    assert len(traces) == 1
+    assert traces[0].info.tags["fleet.outcome"] == "cancelled"
+    assert traces[0].info.response_preview == "cancelled during rlm"
 
 
 @pytest.mark.asyncio

@@ -16,16 +16,18 @@ from xml.etree import ElementTree
 import dspy
 import mlflow
 import pytest
+from dspy.lm15 import Message, Request, Response, StreamAssemblyError, Usage
 from dspy.primitives.code_interpreter import (
     CodeExecutionError,
     CodeInterpreterError,
     FinalOutput,
 )
 from dspy.utils.dummies import DummyLM
+from dspy.utils.exceptions import LMStreamAssemblyError
 from mlflow.entities import SpanStatusCode
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
-from fleet_rlm import skills
+from fleet_rlm import skills, tracing
 from fleet_rlm.agent import (
     _SUBMISSION_GUIDANCE,
     _TOOL_DOCS_HEADER,
@@ -562,6 +564,139 @@ async def test_daytona_cell_spans_are_nested_and_preserve_execution_results(
     assert cancelled.outputs is None
     assert cancelled.status.status_code == SpanStatusCode.ERROR
     assert cancelled.attributes["daytona.execution.status"] == "cancelled"
+
+
+def test_mlflow_capture_redacts_before_export_and_counts_leaf_usage(
+    settings, monkeypatch, tmp_path, request
+):
+    previous_uri = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'traces.db'}")
+    request.addfinalizer(lambda: mlflow.set_tracking_uri(previous_uri))
+    monkeypatch.setattr(
+        "mlflow.dspy.callback.get_autologging_config",
+        lambda _flavor, key: key == "log_traces",
+    )
+    fixture_key = "synthetic-option-key-for-traces"
+    options = {"headers": {"Authorization": f"Bearer {fixture_key}"}}
+    options["nested"] = options
+    assert set(tracing._option_secrets(options)) == {f"Bearer {fixture_key}", fixture_key}
+    fixture_body = "raw error body marker"
+    inline_media = "base64-attachment-marker"
+    signed_url = "https://example.test/object?X-Amz-Signature=signature-marker&download=yes"
+    db_passwords = (
+        "synthetic-pool%40password",
+        "synthetic-pool@password",
+        "synthetic-direct%24password",
+        "synthetic-direct$password",
+        "synthetic-opt+password",
+        "synthetic-opt password",
+    )
+    credentials = " / ".join(db_passwords)
+
+    class Engine:
+        def complete(self, request):
+            label = request.messages[0].parts[0].text
+            if label == "unreported":
+                usage = Usage()
+            elif label == "partial":
+                usage = Usage(input_tokens=4, output_tokens=2, total_tokens=6)
+            else:
+                usage = Usage(input_tokens=20, output_tokens=10, total_tokens=30)
+            response = Response(
+                id=None,
+                model="fixture/model",
+                finish_reason="stop",
+                message=Message.assistant(fixture_key + " " + "界" * 8000),
+                usage=usage,
+            )
+            if label == "partial":
+                raise StreamAssemblyError(fixture_body, partial=response)
+            return response
+
+    calls = {}
+    monkeypatch.setattr(
+        dspy,
+        "cache",
+        SimpleNamespace(
+            get=lambda key, _ignored: calls.get(str(key)),
+            put=lambda key, result, _ignored: calls.__setitem__(str(key), result),
+        ),
+    )
+    settings = settings.model_copy(
+        update={
+            "llm_api_key": SecretStr(fixture_key),
+            "database_url": f"postgresql://u:{db_passwords[0]}@host/fleet",
+            "database_direct_url": f"postgresql://u:{db_passwords[2]}@host/fleet",
+            "optimization_database_url": SecretStr(
+                f"postgresql://u@opt-host/fleet?password={db_passwords[4]}"
+            ),
+        }
+    )
+    lm = dspy.LM("openai/gpt-4o-mini", engine=Engine())
+    prompt = Request(
+        model="openai/gpt-4o-mini",
+        messages=(
+            Message.user(
+                f"Inspect {signed_url}; media data:image/png;base64,{inline_media} {credentials}"
+            ),
+        ),
+    )
+
+    def failure(token: str) -> None:
+        """Run the failing fixture."""
+        raise ValueError(fixture_body)
+
+    tool = dspy.Tool(failure)
+    with tracing.capture(settings), tracing.span("fleet.capture.test", root=True) as root:
+        mlflow.update_current_trace(request_preview=tracing.preview(credentials))
+        assert lm(prompt).usage.total_tokens == 30
+        assert lm(prompt).usage.total_tokens == 30  # Same request, served from the DSPy cache.
+        with pytest.raises(LMStreamAssemblyError):
+            lm(Request(lm.model, (Message.user("partial"),)), cache=False)
+        assert (
+            lm(Request(lm.model, (Message.user("unreported"),)), cache=False).usage.total_tokens
+            is None
+        )
+        with pytest.raises(ValueError, match=fixture_body):
+            tool(token=f"{fixture_key} {credentials}")
+
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(root.trace_id)
+    assert trace is not None
+    assert trace.info.request_preview == " / ".join("[REDACTED]" for _ in db_passwords)
+    first, cached, partial, unreported = [
+        span for span in trace.data.spans if span.name == "LM.__call__"
+    ]
+    assert first.parent_id == cached.parent_id == root.span_id
+    assert first.attributes["mlflow.chat.tokenUsage"] == {
+        "input_tokens": 20,
+        "output_tokens": 10,
+        "total_tokens": 30,
+    }
+    assert cached.attributes["fleet.model.cache_hit"] is True
+    assert "mlflow.chat.tokenUsage" not in cached.attributes
+    assert partial.attributes["mlflow.chat.tokenUsage"]["total_tokens"] == 6
+    assert partial.status.status_code == SpanStatusCode.ERROR
+    assert unreported.attributes["fleet.model.usage_reported"] is False
+    assert "mlflow.chat.tokenUsage" not in unreported.attributes
+    assert trace.info.token_usage == {"input_tokens": 24, "output_tokens": 12, "total_tokens": 36}
+    assert first.outputs["truncated"] is True
+    assert len(json.dumps(first.outputs, ensure_ascii=False).encode()) <= 16 * 1024
+    failed = next(s for s in trace.data.spans if s.name == "Tool.failure")
+    assert failed.status.status_code == SpanStatusCode.ERROR
+    assert failed.attributes["error.type"] == "ValueError"
+    assert not failed.events
+    assert not any(
+        marker in trace.to_json()
+        for marker in (
+            fixture_key,
+            fixture_body,
+            inline_media,
+            "signature-marker",
+            "mlflow-attachment://",
+            *db_passwords,
+        )
+    )
 
 
 @pytest.mark.asyncio

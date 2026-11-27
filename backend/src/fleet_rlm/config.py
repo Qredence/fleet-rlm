@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -84,6 +84,17 @@ class Settings(BaseSettings):
 
     mlflow_tracking_uri: str | None = None
     mlflow_experiment: str = "fleet-rlm"
+    mlflow_full_trace_capture: bool = False
+
+    @model_validator(mode="after")
+    def require_named_fixture_experiment(self) -> "Settings":
+        if self.mlflow_full_trace_capture and self.mlflow_experiment.strip() in {
+            "",
+            "Default",
+            "fleet-rlm",
+        }:
+            raise ValueError("Full MLflow trace capture requires a dedicated fixture experiment")
+        return self
 
     @field_validator("database_url", "database_direct_url")
     @classmethod

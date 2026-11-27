@@ -99,6 +99,10 @@ class OptimizationRuntimeLike(Protocol):
     @property
     def mlflow_experiment_id(self) -> str | None: ...
     @property
+    def mlflow_optimization_experiment_id(self) -> str | None:
+        raise NotImplementedError
+
+    @property
     def artifact_cache_dir(self) -> Path: ...
     @property
     def rlm_state_cache(self) -> dict[str, dict[str, Any]]: ...
@@ -292,6 +296,10 @@ def daytona_volume_enabled(settings: Settings, *, daytona: Any = True) -> bool:
     )
 
 
+def optimization_experiment(settings: Settings) -> str:
+    return f"{settings.mlflow_experiment}-optimization"
+
+
 def mlflow_run_url(
     runtime: OptimizationRuntimeLike,
     experiment_name: str | None,
@@ -299,10 +307,12 @@ def mlflow_run_url(
 ) -> str | None:
     """Return an MLflow UI run URL only when tracking URI and matching experiment ID are known."""
     tracking_uri = runtime.settings.mlflow_tracking_uri
-    exp_id = runtime.mlflow_experiment_id
+    experiments = {
+        runtime.settings.mlflow_experiment: runtime.mlflow_experiment_id,
+        optimization_experiment(runtime.settings): runtime.mlflow_optimization_experiment_id,
+    }
+    exp_id = experiments.get(experiment_name or runtime.settings.mlflow_experiment)
     if not tracking_uri or not run_id or not exp_id:
-        return None
-    if experiment_name is not None and experiment_name != runtime.settings.mlflow_experiment:
         return None
     try:
         uri = urlsplit(tracking_uri)
@@ -1111,7 +1121,7 @@ def build_subprocess_env(
     # MLflow tracking configuration
     if effective.mlflow_tracking_uri:
         env["FLEET_MLFLOW_TRACKING_URI"] = effective.mlflow_tracking_uri
-    env["FLEET_MLFLOW_EXPERIMENT"] = effective.mlflow_experiment
+    env["FLEET_MLFLOW_EXPERIMENT"] = optimization_experiment(effective)
 
     # Daytona credentials ONLY for non-local dspy.RLM runs
     needs_daytona = target == "rlm" and program_kind == "rlm" and not local_interpreter
@@ -1141,15 +1151,7 @@ def collect_extra_secrets(
     role_credentials: Mapping[RoleName, ResolvedRoleCredential] | None = None,
 ) -> list[str]:
     """Collect host, DB, and per-role secrets so logs/reports/errors never leak them."""
-    secrets: list[str] = []
-    for raw in (settings.database_url, settings.database_direct_url, *db_urls):
-        if not raw:
-            continue
-        secrets.append(raw)
-        with suppress(ValueError):
-            parsed = urlsplit(raw)
-            if parsed.password:
-                secrets.append(parsed.password)
+    secrets = opt_datasets.database_url_secrets(settings, *db_urls)
     for attr in (
         "api_bearer_token",
         "daytona_api_key",
@@ -1158,7 +1160,6 @@ def collect_extra_secrets(
         "s3_access_key_id",
         "s3_secret_access_key",
         "llm_api_key",
-        "optimization_database_url",
         "neon_api_key",
         "credentials_encryption_key",
     ):
@@ -1732,7 +1733,7 @@ async def supervise_optimization_job(
                 resolved_decision_model=resolved_decision_model,
                 decision_provider_id=spec.decision_provider_id,
                 mlflow_run_id=mlflow_run_id,
-                mlflow_experiment=runtime.settings.mlflow_experiment,
+                mlflow_experiment=optimization_experiment(effective),
             )
     except asyncio.CancelledError:
         if proc is not None and proc.returncode is None:

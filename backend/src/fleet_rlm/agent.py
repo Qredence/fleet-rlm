@@ -6,7 +6,6 @@ import re
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
 from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -25,9 +24,12 @@ from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreter
 from dspy.primitives.repl_types import REPL_ENTRY_KEY, ExtractFallbackMarker, REPLEntry
 from dspy.primitives.sandbox_guest import CALL_TOOL, LM_TOOL, TAG, WIRE
 from dspy.utils.callback import BaseCallback
+from mlflow.entities import LiveSpan
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .tracing import bounded_capture
+from .tracing import span as trace_span
 
 _SKILL_PREVIEW_CHARS = 4000
 _TOOL_DOCS_HEADER = (
@@ -468,6 +470,15 @@ class _ActionCapture(BaseCallback):
             self.action = outputs
 
 
+def _trace_rlm_request(span: LiveSpan | None, root_run_id: str | None, prompt: str) -> None:
+    if span is None:
+        return
+    if root_run_id is not None:
+        mlflow.update_current_trace(tags={"fleet.run_id": root_run_id})
+    if not bounded_capture():
+        span.set_inputs({"task": prompt})
+
+
 async def run_workspace_task(
     settings: Settings,
     *,
@@ -514,10 +525,9 @@ async def run_workspace_task(
         remaining_calls -= count
 
     def trace_run(name: str, span_type: str, child_id: str, parent_id: str | None, depth: int):
-        if not settings.mlflow_tracking_uri and mlflow.get_current_active_span() is None:
-            return nullcontext()
-        return mlflow.start_span(
+        return trace_span(
             name,
+            root=bool(settings.mlflow_tracking_uri),
             span_type=span_type,
             attributes={
                 "fleet.root_run_id": run_id,
@@ -708,10 +718,7 @@ async def run_workspace_task(
                 trace_run("fleet.rlm.run", "AGENT", current_run_id, parent_run_id, depth) as span,
                 dspy.context(lm=root_lm if depth == 0 else sub_lm, interpreter_factory=factory),
             ):
-                if span is not None:
-                    if depth == 0:
-                        mlflow.update_current_trace(tags={"fleet.run_id": run_id})
-                    span.set_inputs({"task": prompt})
+                _trace_rlm_request(span, run_id if depth == 0 else None, prompt)
                 program = build_program(
                     settings,
                     [*tools, spawn_agent],
@@ -728,7 +735,7 @@ async def run_workspace_task(
                     prior_turns=list(prior_turns) if depth == 0 else [],
                     history=previous,
                 )
-                if span is not None:
+                if span is not None and not bounded_capture():
                     span.set_outputs({"answer": prediction.answer})
                 return prediction
 
