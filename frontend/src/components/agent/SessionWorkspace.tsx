@@ -89,6 +89,10 @@ export function SessionWorkspace({
     setReceivedDraftKey(location.key)
     setSkillDraft(incomingDraft)
   }
+  if (settingsOpen && (modelInfo || modelInfoError)) {
+    setModelInfo(undefined)
+    setModelInfoError(false)
+  }
 
   useEffect(() => {
     if (!visible || typeof incomingDraft !== 'string') return
@@ -152,8 +156,10 @@ export function SessionWorkspace({
   if ((!visible || wide) && filesDrawerOpen) setFilesDrawerOpen(false)
   if (!visible && selection.path) selectFile({ type: 'close' })
 
+  const modelResolving = !modelInfo && !modelInfoError
+
   async function submit(text: string) {
-    if (!text || active || modelSavePending.current || files.isUploading() || files.hasFailed) return
+    if (!text || active || modelResolving || modelSavePending.current || files.isUploading() || files.hasFailed) return
     await chat.send(text, pinned, () => {
       if (skillDraft === null) setPrompt((current) => current.trim() === text ? '' : current)
       else setSkillDraft((current) => current?.trim() === text ? null : current)
@@ -168,7 +174,10 @@ export function SessionWorkspace({
     setModelError('')
     try {
       await onChatSettingsChange(changes)
-      if ('model_override' in changes) setModelInfo(undefined)
+      if ('model_override' in changes) {
+        setModelInfo(undefined)
+        setModelInfoError(false)
+      }
     } catch (failure) {
       setModelError(errorMessage(failure))
     } finally {
@@ -356,7 +365,7 @@ export function SessionWorkspace({
                 skills={skills} pinned={pinned} setPinned={setPinned} value={skillDraft ?? prompt}
                 onValueChange={skillDraft === null ? setPrompt : setSkillDraft}
                 onSubmit={submit} onStop={chat.stop} loading={active}
-                submitDisabled={initialMessages === null || modelSaving || files.uploading || files.hasFailed}
+                submitDisabled={initialMessages === null || modelResolving || modelSaving || files.uploading || files.hasFailed}
                 attachments={attachments} onUpload={canUpload ? upload : undefined}
                 modelSelector={<div className="flex min-w-0 items-center gap-1">
                   {modelInfo && !modelInfoError && modelInfo.efforts.length > 0 && (
