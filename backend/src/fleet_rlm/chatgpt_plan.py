@@ -9,7 +9,7 @@ import os
 import secrets
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from fcntl import LOCK_EX, flock
 from functools import lru_cache
@@ -451,7 +451,8 @@ class GrantExpired(PlanError):
 
 
 def _get_json(url: str, *, token: str | None = None) -> dict:
-    try:
+    # Keep transport and response details out of user-visible errors.
+    with suppress(httpx.HTTPError, ValueError):
         headers = {"Authorization": f"Bearer {token}"} if token else None
         response = httpx.get(url, headers=headers, timeout=10)
         if response.is_error and token:
@@ -460,8 +461,6 @@ def _get_json(url: str, *, token: str | None = None) -> dict:
         payload = response.json()
         if isinstance(payload, dict):
             return payload
-    except (httpx.HTTPError, ValueError):
-        pass
     raise PlanError("Could not reach ChatGPT. Try again.")
 
 
@@ -502,7 +501,7 @@ def _error_code(response: httpx.Response) -> str | None:
 
 
 def _token_request(**fields: str) -> dict:
-    try:
+    with suppress(httpx.HTTPError, ValueError):
         response = httpx.post(
             f"{ISSUER}/api/accounts/oauth/token", data={**fields, "resource": RESOURCE}, timeout=15
         )
@@ -516,8 +515,6 @@ def _token_request(**fields: str) -> dict:
         tokens = response.json()
         if isinstance(tokens, dict):
             return tokens
-    except (httpx.HTTPError, ValueError):
-        pass
     raise PlanError("Could not renew or complete ChatGPT sign-in. Try again.")
 
 
@@ -653,7 +650,7 @@ class PlanEngine(_PlanConnection):
     def complete(self, request: Request) -> Response:
         body = _request_body(request, self.model, self.effort)
         token = self.service.access(self.reference)
-        try:
+        with suppress(httpx.HTTPError):
             with httpx.stream(
                 "POST",
                 f"{RESOURCE}/responses",
@@ -667,8 +664,6 @@ class PlanEngine(_PlanConnection):
                 for line in response.iter_lines():
                     if result := _read_event(line, self.model):
                         return result
-        except httpx.HTTPError:
-            pass
         raise PlanError("The ChatGPT response stream was interrupted. Try again.")
 
 
@@ -676,7 +671,7 @@ class AsyncPlanEngine(_PlanConnection):
     async def complete(self, request: Request) -> Response:
         body = _request_body(request, self.model, self.effort)
         token = await asyncio.to_thread(self.service.access, self.reference)
-        try:
+        with suppress(httpx.HTTPError):
             async with httpx.AsyncClient(timeout=120) as client:
                 async with client.stream(
                     "POST",
@@ -690,8 +685,6 @@ class AsyncPlanEngine(_PlanConnection):
                     async for line in response.aiter_lines():
                         if result := _read_event(line, self.model):
                             return result
-        except httpx.HTTPError:
-            pass
         raise PlanError("The ChatGPT response stream was interrupted. Try again.")
 
 
