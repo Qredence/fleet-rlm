@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 from cryptography.fernet import Fernet
+from dspy._vendor.lm15.transports import StdlibTransport
 from dspy.clients.backend_selection import select_backend
 from pydantic import SecretStr
 
@@ -19,6 +20,7 @@ from fleet_rlm.llm_registry import (
     EndpointValidationError,
     ProviderProbeError,
     build_dspy_lm,
+    chat_reasoning_efforts,
     decrypt_secret,
     encrypt_secret,
     encryption_configured,
@@ -27,6 +29,43 @@ from fleet_rlm.llm_registry import (
     validate_database_url,
     validate_endpoint_url,
 )
+
+
+@pytest.mark.parametrize(
+    ("dialect", "model", "effort", "path"),
+    [
+        ("openai", "gpt-6-luna", "xhigh", ("reasoning", "effort")),
+        ("anthropic", "claude-sonnet-4-6", "high", ("output_config", "effort")),
+        (
+            "gemini",
+            "gemini-3-flash-preview",
+            "minimal",
+            ("generationConfig", "thinkingConfig", "thinkingLevel"),
+        ),
+        ("xai", "grok-4.3", "medium", ("reasoning_effort",)),
+        ("deepseek", "deepseek-v4-pro", "max", ("reasoning_effort",)),
+        ("openrouter", "openai/gpt-5.4", "high", ("reasoning", "effort")),
+    ],
+)
+def test_chat_effort_uses_the_provider_wire_format(monkeypatch, dialect, model, effort, path):
+    class Captured(BaseException):
+        pass
+
+    def capture(_transport, request):
+        raise Captured(json.loads(request.body))
+
+    monkeypatch.setattr(StdlibTransport, "stream", capture)
+    assert effort in chat_reasoning_efforts(dialect, model)
+    assert chat_reasoning_efforts(dialect, model, "https://unknown.test/v1") == ()
+    for selection in (None, effort):
+        options = {"reasoning_effort": selection} if selection is not None else {}
+        lm = build_dspy_lm(dialect, "auto", model, "stub", cache=False, **options)
+        with pytest.raises(Captured) as sent:
+            lm("fixture")
+        value = sent.value.args[0]
+        for key in path:
+            value = value.get(key) if isinstance(value, dict) else None
+        assert value == selection
 
 
 def _make_settings(**overrides: Any) -> Settings:

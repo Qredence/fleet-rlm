@@ -33,11 +33,12 @@ export function ModelPicker({ api, model, disabled, saving, onChange, label, tri
   }, [api, attempt, open])
 
   const workspace: ModelOption = {
-    value: '', label: 'Workspace default', detail: catalog?.workspace_default,
+    value: '', label: 'Workspace default',
+    detail: catalog?.models.find((item) => item.id === catalog.workspace_default)?.label ?? catalog?.workspace_default,
   }
   const providerModels: ModelOption[] = (catalog?.models ?? []).map(({ id, label }) => ({ value: id, label }))
   const selection = model ? providerModels.find(({ value }) => value === model)
-    ?? { value: model, label } : workspace
+    ?? { value: model, label } : { ...workspace, label }
   const options = [workspace, ...providerModels]
   if (model && !providerModels.includes(selection)) options.splice(1, 0, selection)
 

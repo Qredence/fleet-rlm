@@ -165,7 +165,7 @@ function Workspace({ token, onTokenChange }: { token: string; onTokenChange: (va
               filesDocked={filesDocked} setFilesDocked={setFilesDocked}
               onActivity={setRunning} onTurnAccepted={refreshSessions} onTurnComplete={onTurnComplete}
               onFilesUploaded={refreshSessions} onSkillInstalled={addInstalledSkill}
-              onModelChange={(model) => sessions.update(session.id, { model_override: model })}
+              settingsOpen={settingsOpen} onChatSettingsChange={(changes) => sessions.update(session.id, changes)}
             />
           </Deferred>
         )}

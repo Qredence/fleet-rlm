@@ -1,9 +1,10 @@
-import { PanelRight, Terminal } from 'lucide-react'
+import { Brain, PanelRight, Terminal } from 'lucide-react'
 import { lazy, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Deferred } from '@/components/Deferred'
 import { PageHeader } from '@/components/PageHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -19,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useSessionChat } from '@/hooks/use-session-chat'
 import { useWorkspaceFiles } from '@/hooks/use-workspace-files'
-import { errorMessage, type FleetApi, type Session, type Skill } from '@/lib/api'
+import { errorMessage, type ChatModel, type FleetApi, type ReasoningEffort, type Session, type SessionUpdate, type Skill } from '@/lib/api'
 import type { FleetMessage } from '@/lib/messages'
 import { initialWorkspaceSelection, workspaceSelection } from '@/lib/workspace-browser'
 import { ChatComposer } from './ChatComposer'
@@ -48,12 +49,18 @@ interface SessionWorkspaceProps {
   onTurnComplete: () => void
   onFilesUploaded: () => void
   onSkillInstalled: (skill: Skill) => void
-  onModelChange: (model: string | null) => Promise<Session>
+  settingsOpen: boolean
+  onChatSettingsChange: (changes: SessionUpdate) => Promise<Session>
+}
+
+const effortLabels: Record<ReasoningEffort | 'default', string> = {
+  default: 'Default', none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium',
+  high: 'High', xhigh: 'Extra high', max: 'Max',
 }
 
 export function SessionWorkspace({
   api, token, session, skills, skillsError, visible, recentStops, filesDocked, setFilesDocked,
-  onActivity, onTurnAccepted, onTurnComplete, onFilesUploaded, onSkillInstalled, onModelChange,
+  onActivity, onTurnAccepted, onTurnComplete, onFilesUploaded, onSkillInstalled, settingsOpen, onChatSettingsChange,
 }: SessionWorkspaceProps) {
   const [initialMessages, setInitialMessages] = useState<FleetMessage[] | null>(null)
   const [transcriptError, setTranscriptError] = useState('')
@@ -64,6 +71,9 @@ export function SessionWorkspace({
   const [pinned, setPinned] = useState<string[]>([])
   const [modelSaving, setModelSaving] = useState(false)
   const [modelError, setModelError] = useState('')
+  const [modelInfo, setModelInfo] = useState<ChatModel>()
+  const [modelReload, reloadModel] = useState(0)
+  const [modelInfoError, setModelInfoError] = useState(false)
   const modelSavePending = useRef(false)
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false)
   const [selection, selectFile] = useReducer(workspaceSelection, initialWorkspaceSelection)
@@ -96,6 +106,31 @@ export function SessionWorkspace({
     return () => request.abort()
   }, [api, session.id, attempt])
 
+  useEffect(() => {
+    if (!visible || settingsOpen) return
+    let request: AbortController
+    function refreshModel() {
+      request?.abort()
+      const next = new AbortController()
+      request = next
+      void api.getChatModel(session.id, next.signal).then((model) => {
+        if (next.signal.aborted) return
+        setModelInfo(model)
+        setModelInfoError(false)
+      }).catch(() => {
+        if (next.signal.aborted) return
+        setModelInfo(undefined)
+        setModelInfoError(true)
+      })
+    }
+    refreshModel()
+    window.addEventListener('focus', refreshModel)
+    return () => {
+      window.removeEventListener('focus', refreshModel)
+      request?.abort()
+    }
+  }, [api, session.id, session.model_override, session.reasoning_override?.effort, visible, settingsOpen, modelReload])
+
   const chat = useSessionChat({
     id: session.id, token, initialMessages, recentStops,
     onAccepted: onTurnAccepted,
@@ -126,16 +161,18 @@ export function SessionWorkspace({
     })
   }
 
-  async function changeModel(model: string | null) {
-    if (modelSavePending.current || chat.isBusy() || session.model_override === model) return
+  async function saveChatSettings(changes: SessionUpdate) {
+    if (modelSavePending.current || chat.isBusy()) return
     modelSavePending.current = true
     setModelSaving(true)
     setModelError('')
     try {
-      await onModelChange(model)
+      await onChatSettingsChange(changes)
+      if ('model_override' in changes) setModelInfo(undefined)
     } catch (failure) {
-      setModelError(`Could not save the model. ${errorMessage(failure)}`)
+      setModelError(errorMessage(failure))
     } finally {
+      reloadModel((previous) => previous + 1)
       modelSavePending.current = false
       setModelSaving(false)
     }
@@ -321,10 +358,37 @@ export function SessionWorkspace({
                 onSubmit={submit} onStop={chat.stop} loading={active}
                 submitDisabled={initialMessages === null || modelSaving || files.uploading || files.hasFailed}
                 attachments={attachments} onUpload={canUpload ? upload : undefined}
-                modelSelector={<ModelSelector
-                  api={api} model={session.model_override} disabled={active} saving={modelSaving}
-                  onChange={(model) => void changeModel(model)}
-                />}
+                modelSelector={<div className="flex min-w-0 items-center gap-1">
+                  {modelInfo && !modelInfoError && modelInfo.efforts.length > 0 && (
+                    <Select value={modelInfo.effort ?? 'default'} disabled={active || modelSaving} onValueChange={(value) => {
+                      const effort = modelInfo.efforts.find((item) => item === value)
+                      if (value === 'default') void saveChatSettings({ reasoning_override: null })
+                      else if (effort) void saveChatSettings({ reasoning_override: { model: modelInfo.id, effort } })
+                    }}>
+                      <SelectTrigger
+                        icon={Brain}
+                        variant="borderless"
+                        size="compact"
+                        aria-label={`Thinking effort: ${effortLabels[modelInfo.effort ?? 'default']}`}
+                        title={`Thinking effort: ${effortLabels[modelInfo.effort ?? 'default']}`}
+                        className="h-8 min-w-0 max-w-28 text-xs"
+                      />
+                      <SelectContent>
+                        <SelectItem index={0} value="default">Default</SelectItem>
+                        {modelInfo.efforts.map((effort, index) => (
+                          <SelectItem key={effort} index={index + 1} value={effort}>{effortLabels[effort]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <ModelSelector
+                    api={api} model={session.model_override} disabled={active || modelSaving} saving={modelSaving}
+                    resolvedLabel={modelInfo?.label ?? (session.model_override ? undefined : modelInfoError ? 'Model unavailable' : 'Loading model…')}
+                    onChange={(model) => {
+                      if (model !== session.model_override) void saveChatSettings({ model_override: model })
+                    }}
+                  />
+                </div>}
               />
             </div>
           </section>

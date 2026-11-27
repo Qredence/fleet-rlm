@@ -672,6 +672,12 @@ describe('Optimization Control Plane SSR rendering & v2 UX components', () => {
     expect(html).toContain('>GPT-5</span>')
     expect(html).not.toContain('Model ·')
     expect(html).not.toContain('prov-openai')
+    const inherited = renderToStaticMarkup(
+      <ModelSelector api={createApi('token')} model={null} resolvedLabel="GPT-6 Luna"
+        disabled={false} saving={false} onChange={() => {}} />,
+    )
+    expect(inherited).toContain('Model: GPT-6 Luna')
+    expect(inherited).not.toContain('Workspace default')
   })
 
   it('renders ProvidersSection cards, masked hints, keyless local provider, and encryption warning banner', () => {
