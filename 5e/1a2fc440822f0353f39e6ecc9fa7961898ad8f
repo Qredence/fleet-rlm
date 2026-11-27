@@ -1,0 +1,14 @@
+backend/src/fleet_rlm/opt_runner.py
+  h_f276322eb5eb9f 102-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5e1a2fc440822f0353f39e6ecc9fa7961898ad8f",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
