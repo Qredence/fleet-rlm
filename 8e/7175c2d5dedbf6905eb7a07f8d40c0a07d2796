@@ -1,0 +1,30 @@
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 237,337-342,450,681,689-693
+backend/src/fleet_rlm/api.py
+  h_f276322eb5eb9f 2372-2377
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 67-68,656,662,696-717,724-726,778,788,791,958-960,1084-1087,1089-1091,1099
+backend/src/fleet_rlm/ui_stream.py
+  h_f276322eb5eb9f 82-84,203-204,206-209,211,223-226
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 37-38,1035-1132
+backend/tests/test_phase3_api.py
+  h_f276322eb5eb9f 1065,1069-1070,1076-1079,1084,1090-1091,1094-1097,1633-1641,1649-1654,1701,1723,1726-1734,1754
+frontend/src/components/agent/MessageParts.test.tsx
+  h_f276322eb5eb9f 31-40
+frontend/src/components/agent/MessageParts.tsx
+  h_f276322eb5eb9f 27,30-34,37,42,153,155
+frontend/src/components/agent/PythonToolTrace.tsx
+  h_f276322eb5eb9f 2,64,66,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8e7175c2d5dedbf6905eb7a07f8d40c0a07d2796",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
