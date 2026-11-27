@@ -311,6 +311,7 @@ export function SessionWorkspace({
                                     <MessageParts
                                       parts={message.parts} live={active && index === messages.length - 1}
                                       preview={openFromChat} download={files.download}
+                                      resolveTraceLink={api.resolveTraceLink}
                                       refine={() => api.refineTurn(session.id, message.id)}
                                     />
                                   </>

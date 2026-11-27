@@ -1,5 +1,5 @@
 import { Globe, SquareTerminal } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { CodeBlock, CodeBlockContent, CodeBlockHeader, CodeBlockTitle } from '@/components/ui/code-block'
@@ -70,11 +70,40 @@ export function WebResearchActivity({ calls, live }: { calls: WebCall[]; live: b
   )
 }
 
-export function TurnDetailsActivity({ details, submissions = [], refine }: {
+export type TraceLinkResolver = (id: string, signal: AbortSignal) => Promise<{ url: string | null }>
+
+function VerifiedTraceLink({ traceId, resolve }: { traceId: string; resolve: TraceLinkResolver }) {
+  const [url, setUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let retry: ReturnType<typeof setTimeout>
+    async function check(remaining: number) {
+      const result = await resolve(traceId, controller.signal).catch(() => null)
+      if (controller.signal.aborted) return
+      if (result?.url) setUrl(result.url)
+      else if (remaining > 0) retry = setTimeout(() => void check(remaining - 1), 1000)
+    }
+    void check(2)
+    return () => {
+      controller.abort()
+      clearTimeout(retry)
+    }
+  }, [traceId, resolve])
+
+  return url && (
+    <a className="text-sm underline" href={url} target="_blank" rel="noreferrer">Open in MLflow</a>
+  )
+}
+
+export function TurnDetailsActivity({ details, submissions = [], refine, resolveTraceLink }: {
   details?: TurnDetails
   submissions?: unknown[]
   refine?: () => Promise<Memory | null>
+  resolveTraceLink?: TraceLinkResolver
 }) {
+  const [open, setOpen] = useState(false)
+  const traceId = details?.trace_url?.match(/[?&]traceId=(tr-[a-f0-9]{32})$/)?.[1]
   const [lesson, setLesson] = useState<Memory | null>()
   const [refining, setRefining] = useState(false)
   const [error, setError] = useState('')
@@ -95,7 +124,7 @@ export function TurnDetailsActivity({ details, submissions = [], refine }: {
   }
 
   return (
-    <TraceCollapsible>
+    <TraceCollapsible open={open} onOpenChange={setOpen}>
       <TraceCollapsibleTrigger>
         <TraceLine>
           <TraceIcon><SquareTerminal /></TraceIcon>
@@ -123,10 +152,8 @@ export function TurnDetailsActivity({ details, submissions = [], refine }: {
           </CodeBlock>
         ))}
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          {details?.trace_url && /^https?:\/\//i.test(details.trace_url) && (
-            <a className="text-sm underline" href={details.trace_url} target="_blank" rel="noreferrer">
-              Open in MLflow
-            </a>
+          {open && traceId && resolveTraceLink && (
+            <VerifiedTraceLink key={traceId} traceId={traceId} resolve={resolveTraceLink} />
           )}
           {canRefine && (lesson === undefined ? (
             <Button variant="outline" size="sm" disabled={refining} onClick={() => void requestRefinement()}>
