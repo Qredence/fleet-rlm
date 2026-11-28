@@ -1,0 +1,20 @@
+backend/skills/document-extraction/SKILL.md
+  h_f276322eb5eb9f 57
+backend/skills/web-research/SKILL.md
+  h_f276322eb5eb9f 9
+backend/src/fleet_rlm/tracing.py
+  h_f276322eb5eb9f 14,29-40,386-390
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 602-607,671-673,679,682-684
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cd31a670cbe187c6f6de87439d5e3306890ea7fe",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
