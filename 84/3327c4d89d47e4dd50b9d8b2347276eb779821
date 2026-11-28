@@ -1,0 +1,14 @@
+backend/skills/document-extraction/SKILL.md
+  h_f276322eb5eb9f 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "843327c4d89d47e4dd50b9d8b2347276eb779821",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
