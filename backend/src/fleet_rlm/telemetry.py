@@ -107,7 +107,7 @@ async def _initialize_experiment(
 @asynccontextmanager
 async def tracking_client(runtime: TrackingRuntime, optimizer: str) -> AsyncGenerator[None]:
     MLFLOW_HTTP_REQUEST_TIMEOUT.set(2)
-    MLFLOW_HTTP_REQUEST_MAX_RETRIES.set(0)
+    MLFLOW_HTTP_REQUEST_MAX_RETRIES.set(1)
     MLFLOW_ENABLE_ASYNC_TRACE_LOGGING.set(True)
     setup = asyncio.create_task(_initialize(runtime, optimizer))
     try:

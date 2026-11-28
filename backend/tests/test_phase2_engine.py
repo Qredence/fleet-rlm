@@ -730,6 +730,8 @@ async def test_interpreter_outputs_artifacts_and_cancelled_replies(settings, tmp
     try:
         assert await execute("print('ABCDEFGHIJK')") == "ABCDEFGH"
         assert await execute("result = add(x, y)\nprint(result)", {"x": 2, "y": 5}) == "7\n"
+        with pytest.raises(CodeExecutionError, match="nonempty answer"):
+            await execute("SUBMIT('   ')")
         assert await execute("SUBMIT(result)\nraise AssertionError") == FinalOutput({"answer": 7})
         with pytest.raises(CodeExecutionError) as error:
             await execute("raise ValueError('bad data')")

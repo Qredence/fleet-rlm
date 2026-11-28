@@ -37,14 +37,20 @@ _TOOL_DOCS_HEADER = (
 )
 _SUBMISSION_GUIDANCE = """Use the current/limit iteration counter to budget your actions. As soon
 as the available evidence supports an answer, call SUBMIT(answer, artifact_paths). A printed draft
-or saved artifact does not finish the turn. Keep attached reports consistent with the findings and
-caveats you submit.
+or saved artifact does not finish the turn. Include the requested final text in the answer field,
+even when the answer is a single code or token. Keep attached reports consistent with the findings
+and caveats you submit.
 
 With three actions left, wrap up any essential check or requested artifact. On the penultimate
 action, call SUBMIT with the best supported answer and state what remains unresolved. Reserve the
 last action for recovery. If the entire budget is one or two actions, submit by the last action.
 If the web allowance runs out, conclude the research with the opened evidence and identify gaps.
 """
+
+
+def _require_answer(answer: str) -> None:
+    if not answer.strip():
+        raise CodeExecutionError("The model did not produce a final answer")
 
 
 def _split_dynamic_tool_docs(instructions: str) -> tuple[str, str]:
@@ -782,6 +788,7 @@ async def run_workspace_task(
             executor.shutdown(wait=False)
             if depth == 0 and telemetry.started_at is not None:
                 telemetry.elapsed_ms = round((monotonic() - telemetry.started_at) * 1000)
+        _require_answer(result.answer)
         if depth == 0:
             telemetry.record_completion(result)
         if action.action is not None and action.action.reasoning:
