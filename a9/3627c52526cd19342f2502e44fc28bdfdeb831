@@ -1,0 +1,22 @@
+backend/skills/recursive-synthesis/SKILL.md
+  h_f276322eb5eb9f 9-10
+backend/src/fleet_rlm/agent.py
+  h_f276322eb5eb9f 40-42,51-55,791
+backend/src/fleet_rlm/interpreter.py
+  h_f276322eb5eb9f 772-778,1182
+backend/src/fleet_rlm/telemetry.py
+  h_f276322eb5eb9f 110
+backend/tests/test_phase2_engine.py
+  h_f276322eb5eb9f 733-734
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a93627c52526cd19342f2502e44fc28bdfdeb831",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
