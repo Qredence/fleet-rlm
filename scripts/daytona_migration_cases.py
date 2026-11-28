@@ -115,6 +115,22 @@ def _verify_trace(turn: dict, spans: list, arm: str) -> None:
     def parents_include(span, ids):
         return any(parent.span_id in ids for parent in ancestors(span))
 
+    def matches_run(span, run):
+        if arm != "v2":
+            return (
+                isinstance(span.inputs, dict) and span.inputs.get("task") == run["task"]
+            )
+        scope = by_id.get(span.parent_id)
+        return (
+            scope is not None
+            and scope.name == "fleet.rlm.run"
+            and succeeded(scope)
+            and scope.attributes.get("fleet.root_run_id") == turn["run_id"]
+            and scope.attributes.get("fleet.run_id") == run["id"]
+            and scope.attributes.get("fleet.parent_run_id") == run["parent"]
+            and scope.attributes.get("fleet.depth") == run["depth"]
+        )
+
     if arm == "v2" and turn.get("requires_batched_query"):
         _require(
             any(
@@ -173,8 +189,7 @@ def _verify_trace(turn: dict, spans: list, arm: str) -> None:
                 if span.name == "RLM.forward"
                 and succeeded(span)
                 and span.span_id not in matched
-                and isinstance(span.inputs, dict)
-                and span.inputs.get("task") == run["task"]
+                and matches_run(span, run)
                 and (
                     parents_include(span, parent_cells)
                     if run["parent"]
@@ -186,15 +201,6 @@ def _verify_trace(turn: dict, spans: list, arm: str) -> None:
             None,
         )
         _require(rlm is not None, f"Missing completed RLM span for {run['id']}")
-        if arm == "v2":
-            scope = by_id[rlm.parent_id]
-            _require(
-                scope.name == "fleet.rlm.run"
-                and scope.attributes.get("fleet.run_id") == run["id"]
-                and scope.attributes.get("fleet.parent_run_id") == run["parent"]
-                and scope.attributes.get("fleet.depth") == run["depth"],
-                f"Incorrect RLM ancestry for {run['id']}",
-            )
         matched.add(rlm.span_id)
         cells = [
             s
@@ -543,7 +549,7 @@ async def run_daytona_migration(url: str, output: Path, repeats: int, arm: str) 
                 json.dumps(rows, indent=2) + "\n"
             )
 
-    for _ in range(14):
+    for _ in range(30):
         await asyncio.to_thread(
             _attach_traces, tracker, experiment.experiment_id, rows, arm
         )
