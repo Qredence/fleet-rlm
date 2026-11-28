@@ -1,0 +1,75 @@
+AGENTS.md
+  s_5df4440a3a19f9::t_ce0d033d580d65 5,11
+Makefile
+  s_5df4440a3a19f9::t_d57aff1bfc09d0 27-28
+README.md
+  s_5df4440a3a19f9::t_2b2c517b52fdb9 56-57
+backend/.env.example
+  s_5df4440a3a19f9::t_6c7c2ec4dc3338 8
+backend/pyproject.toml
+  s_5df4440a3a19f9::t_ccd0500c97e372 89-90,104,107,111,114,121,136,140,158
+backend/src/fleet_rlm/agent.py
+  s_5df4440a3a19f9::t_8a2e79778776e6 607-610
+backend/src/fleet_rlm/api.py
+  s_5df4440a3a19f9::t_b46d320253a7ac 1,6,9-10,13-17,19,22-25,34-35,130-142,211-212,214-220,222-224
+backend/src/fleet_rlm/config.py
+  s_5df4440a3a19f9::t_3dac80678d93d3 24,90-105
+backend/src/fleet_rlm/db.py
+  s_5df4440a3a19f9::t_9b95a7be24d970 713-730,732-747,749-751
+backend/src/fleet_rlm/http/__init__.py
+  s_5df4440a3a19f9::t_5486c7e6aa1e64 1
+backend/src/fleet_rlm/http/access.py
+  s_5df4440a3a19f9::t_bfad59dc102511 1-148
+backend/src/fleet_rlm/http/dependencies.py
+  s_5df4440a3a19f9::t_fc9a93fff4a270 1-90
+backend/src/fleet_rlm/http/optimizations.py
+  s_5df4440a3a19f9::t_7634014d8d0a40 1-1140
+backend/src/fleet_rlm/http/providers.py
+  s_5df4440a3a19f9::t_082ba7708e746f 1-537
+backend/src/fleet_rlm/http/settings.py
+  s_5df4440a3a19f9::t_6f7424d16f00ed 1-503
+backend/src/fleet_rlm/http/workspace.py
+  s_5df4440a3a19f9::t_019de3463c732e 1-785
+backend/src/fleet_rlm/optimize.py
+  s_5df4440a3a19f9::t_e8bd09053fc227 3069-3072
+backend/src/fleet_rlm/telemetry.py
+  s_5df4440a3a19f9::t_63af325468e915 9,22-30,65,73-75,108
+backend/tests/test_chatgpt_plan.py
+  s_5df4440a3a19f9::t_4c869923c0709e 19,24-26,183,190-192,196-198,351,417-420,430,433,454,470-474
+backend/tests/test_optimization_ui_api.py
+  s_5df4440a3a19f9::t_369bd61cff182a 9,19,22,28-31,591,593-622,624-625,642-644,887-888,891-892,911-926,1039-1041,1048-1051,1544-1583,1637
+docs/architecture.md
+  s_5df4440a3a19f9::t_9bdef2f91c9353 3-6,9-11
+frontend/src/components/agent/MessageParts.test.tsx
+  s_5df4440a3a19f9::t_d6830cd7af29af 42-53
+frontend/src/components/agent/MessageParts.tsx
+  s_5df4440a3a19f9::t_b8f260938971b7 36-45,126-128
+frontend/src/components/agent/SettingsDialogBody.tsx
+  s_5df4440a3a19f9::t_93e5ccdaedf7a1 60,66,378,536,583,757
+frontend/src/hooks/use-session-chat.ts
+  s_5df4440a3a19f9::t_aa90b0eaf5f10a 8-13,51,53,65-71,83,94-98
+frontend/src/lib/api.ts
+  s_5df4440a3a19f9::t_a93e976d8d4cfc 474-483
+frontend/src/lib/chat-fetch.test.ts
+  s_5df4440a3a19f9::t_3cb4ed6dcf3509 2,13-32,80-94
+frontend/src/lib/chat-stream.ts
+  s_5df4440a3a19f9::t_c0d633a5ba32e1 14,20,42
+scripts/check_hygiene.py
+  s_5df4440a3a19f9::t_a70f4fba43eede 19-26,86-89,105-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07dd8454a0359fe74326da4dd3f4b176bd09341e",
+  "prompts": {},
+  "sessions": {
+    "s_5df4440a3a19f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21f46-cb23-73c1-bea5-f10506cfafda",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
