@@ -25,7 +25,7 @@ page_number, value, passage = chosen_match
 assert passage in (reader.pages[page_number - 1].extract_text() or "")
 ```
 
-Use these computed variables when serializing the requested result. Avoid retyping a page number from memory. Apply the same binding to table cells and visually read values, recording the cell or visible passage on its physical page.
+Use these computed variables when serializing the requested result. For a JSON answer, pass `json.dumps(result)` to `SUBMIT` so keys and strings are quoted correctly. Apply the same binding to table cells and visually read values, recording the cell or visible passage on its physical page.
 
 ## Scanned pages
 
@@ -54,6 +54,6 @@ text = (
 )
 ```
 
-Use the rendered page and recognized passage to classify it. For an OCR page list, require visible words, labels or numbers on each listed page. Exclude illustrations even if OCR produces stray characters. An empty text layer alone is insufficient.
+When the answer includes an OCR page list, inspect every page with no usable embedded text, even after finding the requested quantity on another page. Render each candidate and run OCR to distinguish scanned text from illustrations. Record the physical page number alongside its recognized words, labels or numbers. Exclude illustrations even if OCR produces stray characters. An empty text layer alone is insufficient.
 
 For short identifiers, start at 300 DPI and crop to the line containing the label. Run Tesseract with `--psm 7` on that single-line crop. If the identifier is unclear, compare a second render at a different resolution with the original glyphs before submitting. Carry the verified string and page together into the answer.
