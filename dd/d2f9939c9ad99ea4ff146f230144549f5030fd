@@ -1,0 +1,14 @@
+backend/src/fleet_rlm/telemetry.py
+  h_f276322eb5eb9f 87,111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddd2f9939c9ad99ea4ff146f230144549f5030fd",
+  "prompts": {},
+  "humans": {
+    "h_f276322eb5eb9f": {
+      "author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
