@@ -1,5 +1,5 @@
 dspy==3.5.0
-gmpy2>=2.3.0
+gmpy2>=2.3.2
 matplotlib>=3.10.0
 mpmath>=1.4.1
 numpy>=2.2.0
