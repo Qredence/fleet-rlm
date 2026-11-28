@@ -224,7 +224,10 @@ async def get_running_sandbox(daytona: AsyncDaytona, sandbox_id: str) -> AsyncSa
 async def reusable_session_sandbox(daytona: AsyncDaytona, sandbox_id: str) -> AsyncSandbox | None:
     try:
         sandbox = await daytona.v2.get(sandbox_id)
-        if sandbox.state in {"started", "queued", "creating", "starting"}:
+        if sandbox.state == "started":
+            return sandbox
+        if sandbox.state in {"queued", "creating", "starting"}:
+            await prepare_sandbox(sandbox)
             return sandbox
         if sandbox.state not in {"destroyed", "destroying", "error"}:
             raise SandboxStartupError("Daytona workspace is in an unexpected state")

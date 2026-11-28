@@ -20,7 +20,13 @@ from .. import db as store
 from ..config import Settings
 from ..interpreter import DatasetVolumeError
 from ..storage import StorageError
-from .dependencies import Runtime, RuntimeDep, _clean_display_name, _skill_registry
+from .dependencies import (
+    Runtime,
+    RuntimeDep,
+    _clean_display_name,
+    _display_endpoint_url,
+    _skill_registry,
+)
 from .settings import _effective_settings, _merge_settings, _registered_model_reference
 from .workspace import _safe_component
 
@@ -323,7 +329,7 @@ async def optimization_overview(runtime: RuntimeDep) -> OptimizationOverview:
             if opt_db and opt_db.get_secret_value()
             else None
         ),
-        mlflow_tracking_uri=runtime.settings.mlflow_tracking_uri,
+        mlflow_tracking_uri=_display_endpoint_url(runtime.settings.mlflow_tracking_uri),
         mlflow_experiment=opt_runner.optimization_experiment(runtime.settings),
         daytona_configured=bool(runtime.settings.daytona_api_key.get_secret_value()),
         decision_model=effective.decision_model,

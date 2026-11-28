@@ -607,8 +607,9 @@ async def finish_run(
     history_json: JsonObject | None = None,
     files: list[StagedFile] | None = None,
     retire_sandbox_id: str | None = None,
+    child_snapshots: dict[UUID, list[JsonObject]] | None = None,
 ) -> bool:
-    """Commit the terminal result and any root history together. Return false on a late retry."""
+    """Commit the terminal result and related root updates. Return false on a late retry."""
     if status not in ("completed", "failed", "cancelled"):
         raise ValueError("finish_run requires a terminal status")
 
@@ -634,6 +635,25 @@ async def finish_run(
         row = result.one_or_none()
         if row is None:
             return False
+        if row.parent_run_id is None and status != "completed":
+            # The root update serializes this sweep with child admission.
+            running_children = (
+                update(Run)
+                .where(
+                    Run.root_run_id == run_id,
+                    Run.parent_run_id.is_not(None),
+                    Run.status == "running",
+                )
+                .values(status=status, finished_at=func.now())
+            )
+            for child_id, parts in (child_snapshots or {}).items():
+                await connection.execute(
+                    running_children.where(Run.id == child_id).values(
+                        ui_parts=transcript_value(parts)
+                    )
+                )
+            # Admission can commit before an interrupted callback records a snapshot.
+            await connection.execute(running_children)
         if row.parent_run_id is None and history_json is not None:
             await connection.execute(
                 update(Session)

@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .. import agent, chatgpt_plan, llm_registry
 from .. import db as store
 from ..config import Settings
-from .dependencies import Runtime, RuntimeDep, _skill_registry
+from .dependencies import Runtime, RuntimeDep, _display_endpoint_url, _skill_registry
 from .providers import _local_chatgpt, _provider_view
 
 router = APIRouter()
@@ -163,11 +163,11 @@ async def _workspace_settings_view(
             daytona_max_lifetime_minutes=base.daytona_max_lifetime_minutes,
             storage_bucket=base.s3_bucket,
             llm_api_key_configured=bool(base.llm_api_key.get_secret_value()),
-            llm_base_url=base.llm_base_url,
+            llm_base_url=_display_endpoint_url(base.llm_base_url),
             bearer_auth_enabled=base.api_bearer_token is not None
             and bool(base.api_bearer_token.get_secret_value()),
             max_concurrent_turns_per_worker=base.max_concurrent_turns_per_worker,
-            mlflow_tracking_uri=base.mlflow_tracking_uri,
+            mlflow_tracking_uri=_display_endpoint_url(base.mlflow_tracking_uri),
             mlflow_experiment=base.mlflow_experiment,
             optimized_program_path=(
                 f"promoted:{rlm_promo.artifact_sha256[:12]}"

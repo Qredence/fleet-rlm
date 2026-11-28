@@ -25,13 +25,12 @@ from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DataError, OperationalError
 
 from fleet_rlm import agent, api, db, interpreter, skills, ui_stream
 from fleet_rlm.config import Settings
 from fleet_rlm.http import chat as chat_routes
 from fleet_rlm.http import settings as settings_routes
-from fleet_rlm.http import workspace as workspace_routes
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
 from fleet_rlm.storage import (
@@ -1907,9 +1906,10 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
 async def test_rejected_transcript_releases_run_and_retires_vm(offline, monkeypatch):
     async def reject_once(*args, **kwargs):
         offline.finish.side_effect = offline.store.finish
-        raise SQLAlchemyError("rejected transcript")
+        raise DataError(None, None, ValueError("Rejected transcript"))
 
-    async def interrupt(*_args, **_kwargs):
+    async def interrupt(_settings, *, run_id, callbacks, **_kwargs):
+        await callbacks.on_child_start(agent.ChildRun("placeholder", run_id, 1, "subagent", "Read"))
         raise RuntimeError("interrupted")
 
     monkeypatch.setattr(agent, "run_workspace_task", interrupt)
@@ -1919,6 +1919,10 @@ async def test_rejected_transcript_releases_run_and_retires_vm(offline, monkeypa
     terminal = offline.finish.await_args.kwargs
     assert terminal["status"] == "failed"
     assert [part["type"] for part in terminal["ui_parts"]] == ["data-turn-details"]
+    assert offline.finish.await_args_list[0].kwargs["child_snapshots"] == {
+        offline.create_child.return_value.id: []
+    }
+    assert terminal["child_snapshots"] == {}
     assert terminal["retire_sandbox_id"] == "test-sandbox"
     assert not offline.store.active
     offline.daytona.v2.delete.assert_awaited_once_with("test-sandbox", timeout=30)
@@ -1952,7 +1956,9 @@ async def test_incomplete_child_snapshot_survives_root_teardown(
 
         async def fail_first_write(*_args, **_kwargs):
             offline.finish.side_effect = offline.store.finish
-            raise RuntimeError("First root write failed")
+            raise OperationalError(
+                None, None, OSError("Connection lost"), connection_invalidated=True
+            )
 
         offline.finish.side_effect = fail_first_write
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
@@ -1976,12 +1982,9 @@ async def test_incomplete_child_snapshot_survives_root_teardown(
     assert parts[-1]["state"] == "input-streaming"
     assert parts[-1]["input"] == "print('working')"
 
-    child_update, *fallback_updates = offline.store.statements
-    assert child_update.compile().params["status"] == status
-    assert child_update.compile().params["id_1"] == offline.create_child.return_value.id
-    assert child_update.compile().params["ui_parts"] == parts
-    assert len(fallback_updates) == offline.finish.await_count
-    assert all("ui_parts" not in update.compile().params for update in fallback_updates)
+    for attempt in offline.finish.await_args_list:
+        assert attempt.kwargs["child_snapshots"] == {offline.create_child.return_value.id: parts}
+    assert offline.store.statements == []
 
 
 @pytest.mark.parametrize("asgi_version", ["2.3", "2.4"])
@@ -2191,7 +2194,7 @@ async def test_patch_session_edits_title_and_model_override(offline):
 
 
 @pytest.mark.asyncio
-async def test_workspace_settings_crud_validation_and_secret_safety(offline):
+async def test_workspace_settings_crud_validation_and_secret_safety(offline, monkeypatch):
     for method in ("GET", "PATCH", "DELETE"):
         kwargs = {"json": {"rlm_max_iters": 12}} if method == "PATCH" else {}
         response = await offline.client.request(
@@ -2341,6 +2344,41 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline):
     reset_body = reset.json()
     assert reset_body["overrides"] == {}
     assert reset_body["effective"] == reset_body["defaults"]
+
+    runtime = api.app.state.runtime
+    monkeypatch.setattr(
+        runtime,
+        "settings",
+        runtime.settings.model_copy(
+            update={
+                "llm_base_url": "https://fixture-user:fixture-pass@llm.test:8443/v1?key=fixture#path",
+                "mlflow_tracking_uri": "http://fixture-user@[::1]:5001/tracking?token=fixture#ui",
+            }
+        ),
+    )
+    for method in ("GET", "PATCH", "DELETE"):
+        kwargs = {"json": {"rlm_max_iters": 12}} if method == "PATCH" else {}
+        response = await offline.client.request(method, "/api/settings", **kwargs)
+        response.raise_for_status()
+        status = response.json()["status"]
+        assert status["llm_base_url"] == "https://llm.test:8443/v1"
+        assert status["mlflow_tracking_uri"] == "http://[::1]:5001/tracking"
+
+    monkeypatch.setattr(
+        runtime,
+        "settings",
+        runtime.settings.model_copy(
+            update={
+                "llm_base_url": "https://fixture-user:fixture-pass@[::1/v1",
+                "mlflow_tracking_uri": "file:./mlruns",
+            }
+        ),
+    )
+    malformed = await offline.client.get("/api/settings")
+    malformed.raise_for_status()
+    malformed_status = malformed.json()["status"]
+    assert malformed_status["llm_base_url"] is None
+    assert malformed_status["mlflow_tracking_uri"] == "file:./mlruns"
 
 
 @pytest.mark.asyncio
@@ -2719,10 +2757,9 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
             raise interpreter.SandboxStartupError("create response unavailable")
         return recovered
 
-    monkeypatch.setattr(
-        workspace_routes, "allocate_session_sandbox", AsyncMock(side_effect=allocate)
-    )
-    monkeypatch.setattr(workspace_routes, "prepare_sandbox", AsyncMock())
+    monkeypatch.setattr(chat_routes, "allocate_session_sandbox", AsyncMock(side_effect=allocate))
+    prepare = AsyncMock()
+    monkeypatch.setattr(chat_routes, "prepare_sandbox", prepare)
     first_id = offline.store.active_by_session[sid] = uuid4()
     with pytest.raises(interpreter.SandboxStartupError, match="create response"):
         await chat_routes._chat_sandbox(
@@ -2735,6 +2772,7 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
     )
     assert sandbox is recovered and pending == f"fleet-{first_id.hex}"
     assert session.pending_sandbox_name is None and session.daytona_sandbox_id == recovered.id
+    prepare.assert_awaited_once_with(recovered)
     offline.store.active_by_session.pop(sid)
     assert offline.store.checkouts == 0
 

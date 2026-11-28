@@ -1230,11 +1230,14 @@ def read_latest_progress(progress_path: Path, offset: int) -> tuple[int, dict[st
     return new_offset, latest
 
 
-async def _terminate_and_reap_proc(proc: Any, *, grace_seconds: float) -> None:
+async def _terminate_and_reap_proc(
+    proc: Any, *, grace_seconds: float, terminate_sent: bool = False
+) -> None:
     if proc is None or proc.returncode is not None:
         return
-    with suppress(ProcessLookupError, OSError):
-        proc.terminate()
+    if not terminate_sent:
+        with suppress(ProcessLookupError, OSError):
+            proc.terminate()
     try:
         await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
     except TimeoutError:
@@ -1358,45 +1361,45 @@ async def supervise_optimization_job(
         "total": None,
     }
     cancelled = False
+    ownership_lost = False
+    terminate_sent = False
     proc: Any = None
     db_url_file: Path | None = None
     credentials_file: Path | None = None
 
-    async def _check_cancel_requested() -> bool:
-        if cancel_event.is_set():
+    async def stop_before_work(progress: dict[str, Any] | None = None) -> bool:
+        job = await store.update_optimization_job_progress(
+            runtime.sessionmaker,
+            job_id,
+            status="running" if progress else None,
+            stage=progress["stage"] if progress else None,
+            progress_json=progress,
+            started_at=datetime.now(UTC) if progress else None,
+        )
+        if job is None:
             return True
-        if await store.is_optimization_job_cancel_requested(runtime.sessionmaker, job_id):
-            cancel_event.set()
-            return True
-        return False
+        if not (cancel_event.is_set() or job.cancel_requested):
+            return False
+        await store.finish_optimization_job(
+            runtime.sessionmaker,
+            job_id,
+            status="cancelled",
+            stage="cancelled",
+            progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
+            log_tail=log_tail,
+            error="Cancelled by user",
+        )
+        return True
 
     try:
-        # Check cancel BEFORE Neon branch provisioning so queued cancels exit cleanly.
-        if await _check_cancel_requested():
-            await store.finish_optimization_job(
-                runtime.sessionmaker,
-                job_id,
-                status="cancelled",
-                stage="cancelled",
-                progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
-                log_tail=log_tail,
-                error="Cancelled by user",
-            )
-            return
-
         if branch_mode == "auto_neon":
-            progress_state = {
+            provisioning = {
                 "stage": "provisioning_branch",
                 "label": "Provisioning ephemeral Neon branch",
             }
-            await store.update_optimization_job_progress(
-                runtime.sessionmaker,
-                job_id,
-                status="running",
-                stage="provisioning_branch",
-                progress_json=progress_state,
-                started_at=datetime.now(UTC),
-            )
+            if await stop_before_work(provisioning):
+                return
+            progress_state = provisioning
             ephemeral_branch_id, db_url = await create_ephemeral_neon_branch(
                 runtime.settings, spec.target, job_id
             )
@@ -1420,27 +1423,8 @@ async def supervise_optimization_job(
         else:
             db_url = runtime.settings.database_direct_url
 
-        # Re-check cancel BEFORE subprocess spawn (also tears down any ephemeral branch in finally).
-        if await _check_cancel_requested():
-            await store.finish_optimization_job(
-                runtime.sessionmaker,
-                job_id,
-                status="cancelled",
-                stage="cancelled",
-                progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
-                log_tail=log_tail,
-                error="Cancelled by user",
-            )
+        if await stop_before_work({"stage": "starting", "label": "Launching isolated optimizer"}):
             return
-
-        await store.update_optimization_job_progress(
-            runtime.sessionmaker,
-            job_id,
-            status="running",
-            stage="starting",
-            progress_json={"stage": "starting", "label": "Launching isolated optimizer"},
-            started_at=datetime.now(UTC),
-        )
 
         with TemporaryDirectory(prefix=f"fleet-opt-job-{job_id.hex[:8]}-") as temporary:
             work_dir = Path(temporary)
@@ -1459,18 +1443,6 @@ async def supervise_optimization_job(
                 raw_ds, _cached = await materialize_dataset_bytes(runtime, custom_dataset)
                 dataset_arg = work_dir / "dataset.jsonl"
                 await asyncio.to_thread(dataset_arg.write_bytes, raw_ds)
-
-            if await _check_cancel_requested():
-                await store.finish_optimization_job(
-                    runtime.sessionmaker,
-                    job_id,
-                    status="cancelled",
-                    stage="cancelled",
-                    progress_json={**progress_state, "stage": "cancelled", "label": "Cancelled"},
-                    log_tail=log_tail,
-                    error="Cancelled by user",
-                )
-                return
 
             db_url_file = work_dir / "database.url"
             await asyncio.to_thread(_write_private_secret_file, db_url_file, db_url)
@@ -1516,6 +1488,8 @@ async def supervise_optimization_job(
                 decision_credential=spec.role_credentials.get("decision_lm"),
             )
 
+            if await stop_before_work():
+                return
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -1541,10 +1515,8 @@ async def supervise_optimization_job(
                     async with log_lock:
                         log_tail = append_log_tail(log_tail, decoded)
 
-            terminate_sent = False
-
             async def monitor_loop() -> None:
-                nonlocal progress_state, cancelled, terminate_sent
+                nonlocal progress_state, cancelled, terminate_sent, ownership_lost
                 offset = 0
                 last_flushed_tail = ""
                 terminate_at = 0.0
@@ -1560,8 +1532,7 @@ async def supervise_optimization_job(
                         changed = True
                     try:
                         if changed:
-                            last_flushed_tail = tail_snapshot
-                            await store.update_optimization_job_progress(
+                            updated = await store.update_optimization_job_progress(
                                 runtime.sessionmaker,
                                 job_id,
                                 status="running",
@@ -1569,8 +1540,10 @@ async def supervise_optimization_job(
                                 progress_json=progress_state,
                                 log_tail=tail_snapshot,
                             )
+                            ownership_lost = updated is None
+                            last_flushed_tail = tail_snapshot
                         else:
-                            await store.touch_optimization_job_heartbeat(
+                            ownership_lost = not await store.touch_optimization_job_heartbeat(
                                 runtime.sessionmaker, job_id
                             )
                     except Exception as db_error:
@@ -1580,24 +1553,24 @@ async def supervise_optimization_job(
                             type(db_error).__name__,
                         )
 
-                    cancel_now = await _poll_job_cancellation(
+                    should_stop = ownership_lost or await _poll_job_cancellation(
                         runtime.sessionmaker, job_id, cancel_event
                     )
-                    if cancel_now:
-                        cancelled = True
-                        if not terminate_sent:
-                            terminate_sent = True
-                            terminate_at = asyncio.get_running_loop().time()
-                            with suppress(ProcessLookupError, OSError):
-                                proc.terminate()
-                        elif (
-                            asyncio.get_running_loop().time() - terminate_at
-                            >= CANCEL_SIGKILL_GRACE_SECONDS
-                        ):
-                            with suppress(ProcessLookupError, OSError):
-                                proc.kill()
+                    if should_stop and not terminate_sent:
+                        cancelled = not ownership_lost
+                        terminate_sent = True
+                        terminate_at = asyncio.get_running_loop().time()
+                        with suppress(ProcessLookupError, OSError):
+                            proc.terminate()
+                    elif terminate_sent and (
+                        asyncio.get_running_loop().time() - terminate_at
+                        >= CANCEL_SIGKILL_GRACE_SECONDS
+                    ):
+                        with suppress(ProcessLookupError, OSError):
+                            proc.kill()
 
                     if terminate_sent:
+                        # Keep heartbeating while a cancelled process exits.
                         await asyncio.sleep(_MONITOR_POLL_INTERVAL_SECONDS)
                     else:
                         with suppress(TimeoutError):
@@ -1611,23 +1584,17 @@ async def supervise_optimization_job(
                 await proc.wait()
                 await drain_task
             finally:
-                if proc.returncode is None:
-                    if terminate_sent:
-                        try:
-                            await asyncio.wait_for(proc.wait(), timeout=5.0)
-                        except TimeoutError:
-                            with suppress(ProcessLookupError, OSError):
-                                proc.kill()
-                            with suppress(Exception):
-                                await proc.wait()
-                    else:
-                        terminate_sent = True
-                        await _terminate_and_reap_proc(proc, grace_seconds=5.0)
                 await _stop_monitor_task(monitor_task)
+                await _terminate_and_reap_proc(
+                    proc, grace_seconds=5.0, terminate_sent=terminate_sent
+                )
                 await _stop_monitor_task(drain_task)
                 _remove_secret_files(db_url_file, credentials_file)
                 db_url_file = None
                 credentials_file = None
+
+            if ownership_lost:
+                return
 
             _, final_progress = await asyncio.to_thread(read_latest_progress, progress_path, 0)
             if final_progress is not None:
@@ -1662,68 +1629,37 @@ async def supervise_optimization_job(
             artifact_sha256: str | None = None
             artifact_size: int | None = None
             if artifact_path.is_file():
+                if not await store.touch_optimization_job_heartbeat(runtime.sessionmaker, job_id):
+                    return
                 artifact_key = runtime.storage.optimization_artifact_key(job_id, spec.target)
                 artifact_sha256, artifact_size = await runtime.storage.put_object(
                     artifact_key, artifact_path
                 )
-                with suppress(OSError):
-                    raw_artifact = await asyncio.to_thread(artifact_path.read_bytes)
-                    cached_art = runtime.artifact_cache_dir / f"{artifact_sha256}.json"
-                    await asyncio.to_thread(
-                        _write_private_file_atomic,
-                        runtime.artifact_cache_dir,
-                        cached_art,
-                        raw_artifact,
-                    )
 
-            report_inner = (
-                report_payload.get("report")
-                if isinstance(report_payload, dict)
-                and isinstance(report_payload.get("report"), dict)
-                else report_payload
+            report = report_payload or {}
+            report_inner = report.get("report")
+            if not isinstance(report_inner, dict):
+                report_inner = report_payload
+            report_fields = report_inner or {}
+            mlflow_run_id = str(
+                report.get("mlflow_run_id") or report_fields.get("mlflow_run_id") or ""
             )
-            if isinstance(report_inner, dict):
-                report_inner = opt_datasets.scrub_secrets(report_inner, extra_secrets)
-            mlflow_run_id = (
-                str(report_payload.get("mlflow_run_id") or report_inner.get("mlflow_run_id") or "")
-                if isinstance(report_payload, dict) and isinstance(report_inner, dict)
-                else None
-            ) or None
+            mlflow_run_id = mlflow_run_id or None
             resolved_decision_model = (
-                str(report_inner.get("resolved_decision_model") or "")
-                if isinstance(report_inner, dict)
-                else ""
-            ) or None
+                str(report_fields.get("resolved_decision_model") or "") or None
+            )
 
-            await store.finish_optimization_job(
+            completed = await store.finish_optimization_job(
                 runtime.sessionmaker,
                 job_id,
                 status="completed",
                 stage="completed",
-                saved=(
-                    bool(report_payload["saved"])
-                    if isinstance(report_payload, dict) and "saved" in report_payload
-                    else None
-                ),
-                baseline_score=(
-                    report_payload.get("baseline_score")
-                    if isinstance(report_payload, dict)
-                    else None
-                ),
-                optimized_score=(
-                    report_payload.get("optimized_score")
-                    if isinstance(report_payload, dict)
-                    else None
-                ),
-                train_size=(
-                    report_payload.get("train_size") if isinstance(report_payload, dict) else None
-                ),
-                val_size=(
-                    report_payload.get("val_size") if isinstance(report_payload, dict) else None
-                ),
-                holdout_size=(
-                    report_payload.get("holdout_size") if isinstance(report_payload, dict) else None
-                ),
+                saved=bool(report["saved"]) if "saved" in report else None,
+                baseline_score=report.get("baseline_score"),
+                optimized_score=report.get("optimized_score"),
+                train_size=report.get("train_size"),
+                val_size=report.get("val_size"),
+                holdout_size=report.get("holdout_size"),
                 progress_json={**progress_state, "stage": "completed", "label": "Completed"},
                 report_json=report_inner,
                 log_tail=scrubbed_log_tail,
@@ -1735,9 +1671,21 @@ async def supervise_optimization_job(
                 mlflow_run_id=mlflow_run_id,
                 mlflow_experiment=optimization_experiment(effective),
             )
+            if artifact_key is None:
+                return
+            if completed is None:
+                current_job = await store.get_optimization_job(runtime.sessionmaker, job_id)
+                if current_job is None or current_job.artifact_object_key != artifact_key:
+                    await runtime.storage.delete_object(artifact_key)
+                return
+            with suppress(OSError):
+                raw_artifact = await asyncio.to_thread(artifact_path.read_bytes)
+                cached_art = runtime.artifact_cache_dir / f"{artifact_sha256}.json"
+                await asyncio.to_thread(
+                    _write_private_file_atomic, runtime.artifact_cache_dir, cached_art, raw_artifact
+                )
     except asyncio.CancelledError:
-        if proc is not None and proc.returncode is None:
-            await _terminate_and_reap_proc(proc, grace_seconds=5.0)
+        await _terminate_and_reap_proc(proc, grace_seconds=5.0, terminate_sent=terminate_sent)
         with suppress(Exception):
             await store.finish_optimization_job(
                 runtime.sessionmaker,

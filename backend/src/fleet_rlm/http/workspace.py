@@ -21,20 +21,16 @@ from starlette.types import Receive, Scope, Send
 
 from .. import agent, chatgpt_plan
 from .. import db as store
-from ..config import Settings
 from ..interpreter import (
     AsyncSandbox,
     DaytonaError,
     SandboxStartupError,
     WorkspaceBrowseLimit,
-    allocate_session_sandbox,
     delete_pending_sandbox,
     delete_sandbox_by_id,
     get_running_sandbox,
     list_workspace_files,
-    prepare_sandbox,
     read_browsable_workspace_file,
-    reusable_session_sandbox,
 )
 from ..skills import MAX_SKILL_BYTES
 from ..storage import ObjectStorage, StorageError, StorageIntegrityError, StorageObjectMissing
@@ -353,48 +349,6 @@ def _safe_component(name: str) -> bool:
 def _valid_file_path(path: str) -> bool:
     root, *parts = path.split("/")
     return root in {"files", "artifacts"} and bool(parts) and all(map(_safe_component, parts))
-
-
-async def _ensure_bound_sandbox(
-    runtime: Runtime,
-    effective: Settings,
-    session_id: UUID,
-    existing_sandbox_id: str | None,
-    *,
-    owner_run_id: UUID,
-    needs_cleanup: bool = False,
-) -> AsyncSandbox:
-    if existing_sandbox_id:
-        if needs_cleanup:
-            try:
-                await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
-            except DaytonaError as error:
-                raise SandboxStartupError(
-                    "Could not retire the previous Daytona workspace"
-                ) from error
-        elif sandbox := await reusable_session_sandbox(runtime.daytona, existing_sandbox_id):
-            if sandbox.state != "started":
-                await prepare_sandbox(sandbox)
-            return sandbox
-    name, recovering = await store.reserve_session_sandbox(
-        runtime.sessionmaker, session_id, owner_run_id, expected=existing_sandbox_id
-    )
-    sandbox = await allocate_session_sandbox(
-        runtime.daytona, effective, name, recovering=recovering
-    )
-    # A stale worker leaves the reservation for the next owner to reconcile.
-    _, won = await store.rebind_session_sandbox(
-        runtime.sessionmaker,
-        session_id,
-        sandbox.id,
-        expected=existing_sandbox_id,
-        owner_run_id=owner_run_id,
-        allocation_name=name,
-    )
-    if not won:
-        raise SandboxStartupError("The Daytona workspace binding changed during startup")
-    await prepare_sandbox(sandbox)
-    return sandbox
 
 
 async def _reclaim_discarded_objects(runtime: Runtime, session_id: UUID) -> None:

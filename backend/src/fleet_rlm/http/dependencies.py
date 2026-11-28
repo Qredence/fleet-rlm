@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Annotated, Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import dspy
@@ -75,6 +76,21 @@ DbDep = Annotated[AsyncSession, Depends(get_db, scope="function")]
 
 async def _skill_registry(runtime: Runtime) -> SkillRegistry:
     return await asyncio.to_thread(runtime.skills.with_installed, runtime.settings.skills_dir)
+
+
+def _display_endpoint_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    if parts.scheme not in {"http", "https"}:
+        return value
+    if not parts.hostname:
+        return None
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, authority, parts.path, "", ""))
 
 
 def _has_control_chars(value: str) -> bool:

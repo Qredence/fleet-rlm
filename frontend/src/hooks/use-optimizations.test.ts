@@ -432,12 +432,79 @@ describe('useOptimizations hook behavior', () => {
     hook.unmount()
     expect(streamSignal?.aborted).toBe(true)
   })
+
+  it.each(['initial', 'manual'])('keeps newer filtered results during a delayed %s refresh', async (kind) => {
+    const oldJob = makeJob({ id: 'old', status: 'completed' })
+    const filteredJob = makeJob({ id: 'filtered', status: 'failed' })
+    let resolveOverview!: (overview: OptimizationOverview) => void
+    const pendingOverview = new Promise<OptimizationOverview>((resolve) => {
+      resolveOverview = resolve
+    })
+    const getOptimizationOverview = vi.fn(() => pendingOverview)
+    if (kind === 'manual') getOptimizationOverview.mockResolvedValueOnce(makeOverview())
+    const listOptimizationJobs = vi.fn(async ({ status }: { status?: string }) =>
+      status === 'failed' ? [filteredJob] : [oldJob],
+    )
+    const api = {
+      getOptimizationOverview,
+      listOptimizationDatasets: vi.fn(async () => []),
+      listOptimizationJobs,
+      getOptimizationJob: vi.fn(async (id: string) =>
+        id === filteredJob.id ? filteredJob : oldJob,
+      ),
+      openOptimizationEvents: vi.fn(),
+    } as unknown as FleetApi
+    const hook = mountHook(() => useOptimizations(api))
+    await hook.settle()
+    const refresh = kind === 'manual' ? hook.current.refreshAll() : undefined
+
+    hook.current.setStatusFilter('failed')
+    await hook.settle()
+    expect(hook.current.jobs).toEqual([filteredJob])
+    expect(hook.current.selectedJobId).toBe(filteredJob.id)
+
+    resolveOverview(makeOverview())
+    await refresh
+    await hook.settle()
+    expect(hook.current.overview).not.toBeNull()
+    expect(hook.current.loading).toBe(false)
+    expect(hook.current.jobs).toEqual([filteredJob])
+    expect(hook.current.selectedJobId).toBe(filteredJob.id)
+    hook.unmount()
+  })
 })
 
 describe('runOptimizationEventStream SSE reliability', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('processes a terminal snapshot and its done frame once', async () => {
+    const detail = makeJob({ status: 'completed' })
+    const { response } = makeSseResponse([
+      { event: 'snapshot', data: detail },
+      { event: 'done', data: detail },
+    ])
+    const onUpdate = vi.fn()
+    const onTerminal = vi.fn()
+
+    const outcome = await runOptimizationEventStream({
+      api: {
+        openOptimizationEvents: vi.fn(async () => response),
+        getOptimizationJob: vi.fn(),
+      },
+      jobId: detail.id,
+      signal: new AbortController().signal,
+      onUpdate,
+      onTerminal,
+      onFallbackWarning: vi.fn(),
+      onFatalError: vi.fn(),
+    })
+
+    expect(outcome).toBe('terminal')
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith(detail)
+    expect(onTerminal).toHaveBeenCalledExactlyOnceWith(detail)
   })
 
   it('resets retry counter upon receiving any healthy event across repeated stream drops', async () => {
