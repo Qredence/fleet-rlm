@@ -314,6 +314,15 @@ class _ModelCall:
     uses_dspy_cache: bool
 
 
+def _record_provider_error(span: LiveSpan, error: BaseException | None) -> None:
+    if not isinstance(error, LMProviderError):
+        return
+    if isinstance(error.status, int) and 100 <= error.status <= 599:
+        span.set_attribute("fleet.model.http_status", error.status)
+    if error.provider_code in _SAFE_PROVIDER_CODES:
+        span.set_attribute("fleet.model.error_code", error.provider_code)
+
+
 class FleetMlflowCallback(MlflowCallback):
     """Reuse the MLflow 3.18 DSPy hierarchy and sanitize values before capture."""
 
@@ -383,13 +392,9 @@ class FleetMlflowCallback(MlflowCallback):
         try:
             if exception is not None:
                 active.set_attribute("error.type", type(exception).__name__)
-            if model and isinstance(exception, LMProviderError):
-                if isinstance(exception.status, int) and 100 <= exception.status <= 599:
-                    active.set_attribute("fleet.model.http_status", exception.status)
-                if exception.provider_code in _SAFE_PROVIDER_CODES:
-                    active.set_attribute("fleet.model.error_code", exception.provider_code)
             detailed = model or active.span_type in {SpanType.TOOL, SpanType.RETRIEVER}
             if model:
+                _record_provider_error(active, exception)
                 response = outputs if outputs is not None else getattr(exception, "partial", None)
                 recorded = model.usage.get_total_tokens().get(model.model)
                 usage = (
