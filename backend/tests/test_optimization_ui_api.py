@@ -971,6 +971,26 @@ async def test_provider_crud_encryption_ssrf_probe_models_and_delete_guard(
             "https://mlflow.test:5001/tracking"
         )
 
+    with monkeypatch.context() as patch:
+        runtime = api.app.state.runtime
+        patch.setattr(
+            runtime,
+            "settings",
+            opt_app.settings.model_copy(
+                update={
+                    "mlflow_tracking_uri": (
+                        "postgresql://tracking:secret@db.example/tracking?sslmode=require#frag"
+                    )
+                }
+            ),
+        )
+        overview = await client.get("/api/optimizations/overview", headers=_AUTH)
+        overview.raise_for_status()
+        assert overview.json()["capabilities"]["mlflow_tracking_uri"] == (
+            "postgresql://db.example/tracking"
+        )
+        assert "secret" not in overview.text
+
     # 2. SSRF URL blocked on create (metadata + private IP when allow_private=False)
     ssrf_resp = await client.post(
         "/api/optimizations/providers",

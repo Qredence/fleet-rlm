@@ -2380,6 +2380,30 @@ async def test_workspace_settings_crud_validation_and_secret_safety(offline, mon
     assert malformed_status["llm_base_url"] is None
     assert malformed_status["mlflow_tracking_uri"] == "file:./mlruns"
 
+    monkeypatch.setattr(
+        runtime,
+        "settings",
+        runtime.settings.model_copy(
+            update={
+                "llm_base_url": (
+                    "postgresql://fixture-user:fixture-pass@db.example:5432/llm"
+                    "?sslmode=require#frag"
+                ),
+                "mlflow_tracking_uri": (
+                    "postgresql://tracking:secret@db.example/tracking?sslmode=require#frag"
+                ),
+            }
+        ),
+    )
+    database_urls = await offline.client.get("/api/settings")
+    database_urls.raise_for_status()
+    database_status = database_urls.json()["status"]
+    assert database_status["llm_base_url"] == "postgresql://db.example:5432/llm"
+    assert database_status["mlflow_tracking_uri"] == "postgresql://db.example/tracking"
+    rendered = database_urls.text
+    assert "fixture-pass" not in rendered
+    assert "secret" not in rendered
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("session_model", [None, "openai/provider/catalog-model"])

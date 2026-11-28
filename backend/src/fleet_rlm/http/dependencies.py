@@ -85,12 +85,18 @@ def _display_endpoint_url(value: str | None) -> str | None:
         parts = urlsplit(value)
     except ValueError:
         return None
-    if parts.scheme not in {"http", "https"}:
-        return value
-    if not parts.hostname:
+    if parts.scheme in {"http", "https"} and not parts.hostname:
         return None
-    authority = parts.netloc.rsplit("@", 1)[-1]
-    return urlunsplit((parts.scheme, authority, parts.path, "", ""))
+    if (
+        parts.scheme in {"http", "https"}
+        or parts.username
+        or parts.password
+        or parts.query
+        or parts.fragment
+    ):
+        authority = parts.netloc.rsplit("@", 1)[-1]
+        return urlunsplit((parts.scheme, authority, parts.path, "", ""))
+    return value
 
 
 def _has_control_chars(value: str) -> bool:
