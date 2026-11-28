@@ -20,8 +20,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from mlflow.entities import LiveSpan
 from mlflow.exceptions import MlflowException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, StatementError
 
 from .. import agent, chatgpt_plan, opt_runner, ui_stream
 from .. import db as store
@@ -31,12 +30,15 @@ from ..interpreter import (
     AsyncSandbox,
     DaytonaError,
     SandboxStartupError,
+    allocate_session_sandbox,
     delete_sandbox_by_id,
     download_workspace_file,
     list_new_artifacts,
     make_interpreter_factory,
+    prepare_sandbox,
     reconcile_managed_workspace,
     reset_managed_workspace,
+    reusable_session_sandbox,
     sandbox_cleanup_failed,
     upload_workspace_file,
 )
@@ -48,7 +50,6 @@ from .dependencies import _STREAM_HEADER, Runtime, RuntimeDep, _skill_registry
 from .settings import _effective_settings, _interactive_models, _request_decision_lm
 from .workspace import (
     _WORKSPACE_STARTUP_HELP,
-    _ensure_bound_sandbox,
     _session,
     _try_object_cleanup,
     _valid_file_path,
@@ -163,30 +164,14 @@ async def _finish_root(
     child_snapshots: dict[str, list[dict]] | None = None,
     **result,
 ) -> bool:
-    if status != "completed":
-        running_children = (
-            update(store.Run)
-            .where(
-                store.Run.root_run_id == turn.run_id,
-                store.Run.parent_run_id.is_not(None),
-                store.Run.status == "running",
-            )
-            .values(status=status, finished_at=func.now())
-        )
-        async with sessionmaker() as db, db.begin():
-            for child_id, parts in (child_snapshots or {}).items():
-                await db.execute(
-                    running_children.where(store.Run.id == UUID(child_id)).values(
-                        ui_parts=store.transcript_value(parts)
-                    )
-                )
-            # A child-start transaction can commit before its interrupted callback returns.
-            await db.execute(running_children)
     committed = await store.finish_run(
         sessionmaker,
         turn.run_id,
         status=status,
         retire_sandbox_id=turn.sandbox_for_cleanup,
+        child_snapshots={
+            UUID(child_id): parts for child_id, parts in (child_snapshots or {}).items()
+        },
         **result,
     )
     turn.finalized = True
@@ -282,19 +267,38 @@ async def _close_turn(sessionmaker: store.SessionFactory, turn: Turn) -> None:
 async def _chat_sandbox(
     runtime: Runtime,
     session: store.Session,
-    settings: Settings | None = None,
+    settings: Settings,
     *,
     owner_run_id: UUID,
 ) -> AsyncSandbox:
-    effective = settings if settings is not None else await _effective_settings(runtime)
-    return await _ensure_bound_sandbox(
-        runtime,
-        effective,
-        session.id,
-        session.daytona_sandbox_id,
-        owner_run_id=owner_run_id,
-        needs_cleanup=session.sandbox_needs_cleanup,
+    existing_sandbox_id = session.daytona_sandbox_id
+    if existing_sandbox_id:
+        if session.sandbox_needs_cleanup:
+            try:
+                await delete_sandbox_by_id(runtime.daytona, existing_sandbox_id)
+            except DaytonaError as error:
+                raise SandboxStartupError(
+                    "Could not retire the previous Daytona workspace"
+                ) from error
+        elif sandbox := await reusable_session_sandbox(runtime.daytona, existing_sandbox_id):
+            return sandbox
+    name, recovering = await store.reserve_session_sandbox(
+        runtime.sessionmaker, session.id, owner_run_id, expected=existing_sandbox_id
     )
+    sandbox = await allocate_session_sandbox(runtime.daytona, settings, name, recovering=recovering)
+    # A stale worker leaves the reservation for the next owner to reconcile.
+    _, won = await store.rebind_session_sandbox(
+        runtime.sessionmaker,
+        session.id,
+        sandbox.id,
+        expected=existing_sandbox_id,
+        owner_run_id=owner_run_id,
+        allocation_name=name,
+    )
+    if not won:
+        raise SandboxStartupError("The Daytona workspace binding changed during startup")
+    await prepare_sandbox(sandbox)
+    return sandbox
 
 
 def _file_manifest(file: store.File) -> dict:
@@ -600,16 +604,21 @@ async def _persist_failed_finalization(
     error: Exception,
     failed_details: dict,
     parts: list[dict],
+    child_snapshots: dict[str, list[dict]],
 ) -> bool:
     if sandbox is not None:
         turn.sandbox_for_cleanup = sandbox.id
-    # A rejected payload must not invalidate the terminal-state retry.
+    # Retry with a minimal transcript if binding or storing the previous payload failed.
+    payload_rejected = isinstance(error, DataError) or (
+        isinstance(error, StatementError) and not isinstance(error, DBAPIError)
+    )
     return await _finish_root(
         sessionmaker,
         turn,
         "cancelled" if status == "cancelled" else "failed",
         error="Could not persist turn",
-        ui_parts=[failed_details] if isinstance(error, SQLAlchemyError) else parts,
+        ui_parts=[failed_details] if payload_rejected else parts,
+        child_snapshots=None if payload_rejected else child_snapshots,
     )
 
 
@@ -1048,6 +1057,7 @@ async def _execute_turn(
                         error,
                         failed_details,
                         failure_parts or stream.snapshot(root_id),
+                        stream.pending_child_snapshots(),
                     )
                 status = "failed"
                 committed = False

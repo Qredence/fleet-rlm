@@ -13,7 +13,7 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.db import (
@@ -283,6 +283,50 @@ async def test_root_lock_blocks_only_competing_roots(db: SessionFactory) -> None
         ]
         await acquire_root_run(db, session.id, "After binary output")
 
+    finally:
+        async with db.begin() as connection:
+            await connection.execute(delete(Session).where(Session.id == session.id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+async def test_finish_interrupted_root_fences_child_admission(db: SessionFactory, status) -> None:
+    session = await create_session(db)
+    try:
+        root = await acquire_root_run(db, session.id, "Run with descendants")
+        child = await create_child_run(db, root.id, kind="subagent", prompt="Analyze")
+        completed = await create_child_run(db, child.id, kind="llm_query", prompt="Look up")
+        assert await finish_run(db, completed.id, status="completed", answer="Found")
+
+        with pytest.raises(DataError):
+            await finish_run(db, root.id, status=status, child_snapshots={child.id: [{"\x00": 1}]})
+        async with db() as connection:
+            assert (await connection.get_one(Run, root.id)).status == "running"
+            assert (await connection.get_one(Run, child.id)).status == "running"
+
+        parts = [{"type": "text", "text": "Partial result"}]
+        contender, finished = await asyncio.gather(
+            create_child_run(db, child.id, kind="llm_query", prompt="Race finalization"),
+            finish_run(db, root.id, status=status, child_snapshots={child.id: parts}),
+            return_exceptions=True,
+        )
+        assert finished is True
+        with pytest.raises(TurnConflictError):
+            await create_child_run(db, root.id, kind="subagent", prompt="After finalization")
+        assert not await finish_run(
+            db, root.id, status=status, child_snapshots={child.id: [{"type": "other"}]}
+        )
+
+        async with db() as connection:
+            assert (await connection.get_one(Run, root.id)).status == status
+            settled = await connection.get_one(Run, child.id)
+            assert settled.status == status and settled.ui_parts == parts
+            assert settled.finished_at is not None
+            assert (await connection.get_one(Run, completed.id)).status == "completed"
+            if isinstance(contender, Run):
+                assert (await connection.get_one(Run, contender.id)).status == status
+            else:
+                assert isinstance(contender, TurnConflictError)
     finally:
         async with db.begin() as connection:
             await connection.execute(delete(Session).where(Session.id == session.id))

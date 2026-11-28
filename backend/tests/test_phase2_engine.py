@@ -482,6 +482,12 @@ async def test_provisioning_and_reuse(settings, tmp_path):
     create.assert_awaited_once()
     daytona.v2.find_by_name.assert_awaited_once_with(name, region=settings.daytona_region)
     sandbox.wait.assert_not_awaited()
+    sandbox.process.run.assert_awaited_once()
+    sandbox.process.run.reset_mock()
+    sandbox.state = "starting"
+    assert await reusable_session_sandbox(daytona, sandbox.id) is sandbox
+    sandbox.wait.assert_awaited_once_with(until="started", timeout=110)
+    sandbox.process.run.assert_awaited_once()
     sandbox.state = "destroyed"
     assert await reusable_session_sandbox(daytona, sandbox.id) is None
     daytona.v2.delete.assert_awaited_once_with(sandbox.id, timeout=30)
@@ -1433,7 +1439,9 @@ async def test_ephemeral_sandbox_creates_without_volumes_and_always_deletes(sett
 
 
 @pytest.mark.asyncio
-async def test_daytona_v2_and_workspace_file_helpers(settings, tmp_path):
+async def test_daytona_v2_and_workspace_file_helpers(settings, tmp_path, monkeypatch):
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_V2_API_URL", raising=False)
     async with make_daytona_client(settings) as client:
         assert hasattr(client, "v2")
 

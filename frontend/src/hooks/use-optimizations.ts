@@ -216,24 +216,14 @@ export async function runOptimizationEventStream({
 }: StreamJobLifecycleOptions): Promise<'terminal' | 'aborted' | 'fatal'> {
   let retries = 0
   let terminal = false
-  let fatal = false
 
   while (!signal.aborted && !terminal && retries <= maxRetries) {
     try {
       const response = await api.openOptimizationEvents(jobId, signal)
-      if (!response.ok) {
-        const message = response.statusText || `HTTP ${response.status}`
-        if (NON_RETRYABLE_HTTP_STATUSES.has(response.status)) {
-          fatal = true
-          onFatalError(message)
-          break
-        }
-        throw new ApiError(response.status, message)
-      }
-
       onConnected?.()
 
       await consumeSseStream(response, signal, (eventName, detail) => {
+        if (terminal || signal.aborted) return
         retries = 0
         onUpdate(detail)
         if (eventName === 'done' || isTerminalOptimizationStatus(detail.status)) {
@@ -246,9 +236,8 @@ export async function runOptimizationEventStream({
     } catch (failure) {
       if (signal.aborted) break
       if (failure instanceof ApiError && NON_RETRYABLE_HTTP_STATUSES.has(failure.status)) {
-        fatal = true
         onFatalError(errorMessage(failure))
-        break
+        return 'fatal'
       }
     }
 
@@ -258,7 +247,6 @@ export async function runOptimizationEventStream({
     await abortableSleep(delayMs, signal)
   }
 
-  if (fatal) return 'fatal'
   if (terminal) return 'terminal'
   if (signal.aborted) return 'aborted'
 
@@ -355,18 +343,41 @@ export function useOptimizations(api: FleetApi) {
     setFetchedSelectedJob((current) => (current?.id === detail.id ? detail : current))
   }, [])
 
-  const refreshAll = useCallback(
-    async (opts?: { silent?: boolean }) => {
+  const applyJobs = useCallback(
+    (
+      controller: AbortController,
+      nextJobs: OptimizationJobSummary[],
+      target: TargetFilter,
+      status: StatusFilter,
+      nextOverview: OptimizationOverview | null = null,
+    ) => {
+      if (
+        controller.signal.aborted ||
+        jobsControllerRef.current !== controller ||
+        filtersRef.current.targetFilter !== target ||
+        filtersRef.current.statusFilter !== status
+      ) return
+      setError('')
+      setJobs(nextJobs)
+      setSelectedJobId((current) =>
+        pickSelectedJobId(current, nextJobs, nextOverview, target, status),
+      )
+    },
+    [],
+  )
+
+  const loadSnapshot = useCallback(
+    async () => {
       refreshControllerRef.current?.abort()
       jobsControllerRef.current?.abort()
       const controller = new AbortController()
       refreshControllerRef.current = controller
+      jobsControllerRef.current = controller
       fatalStreamIdsRef.current.clear()
 
       const { targetFilter: currentTarget, statusFilter: currentStatus } = filtersRef.current
       lastFetchedFilterKeyRef.current = `${currentTarget}:${currentStatus}`
 
-      if (!opts?.silent) setLoading(true)
       try {
         const [nextOverview, nextDatasets, nextJobs] = await fetchOptimizationSnapshot(
           api,
@@ -375,61 +386,34 @@ export function useOptimizations(api: FleetApi) {
           controller.signal,
         )
         if (controller.signal.aborted) return
-        setError('')
         setOverview(nextOverview)
         setDatasets(nextDatasets)
-        setJobs(nextJobs)
-        setSelectedJobId((current) =>
-          pickSelectedJobId(current, nextJobs, nextOverview, currentTarget, currentStatus),
-        )
+        applyJobs(controller, nextJobs, currentTarget, currentStatus, nextOverview)
       } catch (failure) {
         if (!controller.signal.aborted) setError(errorMessage(failure))
       } finally {
         if (!controller.signal.aborted) setLoading(false)
       }
     },
-    [api],
+    [api, applyJobs],
   )
 
-  const refreshAllRef = useRef(refreshAll)
-  useEffect(() => {
-    refreshAllRef.current = refreshAll
-  }, [refreshAll])
+  const refreshAll = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoading(true)
+      return loadSnapshot()
+    },
+    [loadSnapshot],
+  )
 
   // Initial load (runs once per api instance; never re-runs on table filter changes).
   useEffect(() => {
-    refreshControllerRef.current?.abort()
-    jobsControllerRef.current?.abort()
-    const controller = new AbortController()
-    refreshControllerRef.current = controller
-    fatalStreamIdsRef.current.clear()
-
-    const { targetFilter: currentTarget, statusFilter: currentStatus } = filtersRef.current
-    lastFetchedFilterKeyRef.current = `${currentTarget}:${currentStatus}`
-
-    void fetchOptimizationSnapshot(api, currentTarget, currentStatus, controller.signal)
-      .then(([nextOverview, nextDatasets, nextJobs]) => {
-        if (controller.signal.aborted) return
-        setError('')
-        setOverview(nextOverview)
-        setDatasets(nextDatasets)
-        setJobs(nextJobs)
-        setSelectedJobId((current) =>
-          pickSelectedJobId(current, nextJobs, nextOverview, currentTarget, currentStatus),
-        )
-      })
-      .catch((failure) => {
-        if (!controller.signal.aborted) setError(errorMessage(failure))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-
+    void loadSnapshot()
     return () => {
-      controller.abort()
+      refreshControllerRef.current?.abort()
       jobsControllerRef.current?.abort()
     }
-  }, [api])
+  }, [loadSnapshot])
 
   // Filter changes only refetch the jobs list — never overview, datasets, or SSE.
   useEffect(() => {
@@ -439,7 +423,8 @@ export function useOptimizations(api: FleetApi) {
     }
     lastFetchedFilterKeyRef.current = filterKey
 
-    jobsControllerRef.current?.abort()
+    const previousRequest = jobsControllerRef.current
+    if (previousRequest !== refreshControllerRef.current) previousRequest?.abort()
     const controller = new AbortController()
     jobsControllerRef.current = controller
 
@@ -453,19 +438,14 @@ export function useOptimizations(api: FleetApi) {
         controller.signal,
       )
       .then((nextJobs) => {
-        if (controller.signal.aborted) return
-        setError('')
-        setJobs(nextJobs)
-        setSelectedJobId((current) =>
-          pickSelectedJobId(current, nextJobs, null, targetFilter, statusFilter),
-        )
+        applyJobs(controller, nextJobs, targetFilter, statusFilter)
       })
       .catch((failure) => {
         if (!controller.signal.aborted) setError(errorMessage(failure))
       })
 
     return () => controller.abort()
-  }, [api, statusFilter, targetFilter])
+  }, [api, applyJobs, statusFilter, targetFilter])
 
   // Derive selectedJob and loadingSelected synchronously from selectedJobId + liveJobsById + fetchedSelectedJob.
   const liveSelected = selectedJobId ? (liveJobsById[selectedJobId] ?? null) : null
@@ -584,7 +564,7 @@ export function useOptimizations(api: FleetApi) {
           setStreamWarning('')
           setError((current) => (current === SSE_POLL_FALLBACK_WARNING ? '' : current))
           setAnnouncement(terminalAnnouncement(detail))
-          void refreshAllRef.current({ silent: true })
+          void loadSnapshot()
         },
         onFallbackWarning: (warning) => {
           setStreamWarning(warning)
@@ -602,7 +582,7 @@ export function useOptimizations(api: FleetApi) {
         }
       })
     }
-  }, [activeJobIdsKey, api, applyJobUpdate])
+  }, [activeJobIdsKey, api, applyJobUpdate, loadSnapshot])
 
   const trackStartedJob = useCallback((job: OptimizationJobDetail) => {
     fatalStreamIdsRef.current.delete(job.id)
@@ -619,8 +599,8 @@ export function useOptimizations(api: FleetApi) {
       ),
     )
     setAnnouncement(`Started ${job.target} optimization run.`)
-    void refreshAllRef.current({ silent: true })
-  }, [])
+    void loadSnapshot()
+  }, [loadSnapshot])
 
   const dismissBanner = useCallback((jobId?: string) => {
     setLiveJobsById((current) => {

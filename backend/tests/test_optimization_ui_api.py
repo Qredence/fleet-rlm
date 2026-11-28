@@ -951,6 +951,46 @@ async def test_provider_crud_encryption_ssrf_probe_models_and_delete_guard(
     assert caps["allow_private_llm_endpoints"] is False
     assert caps["allow_local_interpreter"] is False
 
+    with monkeypatch.context() as patch:
+        runtime = api.app.state.runtime
+        patch.setattr(
+            runtime,
+            "settings",
+            opt_app.settings.model_copy(
+                update={
+                    "mlflow_tracking_uri": (
+                        "https://fixture-user:fixture-pass@mlflow.test:5001/tracking"
+                        "?token=fixture#ui"
+                    )
+                }
+            ),
+        )
+        overview = await client.get("/api/optimizations/overview", headers=_AUTH)
+        overview.raise_for_status()
+        assert overview.json()["capabilities"]["mlflow_tracking_uri"] == (
+            "https://mlflow.test:5001/tracking"
+        )
+
+    with monkeypatch.context() as patch:
+        runtime = api.app.state.runtime
+        patch.setattr(
+            runtime,
+            "settings",
+            opt_app.settings.model_copy(
+                update={
+                    "mlflow_tracking_uri": (
+                        "postgresql://tracking:secret@db.example/tracking?sslmode=require#frag"
+                    )
+                }
+            ),
+        )
+        overview = await client.get("/api/optimizations/overview", headers=_AUTH)
+        overview.raise_for_status()
+        assert overview.json()["capabilities"]["mlflow_tracking_uri"] == (
+            "postgresql://db.example/tracking"
+        )
+        assert "secret" not in overview.text
+
     # 2. SSRF URL blocked on create (metadata + private IP when allow_private=False)
     ssrf_resp = await client.post(
         "/api/optimizations/providers",
@@ -1477,6 +1517,17 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     # 1. Running job: cancel endpoint sets flag+event; ONLY monitor_loop sends SIGTERM once!
     terminate_calls = 0
     proc_started = asyncio.Event()
+    term_sent = asyncio.Event()
+    heartbeat_after_term = asyncio.Event()
+    wait_for_graceful_exit = True
+
+    async def touch_heartbeat(sessionmaker, job_id):
+        active = await mem_store.touch_heartbeat(sessionmaker, job_id)
+        if active and wait_for_graceful_exit and term_sent.is_set():
+            heartbeat_after_term.set()
+        return active
+
+    monkeypatch.setattr(db, "touch_optimization_job_heartbeat", touch_heartbeat)
 
     async def fake_long_exec(*_cmd, **_kwargs):
         class SlowProc:
@@ -1496,12 +1547,16 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
             def terminate(self):
                 nonlocal terminate_calls
                 terminate_calls += 1
-                self.returncode = 130
+                term_sent.set()
+                if not wait_for_graceful_exit:
+                    self.exit(130)
+
+            def exit(self, returncode):
+                self.returncode = returncode
                 self._done.set()
 
             def kill(self):
-                self.returncode = -9
-                self._done.set()
+                self.exit(-9)
 
         proc_started.set()
         return SlowProc()
@@ -1524,12 +1579,35 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     assert cancel2.status_code == 200
     assert cancel1.json()["cancel_requested"] is True
 
-    task = api.app.state.runtime.optimization_tasks.get(UUID(job_id))
+    runtime = api.app.state.runtime
+    await asyncio.wait_for(heartbeat_after_term.wait(), timeout=2.0)
+    runtime.optimization_procs[UUID(job_id)].exit(130)
+    wait_for_graceful_exit = False
+    task = runtime.optimization_tasks.get(UUID(job_id))
     if task is not None:
         await asyncio.wait_for(task, timeout=2.0)
 
     assert terminate_calls == 1
     assert mem_store.jobs[UUID(job_id)].status == "cancelled"
+
+    proc_started.clear()
+    reaped = await client.post(
+        "/api/optimizations/jobs",
+        headers=_AUTH,
+        json={"target": "skills", "branch_mode": "configured_branch"},
+    )
+    reaped.raise_for_status()
+    await asyncio.wait_for(proc_started.wait(), timeout=2.0)
+    reaped_id = UUID(reaped.json()["id"])
+    runtime = api.app.state.runtime
+    reaped_task = runtime.optimization_tasks[reaped_id]
+    reaped_job = mem_store.jobs[reaped_id]
+    reaped_job.heartbeat_at = datetime.now(UTC) - timedelta(hours=1)
+    assert await mem_store.reap_stale(runtime.sessionmaker, 300) == 1
+    await asyncio.wait_for(reaped_task, timeout=2.0)
+    assert terminate_calls == 2
+    assert reaped_job.status == "failed"
+    assert reaped_job.error == "Optimization job timed out or worker restarted"
 
     proc_started.clear()
     shutdown_job = await client.post(
@@ -1582,7 +1660,7 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
             await asyncio.wait_for(serving, timeout=4)
     assert runtime.shutdown_event.is_set()
     assert mem_store.jobs[shutdown_id].status == "cancelled"
-    assert terminate_calls == 2
+    assert terminate_calls == 3
     assert not runtime.optimization_tasks and not runtime.optimization_procs
     assert not runtime.optimization_cancel_events
 
@@ -1617,6 +1695,110 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     branch_spy.assert_not_awaited()
     exec_spy.assert_not_awaited()
     assert mem_store.jobs[pre_job_id].status == "cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reap_at", ["provision", "spawn", "upload", "commit", "already_committed"])
+async def test_optimization_ownership_checks_around_artifact_publication(
+    opt_app, monkeypatch, reap_at
+) -> None:
+    mem_store = opt_app.store
+    storage = opt_app.storage
+    runtime = api.app.state.runtime
+    branch = AsyncMock()
+    monkeypatch.setattr(opt_runner, "create_ephemeral_neon_branch", branch)
+
+    async def reap(job):
+        job.heartbeat_at = datetime.now(UTC) - timedelta(hours=1)
+        assert await mem_store.reap_stale(runtime.sessionmaker, 300) == 1
+
+    async def update_progress(sessionmaker, job_id, **progress):
+        job = mem_store.jobs[job_id]
+        if (reap_at == "provision" and progress["stage"] == "provisioning_branch") or (
+            reap_at == "spawn" and progress["stage"] is None and job.stage == "starting"
+        ):
+            await reap(job)
+        return await mem_store.update_progress(sessionmaker, job_id, **progress)
+
+    class FinishedProc:
+        stdout = None
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+    async def spawn(*cmd, **_kwargs):
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b'{"saved": true}')
+        if reap_at == "upload":
+            await reap(next(iter(mem_store.jobs.values())))
+        return FinishedProc()
+
+    store_object = storage.put_object
+
+    async def put_object(key, path):
+        digest, size = await store_object(key, path)
+        job = next(iter(mem_store.jobs.values()))
+        if reap_at == "already_committed":
+            await mem_store.finish_job(
+                runtime.sessionmaker, job.id, status="completed", artifact_object_key=key
+            )
+        else:
+            assert reap_at == "commit"
+            await reap(job)
+        return digest, size
+
+    monkeypatch.setattr(db, "update_optimization_job_progress", update_progress)
+    spawn_spy = AsyncMock(side_effect=spawn)
+    monkeypatch.setattr(opt_runner.asyncio, "create_subprocess_exec", spawn_spy)
+    monkeypatch.setattr(storage, "put_object", put_object)
+
+    if reap_at == "provision":
+        job = await mem_store.create_job(
+            runtime.sessionmaker,
+            target="memory",
+            program_kind=None,
+            dataset_source="builtin",
+            dataset_name="memory.jsonl",
+            dataset_id=None,
+            config_json={},
+            mlflow_experiment="fixture",
+        )
+        await opt_runner.supervise_optimization_job(
+            runtime,
+            job.id,
+            spec=opt_runner.JobRunSpec(target="memory"),
+            branch_mode="auto_neon",
+            effective=opt_app.settings,
+            dataset_source="builtin",
+            builtin_dataset_path=opt_app.settings.eval_datasets_dir / "memory.jsonl",
+            custom_dataset=None,
+            custom_database_url=None,
+        )
+    else:
+        launched = await opt_app.client.post(
+            "/api/optimizations/jobs",
+            headers=_AUTH,
+            json={"target": "memory", "branch_mode": "configured_branch"},
+        )
+        launched.raise_for_status()
+        job_id = UUID(launched.json()["id"])
+        job = mem_store.jobs[job_id]
+        if task := runtime.optimization_tasks.get(job_id):
+            await asyncio.wait_for(task, timeout=2.0)
+
+    branch.assert_not_awaited()
+    assert spawn_spy.await_count == int(reap_at not in {"provision", "spawn"})
+    assert storage.put_calls == int(reap_at in {"commit", "already_committed"})
+    assert storage.delete_calls == int(reap_at == "commit")
+    if reap_at == "already_committed":
+        assert job.status == "completed"
+        assert list(storage.objects) == [job.artifact_object_key]
+    else:
+        assert job.status == "failed"
+        assert job.error == "Optimization job timed out or worker restarted"
+        assert job.artifact_object_key is None
+        assert not storage.objects
 
 
 @pytest.mark.asyncio
