@@ -24,7 +24,8 @@ check-frontend:
 
 dev-backend:
 	cd backend && uv run --locked $(if $(wildcard backend/.env),--env-file .env) \
-		env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL uvicorn fleet_rlm.api:app --reload --port 8000
+		env -u DAYTONA_API_URL -u DAYTONA_V2_API_URL uvicorn fleet_rlm.api:app \
+		--reload --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 15
 
 dev-frontend:
 	cd frontend && pnpm dev --port 5173 --strictPort

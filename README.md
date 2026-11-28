@@ -53,6 +53,8 @@ For frontend development, select the Node version in [`.node-version`](./.node-v
 
 Open **Settings → Providers → Add provider** to register an endpoint and a key. Fleet stores encrypted provider keys in Neon Postgres. Configure `FLEET_CREDENTIALS_ENCRYPTION_KEY` on every backend worker. Shared deployments require HTTPS and `FLEET_API_BEARER_TOKEN` for workspace access. Provider administration requires a separate `FLEET_PROVIDER_ADMIN_TOKEN` on shared deployments and on loopback deployments that set `FLEET_API_BEARER_TOKEN`. Enter the administrator bearer in Settings → General while managing credentials. Configure reverse proxies to preserve the public host and scheme. Only expose unauthenticated development servers on loopback.
 
+Set `FLEET_SHARED_DEPLOYMENT=true` to validate both bearer settings before startup connects to Postgres. Configure Uvicorn's `--forwarded-allow-ips` for the trusted ingress peers that report the public HTTPS scheme. Use `--timeout-graceful-shutdown 15` to bound the request drain before lifespan cleans up active optimization jobs. Direct loopback access can omit the workspace token in local development.
+
 Fetch the provider's models or specify its default model. In **Settings → Models → Global Workspace Models**, select the primary and sub-LLM independently and save. Each selection uses that provider’s endpoint and credentials. The composer can override the primary model for an individual session.
 
 ### Use your ChatGPT plan locally

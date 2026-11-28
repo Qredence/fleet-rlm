@@ -604,7 +604,10 @@ async def run_workspace_task(
             return value
 
         async def spawn_agent(task: str) -> dict:
-            """Delegate a workspace subtask to an isolated RLM and return its result."""
+            """Delegate one distinct subtask to an isolated RLM.
+
+            Reuse its returned answer and artifact paths in later steps.
+            """
             if depth >= settings.rlm_max_depth:
                 raise CodeExecutionError("Maximum spawn_agent depth reached")
             reserve(1)

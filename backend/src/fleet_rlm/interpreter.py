@@ -275,6 +275,59 @@ for name in ('files', 'artifacts'):
         raise SandboxStartupError("Could not reset the Daytona workspace")
 
 
+async def reconcile_managed_workspace(
+    sandbox: AsyncSandbox, manifest: dict[str, tuple[str, int]], *, timeout: int
+) -> set[str]:
+    """Prune uncommitted entries and retain only verified, independent regular files."""
+    encoded = json.dumps(manifest)
+    if len(encoded) > 64 * 1024:
+        # Avoid platform argument limits for unusually large manifests.
+        await reset_managed_workspace(sandbox, timeout=timeout)
+        return set()
+    script = """from pathlib import Path
+import hashlib, json, shutil, stat, sys
+root = Path(sys.argv[1])
+expected = json.loads(sys.argv[2])
+directories = {Path("files"), Path("artifacts")}
+for name in expected:
+    directories.update(Path(name).parents)
+matched = []
+def reconcile(relative):
+    path = root / relative
+    info = path.lstat()
+    if stat.S_ISDIR(info.st_mode):
+        if relative not in directories:
+            shutil.rmtree(path)
+            return
+        for child in path.iterdir():
+            reconcile(relative / child.name)
+        return
+    name = str(relative)
+    if stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and name in expected:
+        digest, size = expected[name]
+        if info.st_size == size:
+            with path.open("rb") as f:
+                if hashlib.file_digest(f, "sha256").hexdigest() == digest:
+                    matched.append(name)
+                    return
+    path.unlink()
+for name in ("files", "artifacts"):
+    path = root / name
+    if path.exists() or path.is_symlink():
+        reconcile(Path(name))
+    path.mkdir(exist_ok=True)
+print(json.dumps(matched))
+"""
+    result = await sandbox.process.run(
+        argv=["python", "-c", script, WORKSPACE, encoded],
+        execution_timeout=timeout,
+        timeout=timeout,
+    )
+    if result.exit_code != 0:
+        raise SandboxStartupError("Could not reconcile the Daytona workspace")
+    return set(json.loads(result.stdout))
+
+
 def _safe_workspace_component(name: str) -> bool:
     return (
         bool(name)

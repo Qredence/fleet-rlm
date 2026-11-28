@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, responseError } from './api'
+import { ApiError, createApi, responseError } from './api'
 import { chatFetch, STOP_RETRY_WINDOW_MS } from './chat-fetch'
 
 function jsonResponse(body: unknown, status: number, statusText = ''): Response {
@@ -9,6 +9,26 @@ function jsonResponse(body: unknown, status: number, statusText = ''): Response 
     headers: { 'content-type': 'application/json' },
   })
 }
+
+it('requests bounded transcript pages and reads the older cursor from Link', async () => {
+  const initial = new Response('[]', {
+    headers: { Link: '</api/sessions/one/messages?limit=25&before=older>; rel="prev"' },
+  })
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(initial).mockResolvedValueOnce(new Response('[]'))
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    const api = createApi()
+    const first = await api.getMessagePage('one', null)
+    expect(first).toEqual({ messages: [], before: 'older' })
+    expect(await api.getMessagePage('one', first.before)).toEqual({ messages: [], before: null })
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/sessions/one/messages?limit=25',
+      '/api/sessions/one/messages?limit=25&before=older',
+    ])
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
 
 describe('chatFetch', () => {
   beforeEach(() => {
@@ -55,6 +75,21 @@ describe('chatFetch', () => {
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(setWaiting).not.toHaveBeenCalled()
+  })
+
+  it('does not signal draft acceptance when the server is busy', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Fleet is busy. Try again shortly.' }, 503))
+    vi.stubGlobal('fetch', fetchMock)
+    const onAccepted = vi.fn()
+
+    const wrapped = chatFetch(() => true, vi.fn(), onAccepted)
+    await expect(wrapped('/api/sessions/1/chat', { method: 'POST' })).rejects.toMatchObject({
+      status: 503,
+    })
+    expect(onAccepted).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('retries 409 responses after a recent stop until the turn succeeds', async () => {

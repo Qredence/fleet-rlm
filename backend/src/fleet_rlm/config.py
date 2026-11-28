@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     db_pool_recycle_seconds: int = 300
 
+    shared_deployment: bool = False
     provider_admin_token: SecretStr | None = None
     api_bearer_token: SecretStr | None = None
     chatgpt_plan_enabled: bool = False
@@ -85,6 +86,22 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: str | None = None
     mlflow_experiment: str = "fleet-rlm"
     mlflow_full_trace_capture: bool = False
+
+    @model_validator(mode="after")
+    def require_shared_credentials(self) -> "Settings":
+        if self.shared_deployment:
+            workspace = self.api_bearer_token.get_secret_value() if self.api_bearer_token else ""
+            admin = (
+                self.provider_admin_token.get_secret_value() if self.provider_admin_token else ""
+            )
+            if not workspace.strip() or not admin.strip() or workspace == admin:
+                raise ValueError(
+                    "Shared deployments require distinct FLEET_API_BEARER_TOKEN and "
+                    "FLEET_PROVIDER_ADMIN_TOKEN values"
+                )
+            if self.chatgpt_plan_enabled:
+                raise ValueError("ChatGPT plan usage requires a local deployment")
+        return self
 
     @model_validator(mode="after")
     def require_named_fixture_experiment(self) -> "Settings":
