@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.14.0"
+version = "0.15.0"
 description = "Stateless recursive agent workspace powered by DSPy 3.5 RLM, Daytona sandboxes, Neon Postgres 18, and MLflow"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
