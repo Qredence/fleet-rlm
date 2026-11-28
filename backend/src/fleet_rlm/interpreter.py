@@ -769,6 +769,13 @@ class _Output:
             _LOG.warning("Could not publish Python stdout (%s)", type(error).__name__)
 
 
+def _final_output(submission: dict[str, Any]) -> FinalOutput:
+    answer = submission.get("answer")
+    if isinstance(answer, str) and not answer.strip():
+        raise CodeExecutionError("SUBMIT requires a nonempty answer. Submit the answer text.")
+    return FinalOutput(submission)
+
+
 class DaytonaCodeInterpreter:
     """One isolated Daytona context, driven by a DSPy worker thread."""
 
@@ -1172,7 +1179,7 @@ class DaytonaCodeInterpreter:
         if "error" in result:
             raise CodeExecutionError(json.dumps(result["error"]))
         if "submission" in result:
-            return FinalOutput(result["submission"])
+            return _final_output(result["submission"])
         return output.finish()
 
 

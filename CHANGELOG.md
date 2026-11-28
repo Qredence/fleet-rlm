@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/Qredence/fleet-rlm/compare/v0.14.0...v0.15.0) - 2026-11-28
+
+### Upgrade from 0.14.0
+
+- Fleet now uses Daytona v2 sandboxes and private Neon Object Storage. Uploads and published artifacts remain available across sandbox replacement. Browse, preview, and download durable files without starting a sandbox. See [PR #712](https://github.com/Qredence/fleet-rlm/pull/712).
+- Before upgrading an existing Daytona v0 deployment, drain writes, archive needed files from the old Daytona Volume, and save a database restore point. Configure the Daytona v2 image and Neon Object Storage, then apply Alembic through head. Revision `0004_daytona_v2_cutover` clears the old sandbox bindings and file manifests while preserving conversations and memories. Re-upload retained files into the migrated workspace. Follow the [Daytona v2 migration runbook](https://github.com/Qredence/fleet-rlm/blob/v0.15.0/docs/daytona-v2-migration.md).
+
+### Added
+
+- Research the web during a turn and refine an existing answer. Fleet bundles PDF, XLSX, and report-writing skills, and existing `spreadsheet-audit` pins resolve to `xlsx`. See [PR #714](https://github.com/Qredence/fleet-rlm/pull/714) and [PR #761](https://github.com/Qredence/fleet-rlm/pull/761).
+- Manage workspace model providers in Settings, see the active chat model, and save thinking effort per conversation. Local Fleet chat can optionally connect to a ChatGPT plan. See [PR #761](https://github.com/Qredence/fleet-rlm/pull/761), [PR #762](https://github.com/Qredence/fleet-rlm/pull/762), and [PR #763](https://github.com/Qredence/fleet-rlm/pull/763).
+- Launch and monitor optimization jobs from the workspace and inspect candidate and holdout results before promoting artifacts. See [PR #746](https://github.com/Qredence/fleet-rlm/pull/746).
+
+### Changed
+
+- Added routed workspace navigation and a session model picker, expanded the Files panel, and improved chat workspace behavior. Moved HTTP routes into dedicated backend routers. See [PR #710](https://github.com/Qredence/fleet-rlm/pull/710) and [PR #768](https://github.com/Qredence/fleet-rlm/pull/768).
+- Bounded and redacted interactive MLflow trace capture. Chat continues during MLflow outages, and the activity panel links to traces once their storage is verified. See [PR #764](https://github.com/Qredence/fleet-rlm/pull/764), [PR #766](https://github.com/Qredence/fleet-rlm/pull/766), and [PR #767](https://github.com/Qredence/fleet-rlm/pull/767).
+
+### Fixed
+
+- Hardened Daytona sandbox startup, worker deadlines, workspace cleanup isolation, and Python stdout streaming. Improved companion skill routing for requests that span several workflows. See [PR #713](https://github.com/Qredence/fleet-rlm/pull/713), [PR #759](https://github.com/Qredence/fleet-rlm/pull/759), [PR #760](https://github.com/Qredence/fleet-rlm/pull/760), and [PR #765](https://github.com/Qredence/fleet-rlm/pull/765).
+
 ## [0.14.0] - 2026-11-23
 
 ### Added

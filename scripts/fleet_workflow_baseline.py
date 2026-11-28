@@ -721,11 +721,8 @@ async def evaluate(
                         root = workspace_trace_root(trace)
                         if (
                             root is None
-                            or not isinstance(root.inputs, dict)
-                            or not isinstance(root.outputs, dict)
+                            or root.status.status_code.name != "OK"
                             or trace.info.trace_id in used
-                            or root.inputs.get("task") != row.get("task")
-                            or root.outputs.get("answer") != row.get("answer")
                             or trace.info.tags.get("fleet.run_id") != row["run_id"]
                         ):
                             continue

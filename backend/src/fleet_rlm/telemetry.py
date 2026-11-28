@@ -84,6 +84,7 @@ async def _initialize_experiment(
                 mlflow.set_tracking_uri(uri)
                 mlflow.tracing.set_destination(MlflowExperimentLocation(experiment))
                 mlflow.dspy.autolog()
+                MLFLOW_HTTP_REQUEST_MAX_RETRIES.set(1)
                 runtime.mlflow_experiment_id = experiment
                 runtime.tracking_pending = False
                 _LOG.info("MLflow tracing ready")

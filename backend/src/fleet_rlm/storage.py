@@ -72,7 +72,7 @@ class ObjectStorage:
                 s3={"addressing_style": "path"},
                 connect_timeout=10,
                 read_timeout=30,
-                retries={"mode": "standard", "total_max_attempts": 2},
+                retries={"mode": "standard", "total_max_attempts": 4},
                 request_checksum_calculation="when_required",
                 response_checksum_validation="when_required",
             ),
