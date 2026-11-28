@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -385,7 +385,7 @@ wheels = [
 
 [[package]]
 name = "daytona"
-version = "2.1.0"
+version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -394,9 +394,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/8c/48040adbd987008b9e98b354ada223ef945376176cc3669b9fb79018d63c/daytona-2.1.0.tar.gz", hash = "sha256:139f19920d6f5a24986f56e8784a470961f9de0f252377f0c4b1868bdf27e20c", size = 1165057, upload-time = "2026-11-20T08:01:31.54Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/2d/911bbd6f7d4498a40f011537f5bc81ab7706f8462bd66c6beb08a8657ba9/daytona-2.2.0.tar.gz", hash = "sha256:b7513a9d0ee6d964136337531dfbd785e3340af54f2470e670f4c1fed611eb4b", size = 1181297, upload-time = "2026-11-24T11:57:04.166Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/13/8808c53950f1f2e2021fc31d4fcbb3f838300a057887a105a3dcc9d7b6f5/daytona-2.1.0-py3-none-any.whl", hash = "sha256:94e96fc5ea372667213c5db5478049162e2fe7fbc5e4b09dbb273bfeeb38110b", size = 1633680, upload-time = "2026-11-20T08:01:29.314Z" },
+    { url = "https://files.pythonhosted.org/packages/da/c7/9a2d3c1be4db330ade7878d0bd1ac9fd0cd0ec2deca33179a2ad0925b0ec/daytona-2.2.0-py3-none-any.whl", hash = "sha256:0a75d463bc79deca6dced331fc9e898b8b84ebd2b950ab5f73cd0e2b76bd9f0e", size = 1665761, upload-time = "2026-11-24T11:57:02.33Z" },
 ]
 
 [package.optional-dependencies]
@@ -646,7 +646,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
     { name = "boto3", specifier = ">=1.43.0,<2" },
     { name = "cryptography", specifier = ">=50.0.2" },
-    { name = "daytona", extras = ["otel"], specifier = "==2.1.0" },
+    { name = "daytona", extras = ["otel"], specifier = "==2.2.0" },
     { name = "dspy", specifier = "==3.5.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.165.0" },
     { name = "httpx", specifier = ">=0.28.0" },
