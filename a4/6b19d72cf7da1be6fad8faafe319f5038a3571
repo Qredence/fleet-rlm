@@ -1,0 +1,61 @@
+backend/src/fleet_rlm/http/dependencies.py
+  s_2d4727388e1d22::t_36e98d73b07294 90
+  s_ba1b62bdaba8e6::t_db8bc928b55da4 9,81-89,91-95
+backend/tests/test_phase3_api.py
+  s_2d4727388e1d22::t_d0d4f03da747bb 2349-2353,2356-2358,2367-2382
+  s_ba1b62bdaba8e6::t_80416c7a01c64b 28,1909,1911-1912,1922-1925,1959-1961,1985-1987,2197,2348,2354-2355,2359-2366,2760-2762,2775
+backend/src/fleet_rlm/db.py
+  s_dd181b0a6308d8::t_37fcf8171dfb94 610,612,638-656
+backend/src/fleet_rlm/http/chat.py
+  s_dd181b0a6308d8::t_70f22952534a02 23,33,38,41,172-174,270,274-291,293-294,296,298-301,607,611-614,620-621,1060
+backend/src/fleet_rlm/http/optimizations.py
+  s_dd181b0a6308d8::t_103f0f647edf61 23-29,332
+backend/src/fleet_rlm/http/settings.py
+  s_dd181b0a6308d8::t_3015662df26678 19,166,170
+backend/src/fleet_rlm/interpreter.py
+  s_dd181b0a6308d8::t_fb5da448f85834 227-230
+backend/src/fleet_rlm/opt_runner.py
+  s_dd181b0a6308d8::t_c9406977e790c1 1233-1235,1238-1240,1364-1365,1370-1379,1381-1392,1396,1400-1402,1426,1491-1492,1519,1535,1543-1544,1546,1556,1559-1570,1573,1588-1590,1596-1598,1632-1633,1639-1645,1647,1649-1650,1652,1657-1662,1674-1686,1688
+backend/tests/test_optimization_ui_api.py
+  s_dd181b0a6308d8::t_6b64dfcd1a593c 954-973,1500-1510,1530-1535,1539,1562-1566,1573-1591,1643,1680-1783
+backend/tests/test_phase1_locking.py
+  s_dd181b0a6308d8::t_42121c659c2756 16,291-334
+backend/tests/test_phase2_engine.py
+  s_dd181b0a6308d8::t_59f7ac4ddcfedd 485-490,1442-1444
+frontend/src/hooks/use-optimizations.test.ts
+  s_dd181b0a6308d8::t_b17234083ad250 435-474,483-509
+frontend/src/hooks/use-optimizations.ts
+  s_dd181b0a6308d8::t_e28ab50d3ff1e5 226,240,346-370,375,391,398,401-407,411,413,416,426-427,441,448,567,585,602-603
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a46b19d72cf7da1be6fad8faafe319f5038a3571",
+  "prompts": {},
+  "sessions": {
+    "s_2d4727388e1d22": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ebc0e4d0-639b-40cf-8cd2-8974b484ce5f",
+        "model": "headless"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_ba1b62bdaba8e6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "40bdd33a-e999-44ff-845c-cfbfcf422f2d",
+        "model": "headless"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    },
+    "s_dd181b0a6308d8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2213d-09f2-7940-8f24-193937bbd5d1",
+        "model": "unknown"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
