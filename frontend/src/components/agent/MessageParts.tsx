@@ -33,6 +33,16 @@ export function MessageParts({ parts, live = false, preview, download, refine, r
       && part.preliminary !== true && submissionMarkers.has(part.toolCallId)
       ? [[part.toolCallId, part.output] as const] : [],
   ))
+  const latestTree = parts.findLast((part) => part.type === 'data-file-tree')
+  const submittedPaths = new Set<string>()
+  let hasArtifactList = false
+  for (const output of submissions.values()) {
+    if (typeof output !== 'object' || !Array.isArray(output.artifact_paths)) continue
+    hasArtifactList = true
+    for (const path of output.artifact_paths) {
+      if (typeof path === 'string') submittedPaths.add(path.replace(/^\/workspace\//, ''))
+    }
+  }
   const details = parts.find((part) => part.type === 'data-turn-details')
   const isAction = (part: FleetPart): part is ActionPart => part.type === 'data-web-call' || part.type === 'tool-subagent'
     || (part.type === 'tool-python_exec' && !submissions.has(part.toolCallId))
@@ -113,7 +123,9 @@ export function MessageParts({ parts, live = false, preview, download, refine, r
           </SubagentTrace>
         )
       case 'data-file-tree': {
-        const artifacts = part.data.files.filter((file) => file.kind === 'artifact')
+        if (part !== latestTree || (live && !hasArtifactList)) return null
+        const artifacts = part.data.files.filter((file) => file.kind === 'artifact'
+          && (!hasArtifactList || submittedPaths.has(file.path.replace(/^\/workspace\//, ''))))
         return artifacts.length > 0 && (
           <TraceCollapsible key={part.id ?? index} defaultOpen>
             <TraceCollapsibleTrigger>

@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Callable
 from concurrent.futures import Future
 from contextlib import asynccontextmanager, suppress
 from threading import Thread
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import mlflow
 from mlflow.entities.trace_location import MlflowExperimentLocation
@@ -19,8 +19,15 @@ from mlflow.environment_variables import (
 from .config import Settings
 from .tracing import telemetry_operation
 
-if TYPE_CHECKING:
-    from .api import Runtime
+
+class TrackingRuntime(Protocol):
+    @property
+    def settings(self) -> Settings: ...
+
+    mlflow_experiment_id: str | None
+    mlflow_optimization_experiment_id: str | None
+    tracking_pending: bool
+
 
 _LOG = logging.getLogger(__name__)
 _RETRY_SECONDS = 30
@@ -55,7 +62,7 @@ def _experiment_id(settings: Settings, name: str) -> str:
     return experiment.experiment_id
 
 
-async def _initialize(runtime: "Runtime", optimizer: str) -> None:
+async def _initialize(runtime: TrackingRuntime, optimizer: str) -> None:
     uri = runtime.settings.mlflow_tracking_uri
     if not uri:
         return
@@ -63,7 +70,9 @@ async def _initialize(runtime: "Runtime", optimizer: str) -> None:
     await _initialize_experiment(runtime, uri, optimizer, chat=False)
 
 
-async def _initialize_experiment(runtime: "Runtime", uri: str, name: str, *, chat: bool) -> None:
+async def _initialize_experiment(
+    runtime: TrackingRuntime, uri: str, name: str, *, chat: bool
+) -> None:
     degraded = False
     while True:
         # The lookup is scoped to its client. Only this task can publish its result.
@@ -96,7 +105,7 @@ async def _initialize_experiment(runtime: "Runtime", uri: str, name: str, *, cha
 
 
 @asynccontextmanager
-async def tracking_client(runtime: "Runtime", optimizer: str) -> AsyncGenerator[None]:
+async def tracking_client(runtime: TrackingRuntime, optimizer: str) -> AsyncGenerator[None]:
     MLFLOW_HTTP_REQUEST_TIMEOUT.set(2)
     MLFLOW_HTTP_REQUEST_MAX_RETRIES.set(0)
     MLFLOW_ENABLE_ASYNC_TRACE_LOGGING.set(True)

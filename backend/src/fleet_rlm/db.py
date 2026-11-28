@@ -710,28 +710,45 @@ async def reap_stale_runs(
 
 
 async def get_session_ui_messages(db: SessionFactory, session_id: UUID) -> list[JsonObject]:
+    messages, _ = await get_session_ui_message_page(db, session_id)
+    return messages
+
+
+async def get_session_ui_message_page(
+    db: SessionFactory, session_id: UUID, *, limit: int | None = None, before: UUID | None = None
+) -> tuple[list[JsonObject], UUID | None]:
+    query = select(Run.id, Run.prompt, Run.ui_parts).where(
+        Run.session_id == session_id,
+        Run.parent_run_id.is_(None),
+        Run.status != "running",
+    )
+    if before is not None:
+        query = query.where(Run.id < before)
+    if limit is None:
+        query = query.order_by(Run.id)
+    else:
+        query = query.order_by(Run.id.desc()).limit(limit + 1)
     async with db() as connection:
-        runs = await connection.scalars(
-            select(Run)
-            .where(
-                Run.session_id == session_id,
-                Run.parent_run_id.is_(None),
-                Run.status != "running",
-            )
-            .order_by(Run.id)
+        runs = (await connection.execute(query)).all()
+
+    next_before = None
+    if limit is not None:
+        if len(runs) > limit:
+            next_before = runs[limit - 1].id
+        runs = list(reversed(runs[:limit]))
+
+    messages = []
+    for run_id, prompt, ui_parts in runs:
+        messages.append(
+            {
+                "id": f"{run_id}:user",
+                "role": "user",
+                "parts": [{"type": "text", "text": prompt}],
+            }
         )
-        messages = []
-        for run in runs:
-            messages.append(
-                {
-                    "id": f"{run.id}:user",
-                    "role": "user",
-                    "parts": [{"type": "text", "text": run.prompt}],
-                }
-            )
-            if run.ui_parts:
-                messages.append({"id": str(run.id), "role": "assistant", "parts": run.ui_parts})
-        return messages
+        if ui_parts:
+            messages.append({"id": str(run_id), "role": "assistant", "parts": ui_parts})
+    return messages, next_before
 
 
 async def get_turn_for_refinement(

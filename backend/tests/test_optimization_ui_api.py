@@ -6,7 +6,7 @@ import importlib
 import json
 import logging
 import socket
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,13 +16,19 @@ from uuid import UUID, uuid4
 
 import dspy
 import httpx
+import mlflow
 import pytest
 import pytest_asyncio
+import uvicorn
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
 
 from fleet_rlm import agent, api, db, interpreter, llm_registry, opt_datasets, opt_runner
 from fleet_rlm.config import Settings
+from fleet_rlm.http import optimizations as optimization_routes
+from fleet_rlm.http import settings as settings_routes
+from fleet_rlm.http.dependencies import Runtime
+from fleet_rlm.skills import SkillRegistry
 from fleet_rlm.storage import ObjectStorage, StorageError
 
 _AUTH = {"Authorization": "Bearer opt-token"}
@@ -582,53 +588,41 @@ async def opt_app(monkeypatch, tmp_path):
     monkeypatch.setattr(interpreter, "close_dataset_volume_helpers", AsyncMock())
     monkeypatch.setattr(opt_runner, "load_overview_data", mem_store.load_overview)
     monkeypatch.setattr(
-        api.store, "create_db", lambda _s: (SimpleNamespace(dispose=AsyncMock()), session_factory)
+        db, "create_db", lambda _s: (SimpleNamespace(dispose=AsyncMock()), session_factory)
     )
-    monkeypatch.setattr(api.store, "reap_stale_runs", AsyncMock(return_value=0))
-    monkeypatch.setattr(api.store, "get_workspace_settings_overrides", mem_store.get_overrides)
-    monkeypatch.setattr(
-        api.store, "update_workspace_settings_overrides", mem_store.update_overrides
-    )
-    monkeypatch.setattr(api.store, "reset_workspace_settings_overrides", mem_store.reset_overrides)
-    monkeypatch.setattr(api.store, "list_llm_providers", mem_store.list_providers)
-    monkeypatch.setattr(api.store, "get_llm_provider", mem_store.get_provider)
-    monkeypatch.setattr(api.store, "get_llm_provider_by_name", mem_store.get_provider_by_name)
-    monkeypatch.setattr(api.store, "create_llm_provider", mem_store.create_provider)
-    monkeypatch.setattr(api.store, "update_llm_provider", mem_store.update_provider)
-    monkeypatch.setattr(api.store, "delete_llm_provider", mem_store.delete_provider)
-    monkeypatch.setattr(api.store, "create_optimization_dataset", mem_store.create_dataset)
-    monkeypatch.setattr(api.store, "list_optimization_datasets", mem_store.list_datasets)
-    monkeypatch.setattr(api.store, "get_optimization_dataset", mem_store.get_dataset)
-    monkeypatch.setattr(
-        api.store, "get_optimization_dataset_by_name", mem_store.get_dataset_by_name
-    )
-    monkeypatch.setattr(
-        api.store, "finish_optimization_dataset_deletion", mem_store.finish_delete_dataset
-    )
-    monkeypatch.setattr(api.store, "begin_optimization_dataset_deletion", mem_store.delete_dataset)
-    monkeypatch.setattr(api.store, "create_optimization_job", mem_store.create_job)
-    monkeypatch.setattr(api.store, "touch_optimization_job_heartbeat", mem_store.touch_heartbeat)
-    monkeypatch.setattr(api.store, "update_optimization_job_progress", mem_store.update_progress)
-    monkeypatch.setattr(api.store, "finish_optimization_job", mem_store.finish_job)
-    monkeypatch.setattr(api.store, "request_optimization_job_cancel", mem_store.request_cancel)
-    monkeypatch.setattr(
-        api.store, "is_optimization_job_cancel_requested", mem_store.is_cancel_requested
-    )
-    monkeypatch.setattr(api.store, "reap_stale_optimization_jobs", mem_store.reap_stale)
-    monkeypatch.setattr(api.store, "list_optimization_jobs", mem_store.list_jobs)
-    monkeypatch.setattr(api.store, "get_optimization_job", mem_store.get_job)
-    monkeypatch.setattr(api.store, "promote_optimization_artifact", mem_store.promote)
-    monkeypatch.setattr(api.store, "rollback_optimization_target", mem_store.rollback)
-    monkeypatch.setattr(
-        api.store, "list_active_optimization_promotions", mem_store.list_active_promotions
-    )
-    monkeypatch.setattr(
-        api.store, "list_target_promotion_history", mem_store.list_promotion_history
-    )
-    monkeypatch.setattr(api.mlflow, "set_tracking_uri", lambda _u: None)
+    monkeypatch.setattr(db, "reap_stale_runs", AsyncMock(return_value=0))
+    monkeypatch.setattr(db, "get_workspace_settings_overrides", mem_store.get_overrides)
+    monkeypatch.setattr(db, "update_workspace_settings_overrides", mem_store.update_overrides)
+    monkeypatch.setattr(db, "reset_workspace_settings_overrides", mem_store.reset_overrides)
+    monkeypatch.setattr(db, "list_llm_providers", mem_store.list_providers)
+    monkeypatch.setattr(db, "get_llm_provider", mem_store.get_provider)
+    monkeypatch.setattr(db, "get_llm_provider_by_name", mem_store.get_provider_by_name)
+    monkeypatch.setattr(db, "create_llm_provider", mem_store.create_provider)
+    monkeypatch.setattr(db, "update_llm_provider", mem_store.update_provider)
+    monkeypatch.setattr(db, "delete_llm_provider", mem_store.delete_provider)
+    monkeypatch.setattr(db, "create_optimization_dataset", mem_store.create_dataset)
+    monkeypatch.setattr(db, "list_optimization_datasets", mem_store.list_datasets)
+    monkeypatch.setattr(db, "get_optimization_dataset", mem_store.get_dataset)
+    monkeypatch.setattr(db, "get_optimization_dataset_by_name", mem_store.get_dataset_by_name)
+    monkeypatch.setattr(db, "finish_optimization_dataset_deletion", mem_store.finish_delete_dataset)
+    monkeypatch.setattr(db, "begin_optimization_dataset_deletion", mem_store.delete_dataset)
+    monkeypatch.setattr(db, "create_optimization_job", mem_store.create_job)
+    monkeypatch.setattr(db, "touch_optimization_job_heartbeat", mem_store.touch_heartbeat)
+    monkeypatch.setattr(db, "update_optimization_job_progress", mem_store.update_progress)
+    monkeypatch.setattr(db, "finish_optimization_job", mem_store.finish_job)
+    monkeypatch.setattr(db, "request_optimization_job_cancel", mem_store.request_cancel)
+    monkeypatch.setattr(db, "is_optimization_job_cancel_requested", mem_store.is_cancel_requested)
+    monkeypatch.setattr(db, "reap_stale_optimization_jobs", mem_store.reap_stale)
+    monkeypatch.setattr(db, "list_optimization_jobs", mem_store.list_jobs)
+    monkeypatch.setattr(db, "get_optimization_job", mem_store.get_job)
+    monkeypatch.setattr(db, "promote_optimization_artifact", mem_store.promote)
+    monkeypatch.setattr(db, "rollback_optimization_target", mem_store.rollback)
+    monkeypatch.setattr(db, "list_active_optimization_promotions", mem_store.list_active_promotions)
+    monkeypatch.setattr(db, "list_target_promotion_history", mem_store.list_promotion_history)
+    monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _u: None)
     monkeypatch.setattr("fleet_rlm.telemetry._experiment_id", lambda *_: "7")
-    monkeypatch.setattr(api.mlflow.tracing, "set_destination", lambda *_: None)
-    monkeypatch.setattr(api.mlflow.dspy, "autolog", lambda *_a, **_k: None)
+    monkeypatch.setattr(mlflow.tracing, "set_destination", lambda *_: None)
+    monkeypatch.setattr(mlflow.dspy, "autolog", lambda *_a, **_k: None)
 
     async with api.lifespan(api.app):
         async with asyncio.timeout(2):
@@ -645,9 +639,9 @@ async def opt_app(monkeypatch, tmp_path):
             )
 
 
-def _swap_runtime_settings(new_settings: Settings, **extra: object) -> api.Runtime:
-    current: api.Runtime = api.app.state.runtime
-    replacement = api.Runtime(
+def _swap_runtime_settings(new_settings: Settings, **extra: object) -> Runtime:
+    current: Runtime = api.app.state.runtime
+    replacement = Runtime(
         settings=new_settings,
         sessionmaker=current.sessionmaker,
         daytona=current.daytona,
@@ -890,12 +884,12 @@ async def test_registered_typesafe_workspace_decision_model(opt_app):
     assert loaded.json()["effective"]["decision_model"] == qualified
 
     runtime = api.app.state.runtime
-    effective = await api._effective_settings(runtime)
-    lm = await api._request_decision_lm(runtime, effective)
+    effective = await settings_routes._effective_settings(runtime)
+    lm = await settings_routes._request_decision_lm(runtime, effective)
     assert lm.model == "typesafe:jev-preview"
     assert lm.kwargs["api_key"] == "test-typesafe-key"
-    roles, decision_provider_id = await api._resolve_role_credentials(
-        runtime, effective, api.OptimizationJobCreate(target="skills")
+    roles, decision_provider_id = await optimization_routes._resolve_role_credentials(
+        runtime, effective, optimization_routes.OptimizationJobCreate(target="skills")
     )
     assert decision_provider_id == UUID(provider_id)
     assert roles["decision_lm"].model == model
@@ -912,6 +906,22 @@ async def test_registered_typesafe_workspace_decision_model(opt_app):
         "/api/settings", headers=_AUTH, json={"llm_model": qualified}
     )
     assert deleted_assignment.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "body", "secret"),
+    [
+        ("providers", {"api_key": "example-provider-credential"}, "example-provider-credential"),
+        ("jobs", {"custom_database_url": "example-private-url"}, "example-private-url"),
+    ],
+)
+async def test_invalid_requests_exclude_credentials(opt_app, path, body, secret):
+    response = await opt_app.client.post(f"/api/optimizations/{path}", headers=_AUTH, json=body)
+    assert response.status_code == 422
+    assert secret not in response.text
+    assert response.json()["detail"]
+    assert all(set(error) == {"loc", "type", "msg"} for error in response.json()["detail"])
 
 
 @pytest.mark.asyncio
@@ -1026,15 +1036,19 @@ async def test_provider_crud_encryption_ssrf_probe_models_and_delete_guard(
     )
 
     qualified = f"provider/{provider_id}/gpt-4.1"
-    lm, label = await api._chat_model(api.app.state.runtime, opt_app.settings, qualified)
+    lm, label = await settings_routes._chat_model(
+        api.app.state.runtime, opt_app.settings, qualified
+    )
     assert label == "Primary Gateway · gpt-4.1"
     assert lm.kwargs["api_base"] == "https://gateway.example.com/v1"
     assert lm.kwargs["api_key"] == "sk-proj-supersecretkey9a4f"
     defaults = opt_app.settings.model_copy(
         update={"llm_model": qualified, "sub_llm_model": qualified}
     )
-    primary, inherited_label = await api._chat_model(api.app.state.runtime, defaults, None)
-    sub = await api._workspace_sub_lm(api.app.state.runtime, defaults)
+    primary, inherited_label = await settings_routes._chat_model(
+        api.app.state.runtime, defaults, None
+    )
+    sub = await settings_routes._workspace_sub_lm(api.app.state.runtime, defaults)
     assert inherited_label == label
     assert primary.kwargs["api_base"] == sub.kwargs["api_base"] == lm.kwargs["api_base"]
 
@@ -1527,7 +1541,46 @@ async def test_single_sigterm_cancel_and_pre_spawn_cancel(opt_app, monkeypatch) 
     shutdown_id = UUID(shutdown_job.json()["id"])
     await asyncio.wait_for(proc_started.wait(), timeout=2.0)
     runtime = api.app.state.runtime
-    await opt_runner.shutdown_optimization_runtime(runtime)
+
+    async def serve_app(scope, receive, send):
+        if scope["type"] != "lifespan":
+            await api.app(scope, receive, send)
+            return
+        # The fixture owns startup. Exercise the production cleanup from Uvicorn's shutdown phase.
+        assert (await receive())["type"] == "lifespan.startup"
+        await send({"type": "lifespan.startup.complete"})
+        assert (await receive())["type"] == "lifespan.shutdown"
+        await opt_runner.shutdown_optimization_runtime(runtime)
+        await send({"type": "lifespan.shutdown.complete"})
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            serve_app, lifespan="on", timeout_graceful_shutdown=1, log_config=None, access_log=False
+        )
+    )
+    monkeypatch.setattr(server, "capture_signals", nullcontext)
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        serving = asyncio.create_task(server.serve(sockets=[listener]))
+        try:
+            async with asyncio.timeout(4):
+                while not server.started:
+                    await asyncio.sleep(0.01)
+                async with httpx.AsyncClient(base_url=origin, trust_env=False) as network:
+                    async with network.stream(
+                        "GET", f"/api/optimizations/jobs/{shutdown_id}/events", headers=_AUTH
+                    ) as stream:
+                        stream.raise_for_status()
+                        async for line in stream.aiter_lines():
+                            if line == "event: snapshot":
+                                break
+                        assert not runtime.shutdown_event.is_set()
+                        server.should_exit = True
+                        await asyncio.shield(serving)
+        finally:
+            server.should_exit = True
+            await asyncio.wait_for(serving, timeout=4)
+    assert runtime.shutdown_event.is_set()
     assert mem_store.jobs[shutdown_id].status == "cancelled"
     assert terminate_calls == 2
     assert not runtime.optimization_tasks and not runtime.optimization_procs
@@ -1581,9 +1634,7 @@ async def test_promote_flex_blocked_force_guard_per_target_reanchor_pinning_and_
     gate_bytes = gate_tmp.read_bytes()
     gate_sha = hashlib.sha256(gate_bytes).hexdigest()
 
-    selector = api.SkillRegistry.load(opt_app.settings.skills_dir).available_skills(
-        opt_app.settings
-    )
+    selector = SkillRegistry.load(opt_app.settings.skills_dir).available_skills(opt_app.settings)
     from fleet_rlm.skills import build_skill_selector
 
     sel_pred = build_skill_selector(selector)

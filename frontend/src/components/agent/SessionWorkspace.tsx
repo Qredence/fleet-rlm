@@ -64,6 +64,11 @@ export function SessionWorkspace({
 }: SessionWorkspaceProps) {
   const [initialMessages, setInitialMessages] = useState<FleetMessage[] | null>(null)
   const [transcriptError, setTranscriptError] = useState('')
+  const [olderMessages, setOlderMessages] = useState<FleetMessage[]>([])
+  const [olderBefore, setOlderBefore] = useState<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState('')
+  const olderRequest = useRef<AbortController | null>(null)
   const [attempt, retry] = useState(0)
   const [prompt, setPrompt] = useState('')
   const [skillDraft, setSkillDraft] = useState<string | null>(null)
@@ -102,13 +107,43 @@ export function SessionWorkspace({
 
   useEffect(() => {
     const request = new AbortController()
-    void api.getMessages(session.id, request.signal).then((items) => {
-      if (!request.signal.aborted) setInitialMessages(items)
+    void api.getMessagePage(session.id, null, request.signal).then((page) => {
+      if (request.signal.aborted) return
+      setInitialMessages(page.messages)
+      setOlderMessages([])
+      setOlderBefore(page.before)
+      setLoadingOlder(false)
+      setOlderError('')
     }).catch((failure) => {
       if (!request.signal.aborted) setTranscriptError(errorMessage(failure))
     })
-    return () => request.abort()
+    return () => {
+      request.abort()
+      olderRequest.current?.abort()
+      olderRequest.current = null
+    }
   }, [api, session.id, attempt])
+
+  async function loadOlderMessages() {
+    if (!olderBefore || olderRequest.current) return
+    const request = new AbortController()
+    olderRequest.current = request
+    setLoadingOlder(true)
+    setOlderError('')
+    try {
+      const page = await api.getMessagePage(session.id, olderBefore, request.signal)
+      if (request.signal.aborted) return
+      setOlderMessages((messages) => [...page.messages, ...messages])
+      setOlderBefore(page.before)
+    } catch (failure) {
+      if (!request.signal.aborted) setOlderError(errorMessage(failure))
+    } finally {
+      if (olderRequest.current === request) {
+        olderRequest.current = null
+        setLoadingOlder(false)
+      }
+    }
+  }
 
   useEffect(() => {
     if (!visible || settingsOpen) return
@@ -143,8 +178,13 @@ export function SessionWorkspace({
       onTurnComplete()
     },
   })
-  const { messages, status, error, preparing, waitingForStop, sendError, active, stream } = chat
+  const { messages: currentMessages, status, error, preparing, waitingForStop, sendError, active, stream } = chat
+  const messages = olderMessages.length ? [...olderMessages, ...currentMessages] : currentMessages
   const observer = stream && <stream.Observer chat={stream.chat} onChange={chat.setSnapshot} />
+  const latestMessage = messages.at(-1)
+  const waitingForActivity = status === 'streaming' && (latestMessage?.role !== 'assistant'
+    || !latestMessage.parts.some(part => part.type.startsWith('tool-') || part.type === 'reasoning'
+      || part.type === 'data-web-call' || part.type === 'text' && part.text.trim()))
   const latestPromptIndex = messages.findLastIndex((message) => message.role === 'user')
 
   useEffect(() => {
@@ -219,7 +259,10 @@ export function SessionWorkspace({
   }
 
   const previewPath = selection.path
+  // A just-published chat artifact already has its digest before the Files panel refreshes.
+  const publishedTree = previewPath && latestMessage?.parts.findLast(part => part.type === 'data-file-tree')
   const previewFile = files.files?.find(({ path }) => path === previewPath)
+    ?? (publishedTree ? publishedTree.data.files.find(file => file.path === previewPath) : undefined)
   const filesToggle = (
     <Tooltip>
       <TooltipTrigger render={<Button
@@ -252,7 +295,7 @@ export function SessionWorkspace({
       filePreview={previewPath && (
         <Deferred fallback={<Skeleton role="status" aria-label="Loading preview" className="m-3 h-32 motion-reduce:animate-none" />}>
           <FilePreview
-            key={`${previewPath}:${previewFile?.revision ?? previewFile?.sha256 ?? ''}`} api={api} sessionId={session.id} path={previewPath}
+            key={`${previewPath}:${previewFile?.sha256 ?? previewFile?.revision ?? ''}`} api={api} sessionId={session.id} path={previewPath}
             onClose={wide ? closePreview : undefined}
             onDownload={() => api.downloadFile(session.id, previewPath)}
             onSkillInstalled={onSkillInstalled}
@@ -284,6 +327,16 @@ export function SessionWorkspace({
               <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
                 <MessageScroller className="flex-1">
                   <MessageScrollerViewport>
+                    {(olderBefore || olderError) && (
+                      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-3 pt-5 sm:px-6 sm:pt-7">
+                        {olderBefore && (
+                          <Button variant="ghost" size="sm" className="self-center" disabled={loadingOlder} onClick={() => void loadOlderMessages()}>
+                            {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+                          </Button>
+                        )}
+                        {olderError && <Alert variant="destructive"><AlertDescription>{olderError}</AlertDescription></Alert>}
+                      </div>
+                    )}
                     <MessageScrollerContent className="mx-auto w-full max-w-3xl px-3 py-5 sm:px-6 sm:py-7" aria-label="Conversation">
                       {messages.length ? messages.map((message, index) => {
                         const user = message.role === 'user'
@@ -309,7 +362,7 @@ export function SessionWorkspace({
                                       <Terminal className="size-4" aria-hidden="true" /> Fleet
                                     </MessageHeader>
                                     <MessageParts
-                                      parts={message.parts} live={active && index === messages.length - 1}
+                                      parts={message.parts} live={status === 'streaming' && index === messages.length - 1}
                                       preview={openFromChat} download={files.download}
                                       resolveTraceLink={api.resolveTraceLink}
                                       refine={() => api.refineTurn(session.id, message.id)}
@@ -353,7 +406,7 @@ export function SessionWorkspace({
               {active && (
                 <p role="status" className="px-1 text-xs text-muted-foreground">
                   <span className={preparing || status === 'submitted' ? 'shimmer motion-reduce:shimmer-none' : undefined}>
-                    {preparing ? 'Loading chat client…' : waitingForStop ? 'Stopping previous run…' : status === 'submitted' ? 'Starting run…' : 'Run in progress…'}
+                    {preparing ? 'Loading chat client…' : waitingForStop ? 'Stopping previous run…' : status === 'submitted' ? 'Starting run…' : waitingForActivity ? 'Request accepted. Waiting for first activity…' : 'Run in progress…'}
                   </span>
                 </p>
               )}

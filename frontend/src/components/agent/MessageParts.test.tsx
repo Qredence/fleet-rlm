@@ -39,3 +39,15 @@ it('preserves unmarked Python results as actions and distinguishes a running cal
   expect(live).not.toContain('Turn details')
   expect(render([progress, marker])).toContain('Activity · 1 Python action')
 })
+
+it('shows the submitted artifact once across repeated workspace snapshots', () => {
+  const tree: FleetPart = { type: 'data-file-tree', data: { files: ['old.csv', 'new.csv'].map(name => ({
+    path: 'artifacts/' + name, kind: 'artifact', size_bytes: 12,
+  })) } }
+  expect(render([tree], true)).not.toContain('old.csv')
+  const html = render([tree, { ...tree }, { type: 'tool-python_exec', toolCallId: 'done',
+    state: 'output-available', input: 'SUBMIT()', output: { artifact_paths: ['/workspace/artifacts/new.csv'] } },
+    { type: 'data-python-submission', data: { tool_call_id: 'done' } }])
+  expect(html).not.toContain('old.csv')
+  expect(html.match(/Preview artifacts\/new.csv/g)).toHaveLength(1)
+})

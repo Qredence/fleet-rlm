@@ -1,8 +1,14 @@
 # Fleet-RLM architecture
 
+## HTTP application
+
+The [application entry point](../backend/src/fleet_rlm/api.py) assembles routers, starts the runtime, and serves health probes. The [HTTP package](../backend/src/fleet_rlm/http/) owns request access and the chat, workspace, settings, provider, and optimization routes. The workspace bearer check runs before request bodies are read. Provider administration uses the separate administrator bearer.
+
 ## Chat and workspace
 
-The [React chat hook](../frontend/src/hooks/use-session-chat.ts) posts through DefaultChatTransport. The [API](../backend/src/fleet_rlm/api.py) admits one running root per session, hydrates durable files and calls the [agent](../backend/src/fleet_rlm/agent.py). Each RLM invocation receives scoped tools, model selection and an interpreter factory. Children run with their own interpreter. The [stream mapper](../backend/src/fleet_rlm/ui_stream.py) produces AI SDK frames, and FastAPI sends JSON events followed by raw `[DONE]`. MLflow correlates the turn and children using Fleet run identifiers.
+The [React chat hook](../frontend/src/hooks/use-session-chat.ts) posts through DefaultChatTransport. The [chat router](../backend/src/fleet_rlm/http/chat.py) admits one running root per session, hydrates durable files and calls the [agent](../backend/src/fleet_rlm/agent.py). Each RLM invocation receives scoped tools, model selection and an interpreter factory. Children run with their own interpreter. The [stream mapper](../backend/src/fleet_rlm/ui_stream.py) produces AI SDK frames, and FastAPI sends JSON events followed by raw `[DONE]`. MLflow correlates the turn and children using Fleet run identifiers.
+
+The session messages endpoint returns a chronological array. Supply `limit` to request the newest 1 to 50 root turns and follow the `Link` header to older turns. Supplying an exclusive `before` root ID alone requests up to 25 turns. An unpaged call returns the full transcript.
 
 The [database](../backend/src/fleet_rlm/db.py) owns sessions, root and child runs, file manifests, outstanding object cleanup, memories and workspace settings. Transactions fence publication, deletion and recovery. The [Daytona interpreter](../backend/src/fleet_rlm/interpreter.py) owns the VM and its scratch files. The [host storage adapter](../backend/src/fleet_rlm/storage.py) retains inputs and published artifacts across VM replacement. The manifest identifies the verified bytes belonging to each session. See the [locking](../backend/tests/test_phase1_locking.py), [engine](../backend/tests/test_phase2_engine.py) and [HTTP tests](../backend/tests/test_phase3_api.py).
 

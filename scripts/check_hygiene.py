@@ -16,6 +16,14 @@ OWNERS = {
     "boto3": "storage.py",
     "botocore": "storage.py",
 }
+MOVED_API_FUNCTIONS = {
+    "_prepare_turn": Path("http/chat.py"),
+    "_execute_turn": Path("http/chat.py"),
+    "update_optimization_provider": Path("http/providers.py"),
+    "_resolve_role_credentials": Path("http/optimizations.py"),
+    "create_optimization_job": Path("http/optimizations.py"),
+    "promote_optimization_job": Path("http/optimizations.py"),
+}
 
 
 def scores(root: Path) -> dict[tuple[Path, str], int]:
@@ -75,6 +83,10 @@ def check_complexity(base: str):
                     subprocess.check_output(["git", "show", f"{base}:{name}"])
                 )
         previous = scores(root)
+        for name, path in MOVED_API_FUNCTIONS.items():
+            original_score = previous.get((Path("api.py"), name))
+            if original_score is not None and not (root / path).exists():
+                previous[path, name] = original_score
     for key, current in scores(SRC).items():
         limit = previous.get(key, 10)
         if current > limit:
@@ -90,9 +102,15 @@ def check_files():
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 modules = [node.module]
             for module in modules:
-                owner = OWNERS.get(module.split(".")[0])
-                if owner and path != SRC / owner:
-                    yield f"{path}:{node.lineno} {module} belongs in {owner}"
+                library = module.split(".")[0]
+                owner = OWNERS.get(library)
+                if owner is None or path == SRC / owner:
+                    continue
+                if library == "fastapi":
+                    if path.is_relative_to(SRC / "http"):
+                        continue
+                    owner = "api.py or http/"
+                yield f"{path}:{node.lineno} {module} belongs in {owner}"
     markdown = subprocess.check_output(
         [
             "git",

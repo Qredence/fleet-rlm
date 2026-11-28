@@ -5,7 +5,12 @@ import type { ChatObserver, ChatSnapshot, createStreamingChat } from '@/lib/chat
 import type { FleetMessage } from '@/lib/messages'
 
 type StreamingChat = ReturnType<typeof createStreamingChat>
-type PendingSend = { chat?: StreamingChat }
+type PendingSend = {
+  chat?: StreamingChat
+  previousMessages?: FleetMessage[]
+  accepted: boolean
+  onAccepted: () => void
+}
 
 export function useSessionChat({ id, token, initialMessages, recentStops, onAccepted, onComplete }: {
   id: string
@@ -43,9 +48,9 @@ export function useSessionChat({ id, token, initialMessages, recentStops, onAcce
     if (request?.chat) stopStream(request.chat)
   }, [stopStream])
 
-  async function send(text: string, pinned: string[], onStart: () => void) {
+  async function send(text: string, pinned: string[], onRequestAccepted: () => void) {
     if (pending.current || initialMessages === null) return
-    const request: PendingSend = {}
+    const request: PendingSend = { accepted: false, onAccepted: onRequestAccepted }
     pending.current = request
     setSendError('')
     try {
@@ -57,6 +62,13 @@ export function useSessionChat({ id, token, initialMessages, recentStops, onAcce
         if (pending.current !== request) return
         chat = createStreamingChat({
           id, token, messages: initialMessages, onAccepted, onComplete,
+          onRequestAccepted: () => {
+            const active = pending.current
+            if (active) {
+              active.accepted = true
+              active.onAccepted()
+            }
+          },
           consumeRecentStop: () => {
             const stoppedAt = recentStops.current.get(id)
             recentStops.current.delete(id)
@@ -68,7 +80,7 @@ export function useSessionChat({ id, token, initialMessages, recentStops, onAcce
       }
 
       request.chat = chat
-      onStart()
+      request.previousMessages = chat.messages
       const sending = chat.sendMessage({ text }, { body: { pinned_skills: pinned } })
       setSnapshot({ messages: chat.messages, status: chat.status, error: chat.error })
       setPreparing(false)
@@ -79,6 +91,11 @@ export function useSessionChat({ id, token, initialMessages, recentStops, onAcce
       }
     } finally {
       if (pending.current === request) {
+        const { chat, previousMessages, accepted } = request
+        if (chat && previousMessages && !accepted) {
+          chat.messages = previousMessages
+          setSnapshot({ messages: chat.messages, status: chat.status, error: chat.error })
+        }
         pending.current = null
         setPreparing(false)
       }

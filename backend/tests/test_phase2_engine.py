@@ -67,6 +67,7 @@ from fleet_rlm.interpreter import (
     make_daytona_client,
     make_interpreter_factory,
     prepare_sandbox,
+    reconcile_managed_workspace,
     reusable_session_sandbox,
     stage_workspace_bytes,
     upload_workspace_file,
@@ -2872,6 +2873,21 @@ async def test_stage_workspace_bytes_and_collect_workspace_artifacts(tmp_path, m
             "size_bytes": len(txt_bytes),
         },
     ]
+
+    expected = {entry["path"]: (entry["sha256"], entry["size_bytes"]) for entry in manifest}
+    expected["files/missing.txt"] = (hashlib.sha256(b"missing").hexdigest(), 7)
+    changed = tmp_path / "files" / "b.csv"
+    changed.write_bytes(b"x" * len(csv_bytes))
+    outside = tmp_path / "unmanaged"
+    outside.mkdir()
+    (outside / "keep").write_text("keep")
+    link = tmp_path / "artifacts" / "linked"
+    link.symlink_to(outside)
+    retained = await reconcile_managed_workspace(sandbox, expected, timeout=20)
+    assert retained == {"files/nested/a.txt"}
+    assert not changed.exists()
+    assert not link.is_symlink()
+    assert (outside / "keep").read_text() == "keep"
 
     # Collect newly created artifacts; skip known unchanged, oversized, and symlink entries.
     artifacts_root = tmp_path / "artifacts"

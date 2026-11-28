@@ -471,8 +471,16 @@ export function createApi(token?: string) {
     async deleteSession(id: string) {
       await request(sessionPath(id), { method: 'DELETE' })
     },
-    getMessages: (id: string, signal?: AbortSignal) =>
-      json<FleetMessage[]>(`${sessionPath(id)}/messages`, { signal }),
+    async getMessagePage(id: string, before: string | null, signal?: AbortSignal) {
+      const params = new URLSearchParams({ limit: '25' })
+      if (before) params.set('before', before)
+      const response = await request(`${sessionPath(id)}/messages?${params}`, { signal })
+      const previousQuery = response.headers.get('Link')?.match(/<[^>]*\?([^>]+)>;\s*rel="prev"/)?.[1]
+      return {
+        messages: await response.json() as FleetMessage[],
+        before: new URLSearchParams(previousQuery).get('before'),
+      }
+    },
     listFiles: (id: string, signal?: AbortSignal) =>
       json<WorkspaceFile[]>(`${sessionPath(id)}/files`, { signal }),
     listWorkspace: (id: string, signal?: AbortSignal) =>

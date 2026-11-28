@@ -13,7 +13,6 @@ import { DialogClose } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Separator } from '@/components/ui/separator'
@@ -58,13 +57,13 @@ function SettingRow({ label, description, id, children }: {
   return (
     <Field
       orientation="horizontal"
-      className="justify-between gap-4 border-b border-border/60 py-4 last:border-b-0 max-sm:flex-col max-sm:items-start"
+      className="justify-between gap-4 border-b border-border/60 py-4 last:border-b-0 @max-md:flex-col @max-md:items-start"
     >
       <div className="min-w-0">
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         {description && <FieldDescription id={id ? `${id}-description` : undefined}>{description}</FieldDescription>}
       </div>
-      <div className="w-fit max-w-full shrink-0">{children}</div>
+      <div className="w-fit min-w-0 max-w-full">{children}</div>
     </Field>
   )
 }
@@ -376,7 +375,7 @@ export function SettingsDialogBody({
             <p className="mt-1 text-xs text-muted-foreground">{currentSection.description}</p>
           </header>
 
-          <ScrollArea key={tab} className="min-h-0 min-w-0 flex-1" viewportClassName="px-5 pt-1 pb-5 sm:px-6">
+          <div key={tab} className="@container min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pt-1 pb-5 sm:px-6">
           <TabsContent value="general" className="grid gap-5">
             <FieldGroup className="gap-0">
               <SettingRow label="Theme" id="settings-theme" description="Follow your system preference or choose a theme.">
@@ -534,7 +533,7 @@ export function SettingsDialogBody({
             />
           </TabsContent>
 
-          <TabsContent value="models" className="grid gap-4">
+          <TabsContent value="models" className="grid grid-cols-1 gap-4">
             {failure && <Alert variant="destructive"><AlertDescription>{failure}</AlertDescription></Alert>}
             {chatGPTError && <Alert variant="destructive"><AlertDescription>{chatGPTError}</AlertDescription></Alert>}
             {chatGPTPlan && <ChatGPTPlanSettings api={api} status={chatGPTPlan} onChange={loadChatGPTPlan} modelsOnly />}
@@ -581,7 +580,7 @@ export function SettingsDialogBody({
                     }[role]
                     const enteringModel = customModelRole === role
                     return <SettingRow key={role} label={label} id={`workspace-${role}`}>
-                      <div className="grid w-56 max-w-full gap-2">
+                      <div className="grid w-56 max-w-full grid-cols-1 gap-2">
                         <Select value={enteringModel ? CUSTOM_ENVIRONMENT_MODEL : current} onValueChange={value => {
                           if (role !== 'decision_model' && value === CUSTOM_ENVIRONMENT_MODEL) {
                             setCustomModelRole(role)
@@ -755,7 +754,7 @@ export function SettingsDialogBody({
               </p>
             )}
           </TabsContent>
-          </ScrollArea>
+          </div>
           <div data-slot="settings-footer" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-5 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <Button

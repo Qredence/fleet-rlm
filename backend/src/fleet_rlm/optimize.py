@@ -3066,7 +3066,10 @@ def _build_scoped_factory(state: _RolloutState) -> Callable[..., Any] | None:
 
 
 def _offline_spawn_agent(task: str) -> dict[str, Any]:
-    """Delegate a workspace subtask to an isolated RLM and return its result."""
+    """Delegate one distinct subtask to an isolated RLM.
+
+    Reuse its returned answer and artifact paths in later steps.
+    """
     state = _ROLLOUT_STATE.get()
     if state is None:
         raise CodeExecutionError("spawn_agent is unavailable outside an active workspace rollout")

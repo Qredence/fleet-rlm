@@ -23,10 +23,15 @@ import pytest
 import pytest_asyncio
 from botocore.response import StreamingBody
 from dspy.utils.dummies import DummyLM
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 
-from fleet_rlm import api, db, interpreter, skills
+from fleet_rlm import agent, api, db, interpreter, skills, ui_stream
 from fleet_rlm.config import Settings
+from fleet_rlm.http import chat as chat_routes
+from fleet_rlm.http import settings as settings_routes
+from fleet_rlm.http import workspace as workspace_routes
 from fleet_rlm.interpreter import DaytonaError, NotFoundError
 from fleet_rlm.skills import SkillDefinition, SkillRegistry
 from fleet_rlm.storage import (
@@ -48,6 +53,7 @@ _PAYLOAD = {
     ],
 }
 _MIB = 1024 * 1024
+_read_all_messages = db.get_session_ui_messages
 
 
 class OfflineStore:
@@ -500,7 +506,7 @@ async def offline(monkeypatch, tmp_path, tracking_endpoint):
         cors_origins=["https://client.example"],
         skills_dir=tmp_path,
     )
-    monkeypatch.setattr(api.store, "list_llm_providers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(db, "list_llm_providers", AsyncMock(return_value=[]))
     store = OfflineStore()
     engine = SimpleNamespace(dispose=AsyncMock())
     reap = AsyncMock(return_value=0)
@@ -540,9 +546,10 @@ async def offline(monkeypatch, tmp_path, tracking_endpoint):
     monkeypatch.setattr(api, "Settings", lambda: settings)
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
-    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
-    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
-    monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
+    monkeypatch.setattr(chat_routes, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(chat_routes, "reconcile_managed_workspace", AsyncMock(return_value=set()))
+    monkeypatch.setattr(chat_routes, "upload_workspace_file", AsyncMock())
+    monkeypatch.setattr(agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", reap)
     monkeypatch.setattr(db, "get_session_or_raise", store.get_session)
@@ -562,13 +569,13 @@ async def offline(monkeypatch, tmp_path, tracking_endpoint):
     monkeypatch.setattr(db, "upsert_file_record", upsert_artifact)
     monkeypatch.setattr(db, "release_upload", store.release_upload)
     pull = AsyncMock(side_effect=pull_artifact)
-    monkeypatch.setattr(api, "download_workspace_file", pull)
+    monkeypatch.setattr(chat_routes, "download_workspace_file", pull)
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
     monkeypatch.setattr(db, "update_workspace_settings_overrides", store.update_workspace_overrides)
     monkeypatch.setattr(db, "reset_workspace_settings_overrides", store.reset_workspace_overrides)
-    monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[artifact]))
+    monkeypatch.setattr(chat_routes, "list_new_artifacts", AsyncMock(return_value=[artifact]))
     memory = AsyncMock(side_effect=RuntimeError("Optional memory gate failed"))
-    monkeypatch.setattr(api.agent, "consolidate_memory", memory)
+    monkeypatch.setattr(agent, "consolidate_memory", memory)
 
     async with api.lifespan(api.app):
         storage = api.app.state.runtime.storage
@@ -579,7 +586,7 @@ async def offline(monkeypatch, tmp_path, tracking_endpoint):
         reap.assert_awaited_once_with(store, settings.stale_run_timeout_seconds)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app),
-            base_url="http://test",
+            base_url="https://test",
             headers=_AUTH,
         ) as client:
             yield SimpleNamespace(
@@ -613,7 +620,11 @@ async def test_auth_and_cors(offline):
     assert response.status_code == 200
     assert response.json() == [{"name": "table", "description": "Analyze tabular data"}]
     assert response.headers["access-control-allow-origin"] == "https://client.example"
-    assert response.headers["access-control-expose-headers"] == "x-vercel-ai-ui-message-stream"
+    assert set(response.headers["access-control-expose-headers"].lower().split(", ")) == {
+        "x-vercel-ai-ui-message-stream",
+        "link",
+        "retry-after",
+    }
 
     for path in (offline.base, "/api/skills/table"):
         assert (
@@ -628,9 +639,57 @@ async def test_auth_and_cors(offline):
     assert (await offline.client.get("/api/skills/missing")).status_code == 404
 
     offline.settings.api_bearer_token = None
+    assert (await offline.client.get("/api/skills")).status_code == 401
+    local = "http://127.0.0.1:8000/api/skills"
     assert (
-        await offline.client.get("/api/skills", headers={"Authorization": ""})
+        await offline.client.get(local, headers={"Origin": "http://localhost:5173"})
     ).status_code == 200
+    assert (
+        await offline.client.get(local, headers={"Origin": "https://client.example"})
+    ).status_code == 401
+    assert (
+        await offline.client.get(local, headers={"Forwarded": "proto=https"})
+    ).status_code == 401
+
+    schema = api.app.openapi()
+    assert schema["components"]["securitySchemes"]["FleetBearer"]["scheme"] == "bearer"
+    assert schema["paths"]["/api/skills"]["get"]["security"] == [{"FleetBearer": []}]
+    assert "security" not in schema["paths"]["/healthz"]["get"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admin", [None, "   ", "offline-token"])
+async def test_shared_startup_checks_credentials_before_database(offline, monkeypatch, admin):
+    values = offline.settings.model_dump()
+    values.update(shared_deployment=True, provider_admin_token=admin)
+    monkeypatch.setattr(api, "Settings", lambda: Settings(_env_file=None, **values))
+    create_db = Mock()
+    monkeypatch.setattr(db, "create_db", create_db)
+    with pytest.raises(ValidationError, match="Shared deployments require distinct"):
+        async with api.lifespan(api.app):
+            pytest.fail("The app started with invalid shared credentials")
+    create_db.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_upload_is_rejected_before_reading_body(offline):
+    async def upload_body():
+        pytest.fail("The upload body was read before authorization")
+        yield b""
+
+    response = await offline.client.post(
+        f"{offline.base}/files",
+        headers={
+            "Authorization": "",
+            "Content-Type": "multipart/form-data; boundary=upload",
+            "Origin": "https://client.example",
+        },
+        content=upload_body(),
+    )
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["access-control-allow-origin"] == "https://client.example"
+    offline.storage.put.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -662,7 +721,7 @@ async def test_models_reads_the_configured_gateway(offline, monkeypatch):
         )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(gateway), follow_redirects=False)
-    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
     assert (
         await offline.client.get("/api/models", headers={"Authorization": ""})
     ).status_code == 401
@@ -699,7 +758,7 @@ async def test_models_falls_back_to_default(offline, monkeypatch, failure):
         return httpx.Response(200, json={"private upstream response": True})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(gateway), follow_redirects=False)
-    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
     response = await offline.client.get("/api/models")
     unconfigured = failure == "unconfigured"
     assert response.status_code == 200
@@ -1047,7 +1106,7 @@ async def test_install_skill_artifact_is_immediately_available_to_new_turns(offl
     task = AsyncMock(
         return_value=dspy.Prediction(answer="RC-29", history=dspy.History(messages=[]))
     )
-    monkeypatch.setattr(api.agent, "run_workspace_task", task)
+    monkeypatch.setattr(agent, "run_workspace_task", task)
     response = await offline.client.post(path, json=payload)
     assert response.status_code == 200
     assert response.text.endswith("data: [DONE]\n\n")
@@ -1100,16 +1159,14 @@ async def test_ui_stream_marks_only_terminal_python_output_as_submission():
         if frame["type"] == "data-python-submission":
             snapshots_at_marker.append(stream.snapshot("root"))
 
-    stream = api.ui_stream.UiStream("root", emit)
+    stream = ui_stream.UiStream("root", emit)
     payload = {"answer": "5", "artifact_paths": []}
     for execution_id, submission in enumerate((False, True)):
-        await stream.publish("root", api.agent.PythonExecStartedEvent(execution_id, "run()"))
+        await stream.publish("root", agent.PythonExecStartedEvent(execution_id, "run()"))
         if submission:
-            await stream.publish(
-                "root", api.agent.PythonExecProgressEvent(execution_id, "working\n")
-            )
+            await stream.publish("root", agent.PythonExecProgressEvent(execution_id, "working\n"))
         await stream.publish(
-            "root", api.agent.PythonExecCompletedEvent(execution_id, payload, submission=submission)
+            "root", agent.PythonExecCompletedEvent(execution_id, payload, submission=submission)
         )
 
     ordinary, preview, marker, submitted = [
@@ -1129,7 +1186,7 @@ async def test_ui_stream_marks_only_terminal_python_output_as_submission():
 
 
 def test_ui_frames_and_lossless_nested_snapshots():
-    root = api.ui_stream.UiPartAccumulator("root")
+    root = ui_stream.UiPartAccumulator("root")
     assert root.start() == {"type": "start", "messageId": "root"}
     assert root.data("skills", {"skills": [{"name": "csv", "score": 0.8}]})["type"] == "data-skills"
     reason = list(root.reasoning("Check the input"))
@@ -1153,9 +1210,9 @@ def test_ui_frames_and_lossless_nested_snapshots():
     assert (
         root.subagent("a", {"task": "Count", "kind": "subagent"})["type"] == "tool-input-available"
     )
-    child = api.ui_stream.UiPartAccumulator("child")
+    child = ui_stream.UiPartAccumulator("child")
     child.subagent("b", {"task": "Verify", "kind": "llm_query"})
-    grandchild = api.ui_stream.UiPartAccumulator("grandchild")
+    grandchild = ui_stream.UiPartAccumulator("grandchild")
     early = root.tool_output("a", child.message(), preliminary=True)
     list(grandchild.finish("Verified"))
     child.tool_output("b", grandchild.message(), preliminary=False)
@@ -1237,7 +1294,7 @@ async def test_chat_supplies_session_only_memories_to_skill_creator(
     prior_lookup = AsyncMock(return_value=prior)
     monkeypatch.setattr(db, "get_session_prior_turns", prior_lookup)
     turn = AsyncMock(return_value=dspy.Prediction(answer="Done", history=dspy.History(messages=[])))
-    monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+    monkeypatch.setattr(agent, "run_workspace_task", turn)
 
     response = await offline.client.post(
         f"{offline.base}/chat",
@@ -1286,14 +1343,14 @@ async def test_refine_saved_turn_creates_one_reviewable_lesson(offline, monkeypa
             {"lesson": lesson},
         ]
     )
-    monkeypatch.setattr(api, "_request_sub_lm", lambda *_: model)
-    refine = api.agent.refine_turn
+    monkeypatch.setattr(settings_routes, "_request_sub_lm", lambda *_: model)
+    refine = agent.refine_turn
 
     async def predict(*args, **kwargs):
         assert offline.store.checkouts == 0
         return await refine(*args, **kwargs)
 
-    monkeypatch.setattr(api.agent, "refine_turn", predict)
+    monkeypatch.setattr(agent, "refine_turn", predict)
 
     async def save(_db, sid, source_id, **fields):
         assert (sid, source_id) == (session_id, run_id)
@@ -1410,7 +1467,7 @@ async def test_consolidate_searches_prompt_and_answer_including_unapproved_memor
             answer="Remembered Zachary.", history=dspy.History(messages=[])
         )
     )
-    monkeypatch.setattr(api.agent, "run_workspace_task", turn)
+    monkeypatch.setattr(agent, "run_workspace_task", turn)
 
     response = await offline.client.post(
         f"{offline.base}/chat",
@@ -1462,11 +1519,11 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
     api.app.state.runtime = replace(
         runtime, settings=offline.settings.model_copy(update={"mlflow_tracking_uri": tracking_uri})
     )
-    caplog.set_level("INFO", logger=api.__name__)
+    caplog.set_level("INFO", logger=chat_routes.__name__)
     monkeypatch.setattr(
-        api,
+        chat_routes,
         "_chat_sandbox",
-        AsyncMock(side_effect=api.SandboxStartupError("private provider diagnostics")),
+        AsyncMock(side_effect=interpreter.SandboxStartupError("private provider diagnostics")),
     )
     with mlflow.start_span("incoming HTTP request") as http_span:
         response = await offline.client.post(
@@ -1512,6 +1569,51 @@ async def test_workspace_startup_failure_returns_actionable_stream_error(
 
 
 @pytest.mark.asyncio
+async def test_hydration_failure_preserves_cause_in_mlflow(offline, monkeypatch, caplog, trace_uri):
+    runtime = api.app.state.runtime
+    monkeypatch.setattr(
+        api.app.state,
+        "runtime",
+        replace(
+            runtime, settings=offline.settings.model_copy(update={"mlflow_tracking_uri": trace_uri})
+        ),
+    )
+    offline.storage.seed(offline.store, "files/input.csv", b"input")
+
+    async def fail_download(*_args, **_kwargs):
+        try:
+            raise OSError("private storage diagnostics")
+        except OSError as cause:
+            raise StorageError("Could not download workspace file") from cause
+
+    offline.storage.download.side_effect = fail_download
+    caplog.set_level("INFO", logger=chat_routes.__name__)
+    response = await offline.client.post(
+        f"{offline.base}/chat",
+        json={"messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello"}]}]},
+    )
+
+    assert response.status_code == 200
+    assert response.text.endswith("data: [DONE]\n\n")
+    assert any(
+        record.args[-1] == "OSError"
+        for record in caplog.records
+        if record.msg == "Turn %s failed (%s)"
+    )
+    trace_id = next(
+        record.args[1] for record in caplog.records if record.msg == "Turn %s MLflow trace %s"
+    )
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(trace_id)
+    assert trace is not None
+    root = next(span for span in trace.data.spans if span.name == "fleet.turn")
+    assert root.attributes["fleet.error.stage"] == "workspace.hydrate"
+    assert root.attributes["error.type"] == "OSError"
+    assert trace.info.tags["fleet.outcome"] == "failed"
+    assert "private storage diagnostics" not in trace.to_json()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_chat_traces_correlate_memory_and_commit_previews(
     offline,
     monkeypatch,
@@ -1539,7 +1641,7 @@ async def test_concurrent_chat_traces_correlate_memory_and_commit_previews(
             history=dspy.History(messages=[]),
         )
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", run)
+    monkeypatch.setattr(agent, "run_workspace_task", run)
     offline.memory.side_effect = None
     seed = "sk-canary-only-not-real-1234567890"
 
@@ -1602,7 +1704,7 @@ async def test_turn_timeout_is_searchable_in_mlflow(offline, monkeypatch, trace_
         settings=runtime.settings.model_copy(update={"mlflow_tracking_uri": uri}),
     )
     turn_worker = AsyncMock(side_effect=TimeoutError("Private provider timeout"))
-    monkeypatch.setattr(api.agent, "run_workspace_task", turn_worker)
+    monkeypatch.setattr(agent, "run_workspace_task", turn_worker)
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 200
     run_id = offline.finish.await_args.args[1]
@@ -1625,8 +1727,10 @@ async def test_chat_billing_error_matches_failing_model(offline, monkeypatch, ro
     failure = dspy.LMBillingError("private provider billing details")
     if role == "decision":
         decision_model = SimpleNamespace(model="typesafe:jev-test")
-        monkeypatch.setattr(api, "_request_decision_lm", AsyncMock(return_value=decision_model))
-        monkeypatch.setattr(api, "select_skills", Mock(side_effect=failure))
+        monkeypatch.setattr(
+            chat_routes, "_request_decision_lm", AsyncMock(return_value=decision_model)
+        )
+        monkeypatch.setattr(chat_routes, "select_skills", Mock(side_effect=failure))
         run = AsyncMock()
         expected = (
             "Billing failed while using the Decision Model (typesafe:jev-test). "
@@ -1638,7 +1742,7 @@ async def test_chat_billing_error_matches_failing_model(offline, monkeypatch, ro
             f"Billing failed while using workspace provider · {runtime.settings.llm_model}. "
             "Choose another model and retry."
         )
-    monkeypatch.setattr(api.agent, "run_workspace_task", run)
+    monkeypatch.setattr(agent, "run_workspace_task", run)
     response = await offline.client.post(
         f"{offline.base}/chat",
         json={
@@ -1661,7 +1765,7 @@ async def test_chat_billing_error_matches_failing_model(offline, monkeypatch, ro
 async def test_post_sse_frames_and_persistence(offline, monkeypatch):
     child_id, nested_id = uuid4(), uuid4()
     offline.create_child.side_effect = [SimpleNamespace(id=child_id), SimpleNamespace(id=nested_id)]
-    run_turn = api._run_turn
+    run_turn = chat_routes._run_turn
     sse_queue = None
 
     async def capture_queue(request, runtime, turn, queue, background):
@@ -1669,46 +1773,46 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
         sse_queue = queue
         return await run_turn(request, runtime, turn, queue, background)
 
-    monkeypatch.setattr(api, "_run_turn", capture_queue)
+    monkeypatch.setattr(chat_routes, "_run_turn", capture_queue)
 
     async def complete(_settings, *, task, run_id, selection, emit, callbacks, **_):
         assert offline.store.checkouts == 0
         assert task == "Analyze @table" and selection.active_skills[0].name == "table"
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.ReasoningEvent("Inspect the data"))
-        await emit(run_id, api.agent.PythonExecStartedEvent(1, "```python\nprint(x)\n```"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.ReasoningEvent("Inspect the data"))
+        await emit(run_id, agent.PythonExecStartedEvent(1, "```python\nprint(x)\n```"))
         assert sse_queue.full()
-        await emit(run_id, api.agent.PythonExecProgressEvent(1, "skipped preview\n"))
+        await emit(run_id, agent.PythonExecProgressEvent(1, "skipped preview\n"))
         async with asyncio.timeout(2):
             while sse_queue.full():
                 await asyncio.sleep(0)
-        await emit(run_id, api.agent.PythonExecProgressEvent(1, "working\n"))
-        await emit(run_id, api.agent.PythonExecFailedEvent(1, "NameError: x"))
+        await emit(run_id, agent.PythonExecProgressEvent(1, "working\n"))
+        await emit(run_id, agent.PythonExecFailedEvent(1, "NameError: x"))
 
-        child = api.agent.ChildRun(str(child_id), run_id, 1, "subagent", "Read the table")
+        child = agent.ChildRun(str(child_id), run_id, 1, "subagent", "Read the table")
         assert await callbacks.on_child_start(child) == child_id
-        await emit(run_id, api.agent.SubagentStartedEvent(child))
-        await emit(child.id, api.agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.SubagentStartedEvent(child))
+        await emit(child.id, agent.RunStartedEvent("workspace"))
 
-        nested = api.agent.ChildRun(str(nested_id), child.id, 2, "llm_query", "Check the totals")
+        nested = agent.ChildRun(str(nested_id), child.id, 2, "llm_query", "Check the totals")
         assert await callbacks.on_child_start(nested) == nested_id
-        await emit(child.id, api.agent.SubagentStartedEvent(nested))
-        await emit(nested.id, api.agent.RunStartedEvent("llm_query"))
-        await emit(nested.id, api.agent.RunResultEvent("Totals checked"))
+        await emit(child.id, agent.SubagentStartedEvent(nested))
+        await emit(nested.id, agent.RunStartedEvent("llm_query"))
+        await emit(nested.id, agent.RunResultEvent("Totals checked"))
         offline.finish.assert_not_awaited()
         assert offline.store.statements == []
         await callbacks.on_child_finish(nested, "completed", "Totals checked", None)
-        await emit(child.id, api.agent.SubagentCompletedEvent(nested.id))
+        await emit(child.id, agent.SubagentCompletedEvent(nested.id))
 
-        await emit(child.id, api.agent.RunResultEvent("Table read"))
+        await emit(child.id, agent.RunResultEvent("Table read"))
         assert offline.finish.await_count == 1
         assert offline.store.statements == []
         await callbacks.on_child_finish(child, "completed", "Table read", None)
-        await emit(run_id, api.agent.SubagentCompletedEvent(child.id))
-        await emit(run_id, api.agent.RunResultEvent("Verified"))
+        await emit(run_id, agent.SubagentCompletedEvent(child.id))
+        await emit(run_id, agent.RunResultEvent("Verified"))
         return dspy.Prediction(answer="Verified", history=dspy.History(messages=[{"task": task}]))
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", complete)
+    monkeypatch.setattr(agent, "run_workspace_task", complete)
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -1803,12 +1907,12 @@ async def test_post_sse_frames_and_persistence(offline, monkeypatch):
 async def test_rejected_transcript_releases_run_and_retires_vm(offline, monkeypatch):
     async def reject_once(*args, **kwargs):
         offline.finish.side_effect = offline.store.finish
-        raise api.SQLAlchemyError("rejected transcript")
+        raise SQLAlchemyError("rejected transcript")
 
     async def interrupt(*_args, **_kwargs):
         raise RuntimeError("interrupted")
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", interrupt)
+    monkeypatch.setattr(agent, "run_workspace_task", interrupt)
     offline.finish.side_effect = reject_once
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.text.endswith("data: [DONE]\n\n")
@@ -1828,22 +1932,22 @@ async def test_incomplete_child_snapshot_survives_root_teardown(
     offline, monkeypatch, status, retry
 ):
     async def interrupt(_settings, *, run_id, emit, callbacks, **_):
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
         child_id = await callbacks.on_child_start(
-            api.agent.ChildRun("placeholder", run_id, 1, "subagent", "Read the table")
+            agent.ChildRun("placeholder", run_id, 1, "subagent", "Read the table")
         )
-        child = api.agent.ChildRun(str(child_id), run_id, 1, "subagent", "Read the table")
-        await emit(run_id, api.agent.SubagentStartedEvent(child))
-        await emit(child.id, api.agent.RunStartedEvent("workspace"))
-        await emit(child.id, api.agent.PythonExecStartedEvent(1, "print('working')"))
-        await emit(child.id, api.agent.WebCallEvent("request-1", "web_open", "https://example.org"))
+        child = agent.ChildRun(str(child_id), run_id, 1, "subagent", "Read the table")
+        await emit(run_id, agent.SubagentStartedEvent(child))
+        await emit(child.id, agent.RunStartedEvent("workspace"))
+        await emit(child.id, agent.PythonExecStartedEvent(1, "print('working')"))
+        await emit(child.id, agent.WebCallEvent("request-1", "web_open", "https://example.org"))
         assert offline.store.statements == []
         offline.finish.assert_not_awaited()
         if status == "cancelled":
             raise asyncio.CancelledError
         raise RuntimeError("Turn interrupted before the child was finalized")
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", interrupt)
+    monkeypatch.setattr(agent, "run_workspace_task", interrupt)
     if retry:
 
         async def fail_first_write(*_args, **_kwargs):
@@ -1943,7 +2047,7 @@ async def test_disconnect_aborts_context_and_cancels_run(
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": asgi_version},
         "method": "POST",
-        "scheme": "http",
+        "scheme": "https",
         "path": f"{offline.base}/chat",
         "root_path": "",
         "query_string": b"",
@@ -1993,7 +2097,7 @@ async def test_disconnect_aborts_context_and_cancels_run(
 @pytest.mark.parametrize("model_id", ["openai/gpt-6-luna", "gpt-6-luna"])
 async def test_chat_model_reports_and_persists_model_bound_effort(offline, model_id, monkeypatch):
     monkeypatch.setattr(
-        api.agent, "_model", lambda settings, model: dspy.LM(model, api_base=settings.llm_base_url)
+        agent, "_model", lambda settings, model: dspy.LM(model, api_base=settings.llm_base_url)
     )
     offline.settings.llm_model = model_id
     original = {"model": model_id, "effort": "high"}
@@ -2260,8 +2364,8 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(
         created_decision_models.append(name)
         return DummyLM([])
 
-    monkeypatch.setattr(api.agent, "_model", fake_model)
-    monkeypatch.setattr(api.dspy, "LM", fake_decision_lm)
+    monkeypatch.setattr(agent, "_model", fake_model)
+    monkeypatch.setattr(dspy, "LM", fake_decision_lm)
 
     patch_resp = await offline.client.patch(
         "/api/settings",
@@ -2285,11 +2389,11 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(
         observed["model_override"] = model_override
         observed["sub_lm"] = sub_lm
         observed["optimized_state"] = optimized_state
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.RunResultEvent("Overridden"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunResultEvent("Overridden"))
         return dspy.Prediction(answer="Overridden", history=dspy.History(messages=[]))
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", capture_turn)
+    monkeypatch.setattr(agent, "run_workspace_task", capture_turn)
 
     response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert response.status_code == 200
@@ -2325,6 +2429,72 @@ async def test_run_turn_and_files_apply_neon_settings_overrides(
     assert download.status_code == 200
     assert download.content == b"report"
     assert offline.pull.await_args.kwargs["timeout"] == 33
+
+
+@pytest.mark.asyncio
+async def test_transcript_pages_exclude_running_roots_and_keep_turns_together(offline, monkeypatch):
+    # Exercise the projected query and exclusive cursor against an in-memory run table.
+    engine = create_engine("sqlite://")
+    session_id = offline.store.session_id.hex
+    other_session = uuid4().hex
+    assistant = json.dumps([{"type": "text", "text": "Saved reply"}])
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE runs (id CHAR(32), session_id CHAR(32), parent_run_id CHAR(32),"
+            " status TEXT, prompt TEXT, ui_parts JSON)"
+        )
+
+        def insert_run(number, status, prompt, *, owner=session_id, parent=None, parts="[]"):
+            connection.exec_driver_sql(
+                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+                (UUID(int=number).hex, owner, parent, status, prompt, parts),
+            )
+
+        insert_run(1, "completed", "Oldest", parts=assistant)
+        insert_run(2, "running", "Still running")
+        insert_run(3, "cancelled", "Cancelled")
+        insert_run(4, "completed", "Latest", parts=assistant)
+        insert_run(5, "completed", "Other session", owner=other_session)
+        insert_run(6, "completed", "Child turn", parent=UUID(int=4).hex)
+
+        @asynccontextmanager
+        async def sessionmaker():
+            yield SimpleNamespace(execute=AsyncMock(side_effect=connection.execute))
+
+        runtime = api.app.state.runtime
+        api.app.state.runtime = replace(runtime, sessionmaker=sessionmaker)
+        monkeypatch.setattr(db, "get_session_ui_messages", _read_all_messages)
+        path = f"{offline.base}/messages"
+        first = await offline.client.get(path, params={"limit": 2})
+        first.raise_for_status()
+        assert [message["parts"][0]["text"] for message in first.json()] == [
+            "Cancelled",
+            "Latest",
+            "Saved reply",
+        ]
+        assert str(UUID(int=3)) in first.headers["Link"]
+        assert 'rel="prev"' in first.headers["Link"]
+
+        insert_run(7, "completed", "New turn")
+        older = await offline.client.get(path, params={"before": str(UUID(int=3))})
+        older.raise_for_status()
+        assert [message["parts"][0]["text"] for message in older.json()] == [
+            "Oldest",
+            "Saved reply",
+        ]
+        assert "Link" not in older.headers
+        full = await offline.client.get(path)
+        assert [message["parts"][0]["text"] for message in full.json()] == [
+            "Oldest",
+            "Saved reply",
+            "Cancelled",
+            "Latest",
+            "Saved reply",
+            "New turn",
+        ]
+        for params in ({"limit": 51}, {"limit": 0}, {"before": "malformed"}):
+            assert (await offline.client.get(path, params=params)).status_code == 422
+    engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -2546,19 +2716,21 @@ async def test_zero_db_checkouts_across_storage_and_sandbox_bind_races(offline, 
         assert offline.store.checkouts == 0
         assert name == session.pending_sandbox_name
         if not recovering:
-            raise api.SandboxStartupError("create response unavailable")
+            raise interpreter.SandboxStartupError("create response unavailable")
         return recovered
 
-    monkeypatch.setattr(api, "allocate_session_sandbox", AsyncMock(side_effect=allocate))
-    monkeypatch.setattr(api, "prepare_sandbox", AsyncMock())
+    monkeypatch.setattr(
+        workspace_routes, "allocate_session_sandbox", AsyncMock(side_effect=allocate)
+    )
+    monkeypatch.setattr(workspace_routes, "prepare_sandbox", AsyncMock())
     first_id = offline.store.active_by_session[sid] = uuid4()
-    with pytest.raises(api.SandboxStartupError, match="create response"):
-        await api._chat_sandbox(
+    with pytest.raises(interpreter.SandboxStartupError, match="create response"):
+        await chat_routes._chat_sandbox(
             api.app.state.runtime, session, offline.settings, owner_run_id=first_id
         )
     pending = session.pending_sandbox_name
     replacement_id = offline.store.active_by_session[sid] = uuid4()
-    sandbox = await api._chat_sandbox(
+    sandbox = await chat_routes._chat_sandbox(
         api.app.state.runtime, session, offline.settings, owner_run_id=replacement_id
     )
     assert sandbox is recovered and pending == f"fleet-{first_id.hex}"
@@ -2616,13 +2788,13 @@ async def test_lazy_stale_run_reaping_on_turn_conflict(offline, monkeypatch):
         return 1
 
     async def quick_turn(_settings, *, run_id, emit, **_):
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.RunResultEvent("Recovered"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunResultEvent("Recovered"))
         return dspy.Prediction(answer="Recovered", history=dspy.History(messages=[]))
 
     offline.reap.reset_mock()
     offline.reap.side_effect = reap_stale
-    monkeypatch.setattr(api.agent, "run_workspace_task", quick_turn)
+    monkeypatch.setattr(agent, "run_workspace_task", quick_turn)
 
     admitted = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
     assert admitted.status_code == 200
@@ -2660,7 +2832,7 @@ async def test_max_concurrent_turns_per_worker_enforced_by_turn_semaphore(offlin
     events_order: list[str] = []
 
     async def controlled_turn(_settings, *, task, run_id, emit, **_):
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
         if "First" in task:
             events_order.append("turn1:start")
             turn1_entered.set()
@@ -2671,10 +2843,10 @@ async def test_max_concurrent_turns_per_worker_enforced_by_turn_semaphore(offlin
             events_order.append("turn2:start")
             turn2_entered.set()
             answer = "Second done"
-        await emit(run_id, api.agent.RunResultEvent(answer))
+        await emit(run_id, agent.RunResultEvent(answer))
         return dspy.Prediction(answer=answer, history=dspy.History(messages=[]))
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", controlled_turn)
+    monkeypatch.setattr(agent, "run_workspace_task", controlled_turn)
 
     payload1 = {"messages": [{"role": "user", "parts": [{"type": "text", "text": "First @table"}]}]}
     payload2 = {
@@ -2696,6 +2868,127 @@ async def test_max_concurrent_turns_per_worker_enforced_by_turn_semaphore(offlin
     assert resp1.status_code == 200 and "First done" in resp1.text
     assert resp2.status_code == 200 and "Second done" in resp2.text
     assert events_order == ["turn1:start", "turn1:end", "turn2:start"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slot_available_at_disconnect", [False, True])
+async def test_queued_client_disconnect_never_admits_root(
+    offline, monkeypatch, slot_available_at_disconnect
+):
+    disconnected = asyncio.Event()
+    queued = asyncio.Event()
+
+    class QueueProbe(asyncio.Semaphore):
+        async def acquire(self):
+            queued.set()
+            return await super().acquire()
+
+    semaphore = QueueProbe(0)
+    api.app.state.runtime = replace(api.app.state.runtime, turn_semaphore=semaphore)
+    admit = AsyncMock()
+    monkeypatch.setattr(db, "acquire_root_run", admit)
+    sent = []
+    request_sent = False
+
+    async def receive():
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {
+                "type": "http.request",
+                "body": json.dumps(_PAYLOAD).encode(),
+                "more_body": False,
+            }
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "method": "POST",
+        "scheme": "https",
+        "path": f"{offline.base}/chat",
+        "root_path": "",
+        "query_string": b"",
+        "headers": [
+            (b"authorization", b"Bearer offline-token"),
+            (b"content-type", b"application/json"),
+        ],
+    }
+    request = asyncio.create_task(api.app(scope, receive, send))
+    try:
+        await asyncio.wait_for(queued.wait(), timeout=2)
+        if slot_available_at_disconnect:
+            semaphore.release()
+    finally:
+        disconnected.set()
+        await asyncio.wait_for(request, timeout=2)
+    assert sent[0]["status"] == 499
+    assert semaphore._value == int(slot_available_at_disconnect)
+    admit.assert_not_awaited()
+    offline.finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_admission_timeout_leaves_root_uncreated(offline, monkeypatch):
+    semaphore = asyncio.Semaphore(0)
+    api.app.state.runtime = replace(api.app.state.runtime, turn_semaphore=semaphore)
+    monkeypatch.setattr(chat_routes, "_CHAT_ADMISSION_SECONDS", 0.02)
+    admit = AsyncMock()
+    monkeypatch.setattr(db, "acquire_root_run", admit)
+
+    response = await offline.client.post(f"{offline.base}/chat", json=_PAYLOAD)
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "1"
+    assert semaphore._value == 0
+    admit.assert_not_awaited()
+    offline.finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_capacity_is_free_while_memory_is_still_running(offline, monkeypatch):
+    runtime = replace(api.app.state.runtime, turn_semaphore=asyncio.Semaphore(1))
+    api.app.state.runtime = runtime
+    consolidating = asyncio.Event()
+    finish_memory = asyncio.Event()
+
+    async def controlled_turn(_settings, *, task, run_id, emit, **_):
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        return dspy.Prediction(answer=f"Completed {task}", history=dspy.History(messages=[]))
+
+    async def controlled_memory(_settings, prompt, *_args, **_kwargs):
+        if prompt.startswith("First"):
+            consolidating.set()
+            await finish_memory.wait()
+
+    def payload(prompt):
+        return {
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": prompt}]}],
+            "pinned_skills": ["table"],
+        }
+
+    monkeypatch.setattr(agent, "run_workspace_task", controlled_turn)
+    monkeypatch.setattr(agent, "consolidate_memory", controlled_memory)
+    first = asyncio.create_task(offline.client.post(f"{offline.base}/chat", json=payload("First")))
+    try:
+        await asyncio.wait_for(consolidating.wait(), timeout=2)
+        assert offline.store.active is None
+        second = await asyncio.wait_for(
+            offline.client.post(f"{offline.base}/chat", json=payload("Second")), timeout=2
+        )
+        assert second.status_code == 200 and "Completed Second" in second.text
+        assert not first.done()
+    finally:
+        finish_memory.set()
+        completed = await asyncio.wait_for(first, timeout=2)
+    assert completed.status_code == 200 and "Completed First" in completed.text
+    assert runtime.turn_semaphore._value == 1
+    assert runtime.memory_semaphore._value == min(
+        4, runtime.settings.max_concurrent_turns_per_worker
+    )
 
 
 @pytest.mark.asyncio
@@ -2726,7 +3019,7 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
     offline.remote_files.update(new_files)
 
     observed: dict[str, object] = {}
-    real_select_skills = api.select_skills
+    real_select_skills = chat_routes.select_skills
 
     def spy_select_skills(settings, registry, task, pinned_skills=None, **kwargs):
         observed["select_decision_lm"] = kwargs.get("decision_lm")
@@ -2746,17 +3039,17 @@ async def test_pinned_skills_merge_decision_lm_reuse_and_overwritten_artifacts(
 
     async def fake_turn(_settings, *, selection, run_id, emit, **_):
         observed["active_skills"] = [skill.name for skill in selection.active_skills]
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.RunResultEvent("Updated artifacts"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunResultEvent("Updated artifacts"))
         return dspy.Prediction(answer="Updated artifacts", history=dspy.History(messages=[]))
 
     def fail_new_lm(*_args, **_kwargs):
         pytest.fail("Unchanged decision_model must reuse runtime.decision_lm without dspy.LM()")
 
-    monkeypatch.setattr(api, "select_skills", spy_select_skills)
-    monkeypatch.setattr(api, "list_new_artifacts", spy_list_artifacts)
-    monkeypatch.setattr(api.agent, "run_workspace_task", fake_turn)
-    monkeypatch.setattr(api.dspy, "LM", fail_new_lm)
+    monkeypatch.setattr(chat_routes, "select_skills", spy_select_skills)
+    monkeypatch.setattr(chat_routes, "list_new_artifacts", spy_list_artifacts)
+    monkeypatch.setattr(agent, "run_workspace_task", fake_turn)
+    monkeypatch.setattr(dspy, "LM", fail_new_lm)
 
     payload = {
         "messages": [
@@ -2822,7 +3115,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
         api_bearer_token="offline-token",
         skills_dir=tmp_path,
     )
-    program = api.agent.build_program(base_settings, [], sub_lm=model)
+    program = agent.build_program(base_settings, [], sub_lm=model)
     artifact_path = tmp_path / "rlm_program.json"
     program.save(artifact_path)
 
@@ -2839,9 +3132,10 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
 
     monkeypatch.setattr(api, "make_daytona_client", daytona_client)
     monkeypatch.setattr(api, "ObjectStorage", OfflineStorage)
-    monkeypatch.setattr(api, "reset_managed_workspace", AsyncMock())
-    monkeypatch.setattr(api, "upload_workspace_file", AsyncMock())
-    monkeypatch.setattr(api.agent, "_model", lambda *_args: model)
+    monkeypatch.setattr(chat_routes, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(chat_routes, "reconcile_managed_workspace", AsyncMock(return_value=set()))
+    monkeypatch.setattr(chat_routes, "upload_workspace_file", AsyncMock())
+    monkeypatch.setattr(agent, "_model", lambda *_args: model)
     monkeypatch.setattr(db, "create_db", lambda _settings: (engine, store))
     monkeypatch.setattr(db, "reap_stale_runs", AsyncMock(return_value=0))
     monkeypatch.setattr(db, "get_session_or_raise", store.get_session)
@@ -2852,8 +3146,8 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
     monkeypatch.setattr(db, "search_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "recall_procedures", AsyncMock(return_value=[]))
     monkeypatch.setattr(db, "get_workspace_settings_overrides", store.get_workspace_overrides)
-    monkeypatch.setattr(api, "list_new_artifacts", AsyncMock(return_value=[]))
-    monkeypatch.setattr(api.agent, "consolidate_memory", AsyncMock())
+    monkeypatch.setattr(chat_routes, "list_new_artifacts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(agent, "consolidate_memory", AsyncMock())
 
     # Missing configured optimized_program_path fails fast during lifespan startup.
     missing_settings = base_settings.model_copy(
@@ -2871,11 +3165,11 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
 
     async def capture_state(_settings, *, optimized_state, run_id, emit, **_):
         seen_states.append(optimized_state)
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.RunResultEvent("Cached"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunResultEvent("Cached"))
         return dspy.Prediction(answer="Cached", history=dspy.History(messages=[]))
 
-    monkeypatch.setattr(api.agent, "run_workspace_task", capture_state)
+    monkeypatch.setattr(agent, "run_workspace_task", capture_state)
 
     async with api.lifespan(api.app):
         cached = api.app.state.runtime.optimized_program_state
@@ -2883,7 +3177,7 @@ async def test_optimized_program_state_cached_once_at_startup(monkeypatch, tmp_p
         artifact_path.unlink()
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app),
-            base_url="http://test",
+            base_url="https://test",
             headers=_AUTH,
         ) as client:
             resp = await client.post(f"/api/sessions/{store.session_id}/chat", json=_PAYLOAD)
@@ -2912,7 +3206,7 @@ async def test_configured_web_research_catalog_and_pins(offline, monkeypatch):
         return dspy.Prediction(answer="Used local notes", history=dspy.History(messages=[]))
 
     run_mock = AsyncMock(side_effect=run)
-    monkeypatch.setattr(api.agent, "run_workspace_task", run_mock)
+    monkeypatch.setattr(agent, "run_workspace_task", run_mock)
     catalog = (await offline.client.get("/api/skills")).json()
     assert "web-research" in {item["name"] for item in catalog}
     response = await offline.client.post(f"{offline.base}/chat", json=payload)
@@ -3026,7 +3320,9 @@ async def test_web_research_through_chat(offline, monkeypatch, tmp_path, scenari
         payload = {
             "messages": [{"role": "user", "parts": [{"type": "text", "text": f"Open {url}"}]}],
         }
-    monkeypatch.setattr(api, "_chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path)))
+    monkeypatch.setattr(
+        chat_routes, "_chat_sandbox", AsyncMock(return_value=_LocalSandbox(tmp_path))
+    )
     response = await offline.client.post(route, json=payload)
     expected = {
         "search": ["search", "extract"],
@@ -3096,19 +3392,19 @@ def test_turn_details_link_targets_the_mlflow_trace(offline):
             update={"mlflow_tracking_uri": "http://localhost:5001/metrics?token=excluded"}
         ),
     )
-    assert api._trace_link(runtime, "tr-test") == (
+    assert chat_routes._trace_link(runtime, "tr-test") == (
         "http://localhost:5001/metrics/#/experiments/1/traces?traceId=tr-test"
     )
 
 
 async def _assert_chat_commits_once(offline, monkeypatch):
     async def answer(_settings, *, run_id, emit, **_):
-        await emit(run_id, api.agent.RunStartedEvent("workspace"))
-        await emit(run_id, api.agent.RunResultEvent("Verified"))
+        await emit(run_id, agent.RunStartedEvent("workspace"))
+        await emit(run_id, agent.RunResultEvent("Verified"))
         return dspy.Prediction(answer="Verified", history=dspy.History(messages=[]))
 
     model = AsyncMock(side_effect=answer)
-    monkeypatch.setattr(api.agent, "run_workspace_task", model)
+    monkeypatch.setattr(agent, "run_workspace_task", model)
 
     ready = await offline.client.get("/readyz")
     assert ready.status_code == 200 and ready.json() == {"status": "ok"}
@@ -3292,6 +3588,7 @@ async def test_optimizer_lookup_retries_after_chat_is_ready(offline, monkeypatch
 
     monkeypatch.setattr(telemetry, "_experiment_id", lookup)
     monkeypatch.setattr(telemetry, "_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(mlflow.tracing, "set_destination", Mock())
     monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
     async with asyncio.timeout(2):
         await telemetry._initialize(runtime, "optimizer")
@@ -3324,3 +3621,35 @@ async def test_trace_link_requires_a_stored_trace(offline, monkeypatch):
         "url": f"http://127.0.0.1:5001/#/experiments/1/traces?traceId={trace_id}"
     }
     lookup.assert_called_with(trace_id, display=False)
+
+
+@pytest.mark.asyncio
+async def test_workspace_hydration_overlaps_four_independent_files(monkeypatch):
+    active = set()
+    restored = set()
+    four_started = asyncio.Event()
+
+    async def download(key, path, **kwargs):
+        assert path not in active
+        active.add(path)
+        assert len(active) <= 4
+        if len(active) == 4:
+            four_started.set()
+        await asyncio.wait_for(four_started.wait(), timeout=2)
+        path.write_text(key)
+
+    async def upload(sandbox, path, destination, **kwargs):
+        assert path.read_text() == destination
+        active.remove(path)
+        restored.add(destination)
+
+    monkeypatch.setattr(chat_routes, "reset_managed_workspace", AsyncMock())
+    monkeypatch.setattr(chat_routes, "upload_workspace_file", upload)
+    files = [
+        SimpleNamespace(path=name, object_key=name, sha256="", size_bytes=0)
+        for name in (f"artifacts/{index}.csv" for index in range(6))
+    ]
+    await chat_routes._hydrate_workspace(
+        SimpleNamespace(storage=SimpleNamespace(download=download)), Mock(), files, 5
+    )
+    assert restored == {file.path for file in files}

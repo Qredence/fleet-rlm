@@ -16,10 +16,14 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from dspy.lm15 import Config, Message, Request
 from dspy.utils.exceptions import LMUnexpectedError
+from fastapi import HTTPException
 from starlette.requests import Request as HttpRequest
 
 from fleet_rlm import api
 from fleet_rlm import chatgpt_plan as plan
+from fleet_rlm.http import chat as chat_routes
+from fleet_rlm.http import optimizations as optimization_routes
+from fleet_rlm.http import settings as settings_routes
 
 MODEL = "gpt-6-luna"
 CATALOG = [{"slug": MODEL, "display_name": "GPT-6 Luna"}]
@@ -176,18 +180,22 @@ async def test_api_key_primary_can_run_when_plan_credentials_are_unreadable(serv
     )
     runtime = SimpleNamespace(chatgpt=service, settings=settings, sub_lm=dspy.LM("openai/sub"))
 
-    (root_model, _), sub_lm = await api._interactive_models(
+    (root_model, _), sub_lm = await settings_routes._interactive_models(
         request, runtime, settings, "openai/api-key-model"
     )
     assert root_model == "openai/api-key-model"
     assert sub_lm.model == f"chatgpt/{MODEL}"
     with pytest.raises(LMUnexpectedError) as failure:
         await sub_lm.acall(Request(sub_lm.model, (Message.user("Delegate"),)))
-    assert "credential storage is unavailable" in api._turn_failure_message(failure.value, None)
+    assert "credential storage is unavailable" in chat_routes._turn_failure_message(
+        failure.value, None
+    )
 
     assert service.defaults() == {"primary": reference, "sub": reference}
     service.set_defaults({"sub": None})
-    _, sub_lm = await api._interactive_models(request, runtime, settings, "openai/api-key-model")
+    _, sub_lm = await settings_routes._interactive_models(
+        request, runtime, settings, "openai/api-key-model"
+    )
     assert sub_lm is runtime.sub_lm
 
 
@@ -340,7 +348,7 @@ def test_inference_requires_terminal_success_and_redacts_errors(
         with pytest.raises(plan.PlanError, match=message) as failure:
             engine.complete(Request(MODEL, (Message.user("hi"),)))
     assert "secret" not in str(failure.value)
-    assert api._turn_failure_message(failure.value, None) == str(failure.value)
+    assert chat_routes._turn_failure_message(failure.value, None) == str(failure.value)
 
 
 @pytest.mark.asyncio
@@ -406,7 +414,10 @@ async def test_only_local_fleet_can_manage_profiles_or_expose_callback(service, 
     service.path.write_text(json.dumps(legacy))
     runtime = SimpleNamespace(
         settings=SimpleNamespace(
-            api_bearer_token=None, provider_admin_token=None, cors_origins=["http://localhost:5173"]
+            api_bearer_token=None,
+            provider_admin_token=None,
+            shared_deployment=False,
+            cors_origins=["http://localhost:5173"],
         ),
         chatgpt=service,
     )
@@ -416,12 +427,10 @@ async def test_only_local_fleet_can_manage_profiles_or_expose_callback(service, 
         denied = await client.post(
             "/api/chatgpt/authorize", json={}, headers={"Origin": "https://evil.test"}
         )
-        assert denied.status_code == 403
+        assert denied.status_code == 401
         assert (
             await client.get("/api/chatgpt", headers={"X-Forwarded-For": "127.0.0.1"})
-        ).json() == {
-            "enabled": False,
-        }
+        ).status_code == 401
         started = await client.post(
             "/api/chatgpt/authorize",
             json={"profile_id": profile_id},
@@ -442,7 +451,7 @@ async def test_only_local_fleet_can_manage_profiles_or_expose_callback(service, 
         assert (await client.post(f"/api/chatgpt/profiles/{profile_id}/models")).status_code == 204
     transport = httpx.ASGITransport(app=api.app, client=("192.0.2.1", 1234))
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as client:
-        assert (await client.post("/api/chatgpt/authorize", json={})).status_code == 403
+        assert (await client.post("/api/chatgpt/authorize", json={})).status_code == 401
 
 
 def test_callback_access_log_drops_query_and_optimization_rejects_plan():
@@ -458,8 +467,10 @@ def test_callback_access_log_drops_query_and_optimization_rejects_plan():
     )
     assert plan.CallbackLogFilter().filter(record)
     assert "secret" not in record.getMessage()
-    with pytest.raises(api.HTTPException, match="interactive chat only"):
-        api._optimization_role_selection(
-            api.LMRoleSelection(provider_id=uuid4(), model=f"chatgpt/{uuid4()}/{MODEL}"),
+    with pytest.raises(HTTPException, match="interactive chat only"):
+        optimization_routes._optimization_role_selection(
+            optimization_routes.LMRoleSelection(
+                provider_id=uuid4(), model=f"chatgpt/{uuid4()}/{MODEL}"
+            ),
             "default",
         )
