@@ -2965,7 +2965,10 @@ async def test_chat_capacity_is_free_while_memory_is_still_running(offline, monk
             await finish_memory.wait()
 
     def payload(prompt):
-        return {"messages": [{"role": "user", "parts": [{"type": "text", "text": prompt}]}]}
+        return {
+            "messages": [{"role": "user", "parts": [{"type": "text", "text": prompt}]}],
+            "pinned_skills": ["table"],
+        }
 
     monkeypatch.setattr(agent, "run_workspace_task", controlled_turn)
     monkeypatch.setattr(agent, "consolidate_memory", controlled_memory)
