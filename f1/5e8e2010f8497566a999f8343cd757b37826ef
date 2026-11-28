@@ -1,0 +1,23 @@
+backend/tests/test_optimization_ui_api.py
+  s_2d4727388e1d22::t_85cc295428c8a2 974-993
+backend/src/fleet_rlm/http/dependencies.py
+  s_2d4727388e1d22::t_5fe7b25b2c1218 88,90-99
+backend/tests/test_phase3_api.py
+  s_2d4727388e1d22::t_f42b2773933bc5 2383-2406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f15e8e2010f8497566a999f8343cd757b37826ef",
+  "prompts": {},
+  "sessions": {
+    "s_2d4727388e1d22": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ebc0e4d0-639b-40cf-8cd2-8974b484ce5f",
+        "model": "headless"
+      },
+      "human_author": "Zachary BENSALEM <zachary@qredence.ai>"
+    }
+  }
+}
