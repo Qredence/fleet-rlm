@@ -54,4 +54,6 @@ text = (
 )
 ```
 
-Use the rendered page and recognized passage to classify it. An empty text layer alone is insufficient. For short identifiers, compare uncertain punctuation and digits at a second resolution or against a tightly cropped image. Carry the verified string and page together into the answer.
+Use the rendered page and recognized passage to classify it. For an OCR page list, require visible words, labels or numbers on each listed page. Exclude illustrations even if OCR produces stray characters. An empty text layer alone is insufficient.
+
+For short identifiers, start at 300 DPI and crop to the line containing the label. Run Tesseract with `--psm 7` on that single-line crop. If the identifier is unclear, compare a second render at a different resolution with the original glyphs before submitting. Carry the verified string and page together into the answer.
