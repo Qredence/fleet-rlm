@@ -11,6 +11,7 @@ from typing import Any
 
 import dspy
 import mlflow
+from dspy.utils.exceptions import LMProviderError
 from dspy.utils.usage_tracker import UsageTracker
 from mlflow.dspy.callback import MlflowCallback
 from mlflow.entities import LiveSpan, SpanType
@@ -25,6 +26,18 @@ _PAYLOAD_BYTES = 16 * 1024
 _PREVIEW_BYTES = 768
 _MAX_DEPTH = 20
 _OMITTED = "[omitted]"
+_SAFE_PROVIDER_CODES = {
+    "content_filter",
+    "content_policy_violation",
+    "context_length_exceeded",
+    "invalid_prompt",
+    "invalid_request_error",
+    "model_not_found",
+    "rate_limit_exceeded",
+    "server_error",
+    "unsupported_parameter",
+    "unsupported_value",
+}
 _SENSITIVE_KEY = re.compile(
     r"(?:api.?key|.*(?:access|refresh|auth|session|identity|id|bearer).?token|token|"
     r".*password|.*secret|.*credential.*|authorization|proxy.authorization|"
@@ -370,6 +383,11 @@ class FleetMlflowCallback(MlflowCallback):
         try:
             if exception is not None:
                 active.set_attribute("error.type", type(exception).__name__)
+            if model and isinstance(exception, LMProviderError):
+                if isinstance(exception.status, int) and 100 <= exception.status <= 599:
+                    active.set_attribute("fleet.model.http_status", exception.status)
+                if exception.provider_code in _SAFE_PROVIDER_CODES:
+                    active.set_attribute("fleet.model.error_code", exception.provider_code)
             detailed = model or active.span_type in {SpanType.TOOL, SpanType.RETRIEVER}
             if model:
                 response = outputs if outputs is not None else getattr(exception, "partial", None)

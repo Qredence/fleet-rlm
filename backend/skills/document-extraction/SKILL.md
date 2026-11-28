@@ -54,6 +54,6 @@ text = (
 )
 ```
 
-When the answer includes an OCR page list, inspect every page with no usable embedded text, even after finding the requested quantity on another page. Render each candidate and run OCR to distinguish scanned text from illustrations. Record the physical page number alongside its recognized words, labels or numbers. Exclude illustrations even if OCR produces stray characters. An empty text layer alone is insufficient.
+When the answer includes an OCR page list, make a table with one row per physical page before submitting. Record the embedded text first. For each page with no usable embedded text, render it and run OCR, even after finding the requested quantity on another page. Keep a page in the OCR list only when the rendered page contains readable words, labels or numbers absent from its text layer. Exclude illustrations even if OCR produces stray characters. Derive the quantity and its citation from the same source passage, and derive the OCR list from this separate page table.
 
 For short identifiers, render the same physical page at 200 and 300 DPI. Crop each image to the line containing the label, leaving a small white margin, and run `tesseract stdin stdout --psm 7` on both crops. Compare the transcriptions before submitting. If they disagree, inspect the original glyphs or try a cleaner crop. Report ambiguous characters as uncertain if the evidence remains inconclusive. Carry the verified string and page together into the answer.

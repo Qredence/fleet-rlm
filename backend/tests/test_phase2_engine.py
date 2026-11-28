@@ -599,6 +599,12 @@ def test_mlflow_capture_redacts_before_export_and_counts_leaf_usage(
     class Engine:
         def complete(self, request):
             label = request.messages[0].parts[0].text
+            if label in {"invalid", "invalid_private_code"}:
+                raise dspy.lm15.InvalidRequestError(
+                    fixture_body,
+                    status=400,
+                    provider_code="invalid_prompt" if label == "invalid" else fixture_key,
+                )
             if label == "unreported":
                 usage = Usage()
             elif label == "partial":
@@ -662,14 +668,20 @@ def test_mlflow_capture_redacts_before_export_and_counts_leaf_usage(
         )
         with pytest.raises(ValueError, match=fixture_body):
             tool(token=f"{fixture_key} {credentials}")
+        for label in ("invalid", "invalid_private_code"):
+            with pytest.raises(dspy.LMInvalidRequestError):
+                lm(Request(lm.model, (Message.user(label),)), cache=False)
 
     mlflow.flush_trace_async_logging()
     trace = mlflow.get_trace(root.trace_id)
     assert trace is not None
     assert trace.info.request_preview == " / ".join("[REDACTED]" for _ in db_passwords)
-    first, cached, partial, unreported = [
+    first, cached, partial, unreported, invalid, invalid_private_code = [
         span for span in trace.data.spans if span.name == "LM.__call__"
     ]
+    assert invalid.attributes["fleet.model.http_status"] == 400
+    assert invalid.attributes["fleet.model.error_code"] == "invalid_prompt"
+    assert "fleet.model.error_code" not in invalid_private_code.attributes
     assert first.parent_id == cached.parent_id == root.span_id
     assert first.attributes["mlflow.chat.tokenUsage"] == {
         "input_tokens": 20,
