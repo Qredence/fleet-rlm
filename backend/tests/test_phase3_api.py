@@ -3588,6 +3588,7 @@ async def test_optimizer_lookup_retries_after_chat_is_ready(offline, monkeypatch
 
     monkeypatch.setattr(telemetry, "_experiment_id", lookup)
     monkeypatch.setattr(telemetry, "_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(mlflow.tracing, "set_destination", Mock())
     monkeypatch.setattr(mlflow.dspy, "autolog", lambda: None)
     async with asyncio.timeout(2):
         await telemetry._initialize(runtime, "optimizer")
